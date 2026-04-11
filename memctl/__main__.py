@@ -1,18 +1,17 @@
 """memctl CLI entrypoint.
 
-v1 wires `pretool` and `seed` for real. Other subcommands are stubs that
-exit 0 with an empty hook output — enough to wire every hook event without
-breaking anything while the formation/reinforcement layers are built out.
+v1 wires the four hook handlers (pretool, session-start, user-prompt,
+post-failure) plus `seed`. The formation subcommands (remember, forget,
+pin, recall, export) are stubs until v1.5.
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from typing import Callable
 
-from .commands import pretool, seed
+from .commands import post_failure, pretool, seed, session_start, user_prompt
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -20,9 +19,9 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("pretool", help="PreToolUse hook handler (reads JSON on stdin)")
-    sub.add_parser("session-start", help="SessionStart hook handler (stub)")
-    sub.add_parser("user-prompt", help="UserPromptSubmit hook handler (stub)")
-    sub.add_parser("post-failure", help="PostToolUseFailure hook handler (stub)")
+    sub.add_parser("session-start", help="SessionStart hook handler (reads JSON on stdin)")
+    sub.add_parser("user-prompt", help="UserPromptSubmit hook handler (reads JSON on stdin)")
+    sub.add_parser("post-failure", help="PostToolUse hook handler — failure subset (reads JSON on stdin)")
     sub.add_parser("seed", help="Insert example memories for smoke testing")
 
     remember = sub.add_parser("remember", help="Formation: extract triggers + insert (stub)")
@@ -44,10 +43,10 @@ def main(argv: list[str] | None = None) -> int:
 
     handlers: dict[str, Callable[[], int]] = {
         "pretool": pretool.main,
+        "session-start": session_start.main,
+        "user-prompt": user_prompt.main,
+        "post-failure": post_failure.main,
         "seed": seed.main,
-        "session-start": _stub_hook("SessionStart"),
-        "user-prompt": _stub_hook("UserPromptSubmit"),
-        "post-failure": _stub_hook("PostToolUseFailure"),
         "remember": _stub_unimpl("remember"),
         "forget": _stub_unimpl("forget"),
         "pin": _stub_unimpl("pin"),
@@ -56,22 +55,6 @@ def main(argv: list[str] | None = None) -> int:
     }
 
     return handlers[args.command]()
-
-
-def _stub_hook(event_name: str) -> Callable[[], int]:
-    """Stub that drains stdin and emits an empty hook output. Keeps the hook
-    pipeline happy while the real handler isn't built yet."""
-
-    def _run() -> int:
-        try:
-            sys.stdin.read()
-        except Exception:
-            pass
-        sys.stdout.write(json.dumps({}))
-        sys.stdout.write("\n")
-        return 0
-
-    return _run
 
 
 def _stub_unimpl(name: str) -> Callable[[], int]:

@@ -21,3 +21,11 @@ memctl = "memctl.__main__:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["memctl*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "e2e: end-to-end tests that invoke `claude -p` (slow, cost money, skipped by default)",
+]
+# Default to not running e2e tests unless explicitly requested.
+addopts = "-m 'not e2e'"
