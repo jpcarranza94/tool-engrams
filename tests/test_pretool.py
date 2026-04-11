@@ -6,7 +6,7 @@ import io
 import json
 import sys
 
-from memctl.commands import pretool, seed
+from toolengrams.commands import pretool, seed
 
 
 def _run_pretool(payload: dict, monkeypatch) -> dict:

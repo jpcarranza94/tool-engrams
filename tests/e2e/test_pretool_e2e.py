@@ -6,7 +6,7 @@ reasoning context?
 
 Strategy:
   1. Seed a memory bound to (Bash, echo) containing a unique magic token
-  2. Wire the PreToolUse hook to memctl pretool
+  2. Wire the PreToolUse hook to engram pretool
   3. Prompt Claude to run `echo <something>` AND quote any additional hook
      context it sees verbatim
   4. Assert the magic token appears in Claude's response
@@ -30,7 +30,7 @@ PRETOOL_HOOK_SHAPE = {
 }
 
 # Unique magic token for this test file. Long enough to be unambiguous.
-MAGIC = "MEMCTL_E2E_TOKEN_ZK7QV9P_PRETOOL"
+MAGIC = "ENGRAM_E2E_TOKEN_ZK7QV9P_PRETOOL"
 
 
 @pytest.mark.e2e
@@ -56,7 +56,7 @@ def test_pretool_injects_memory_when_claude_calls_bash_echo(claude_runner, seed_
         ],
     )
 
-    # Wire the PreToolUse hook in settings.local.json pointing at memctl.
+    # Wire the PreToolUse hook in settings.local.json pointing at engram.
     hooks_block = {
         "PreToolUse": [
             {

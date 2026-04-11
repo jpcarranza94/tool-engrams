@@ -7,7 +7,7 @@ import json
 import sys
 import time
 
-from memctl.commands import post_failure
+from toolengrams.commands import post_failure
 
 
 def _run(payload: dict, monkeypatch) -> dict:

@@ -47,14 +47,14 @@ def main() -> int:
     try:
         payload = json.loads(sys.stdin.read() or "{}")
     except json.JSONDecodeError as e:
-        print(f"memctl user-prompt: invalid JSON on stdin: {e}", file=sys.stderr)
+        print(f"engram user-prompt: invalid JSON on stdin: {e}", file=sys.stderr)
         _emit({})
         return 0
 
     try:
         return _run(payload)
     except Exception as e:  # pragma: no cover
-        print(f"memctl user-prompt: unexpected error: {e}", file=sys.stderr)
+        print(f"engram user-prompt: unexpected error: {e}", file=sys.stderr)
         _emit({})
         return 0
 
@@ -172,7 +172,7 @@ def _retrieve_for_prompt(
             for row in fts_rows:
                 _add_candidate(candidates, row)
         except Exception as e:
-            print(f"memctl user-prompt: FTS query failed: {e}", file=sys.stderr)
+            print(f"engram user-prompt: FTS query failed: {e}", file=sys.stderr)
 
     for c in candidates.values():
         c.final_score = final_score(c, now_ts)

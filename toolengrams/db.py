@@ -1,4 +1,4 @@
-"""SQLite connection + migration runner for claude-memory-recall."""
+"""SQLite connection + migration runner for ToolEngrams."""
 
 from __future__ import annotations
 
@@ -11,12 +11,12 @@ from typing import Iterator
 SCHEMA_VERSION = 1
 SCHEMA_PATH = Path(__file__).parent / "schema.sql"
 
-DEFAULT_DB_PATH = Path.home() / ".claude" / "memory-recall" / "db.sqlite"
+DEFAULT_DB_PATH = Path.home() / ".claude" / "tool-engrams" / "db.sqlite"
 
 
 def db_path() -> Path:
-    """Resolve the DB path. Honors $MEMCTL_DB for tests and overrides."""
-    override = os.environ.get("MEMCTL_DB")
+    """Resolve the DB path. Honors $ENGRAM_DB for tests and overrides."""
+    override = os.environ.get("ENGRAM_DB")
     if override:
         return Path(override)
     return DEFAULT_DB_PATH

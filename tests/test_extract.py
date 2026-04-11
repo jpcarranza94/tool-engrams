@@ -6,7 +6,7 @@ tools in the PreToolUse whitelist.
 
 from __future__ import annotations
 
-from memctl.extract import extract_hints
+from toolengrams.extract import extract_hints
 
 
 def test_bash_single_head():
@@ -72,9 +72,9 @@ def test_grep_path():
 
 
 def test_glob_pattern_and_path():
-    hint = extract_hints("Glob", {"pattern": "**/*.py", "path": "memctl/"})
+    hint = extract_hints("Glob", {"pattern": "**/*.py", "path": "toolengrams/"})
     assert "**/*.py" in hint.paths
-    assert "memctl/" in hint.paths
+    assert "toolengrams/" in hint.paths
 
 
 def test_unknown_tool_no_hints():

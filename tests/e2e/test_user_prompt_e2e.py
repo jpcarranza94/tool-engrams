@@ -1,6 +1,6 @@
 """End-to-end test for the UserPromptSubmit hook.
 
-Seeds a memory with a keyword trigger, wires UserPromptSubmit to memctl,
+Seeds a memory with a keyword trigger, wires UserPromptSubmit to engram,
 sends a prompt containing the keyword, and verifies Claude quotes the
 injected context back.
 """
@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import pytest
 
-MAGIC = "MEMCTL_E2E_TOKEN_ZK7QV9P_USER_PROMPT"
-TRIGGER_KEYWORD = "memctlprobe"  # distinctive, unlikely to appear naturally
+MAGIC = "ENGRAM_E2E_TOKEN_ZK7QV9P_USER_PROMPT"
+TRIGGER_KEYWORD = "engramprobe"  # distinctive, unlikely to appear naturally
 
 
 @pytest.mark.e2e

@@ -56,14 +56,14 @@ def main() -> int:
     try:
         payload = json.loads(sys.stdin.read() or "{}")
     except json.JSONDecodeError as e:
-        print(f"memctl post-failure: invalid JSON on stdin: {e}", file=sys.stderr)
+        print(f"engram post-failure: invalid JSON on stdin: {e}", file=sys.stderr)
         _emit({})
         return 0
 
     try:
         return _run(payload)
     except Exception as e:  # pragma: no cover
-        print(f"memctl post-failure: unexpected error: {e}", file=sys.stderr)
+        print(f"engram post-failure: unexpected error: {e}", file=sys.stderr)
         _emit({})
         return 0
 

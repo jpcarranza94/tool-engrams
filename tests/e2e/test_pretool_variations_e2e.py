@@ -33,7 +33,7 @@ def _git_init(project_dir):
 
 
 def _pretool_hook(claude_runner, matcher: str):
-    """Return a PreToolUse hooks block wired to memctl for the given matcher."""
+    """Return a PreToolUse hooks block wired to engram for the given matcher."""
     return {
         "PreToolUse": [
             {
@@ -91,7 +91,7 @@ def test_pretool_fires_on_read_with_path_trigger(claude_runner, seed_memory, db_
 @pytest.mark.e2e
 def test_pretool_fires_on_grep_with_path_trigger(claude_runner, seed_memory):
     """Grep inside a project subdir → path_glob trigger → memory injected."""
-    magic = "MEMCTL_E2E_TOKEN_ZK7QV9P_GREP_VAR"
+    magic = "ENGRAM_E2E_TOKEN_ZK7QV9P_GREP_VAR"
 
     (claude_runner.project_dir / "src").mkdir()
     (claude_runner.project_dir / "src" / "main.py").write_text("def hello():\n    pass\n")
@@ -131,7 +131,7 @@ def test_pretool_fires_on_grep_with_path_trigger(claude_runner, seed_memory):
 @pytest.mark.e2e
 def test_pretool_fires_on_git_status_subcommand(claude_runner, seed_memory):
     """Bash git status → tool_head trigger on [git, status] → memory injected."""
-    magic = "MEMCTL_E2E_TOKEN_ZK7QV9P_GIT_STATUS"
+    magic = "ENGRAM_E2E_TOKEN_ZK7QV9P_GIT_STATUS"
 
     # Make the project dir a real git repo so `git status` succeeds and
     # Claude has bandwidth to examine hook context instead of focusing on
@@ -176,8 +176,8 @@ def test_pretool_fires_on_git_status_subcommand(claude_runner, seed_memory):
 def test_pretool_longer_head_wins_tiebreak_live(claude_runner, seed_memory):
     """Two memories, one [git] and one [git, status] — the longer head
     should rank first when Claude runs `git status`."""
-    generic_magic = "MEMCTL_E2E_TOKEN_ZK7QV9P_GENERIC_GIT"
-    specific_magic = "MEMCTL_E2E_TOKEN_ZK7QV9P_SPECIFIC_STATUS"
+    generic_magic = "ENGRAM_E2E_TOKEN_ZK7QV9P_GENERIC_GIT"
+    specific_magic = "ENGRAM_E2E_TOKEN_ZK7QV9P_SPECIFIC_STATUS"
 
     _git_init(claude_runner.project_dir)
 

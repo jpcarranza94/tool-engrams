@@ -1,4 +1,4 @@
-# claude-memory-recall — design v8 (frozen 2026-04-11)
+# ToolEngrams — design v8 (frozen 2026-04-11)
 
 ## Problem
 
@@ -27,9 +27,9 @@ A head like `[ssh, "deploy@"]` prefix-matches both `ssh deploy@10.0.1.50` and `s
 
 ## Components
 
-### 1. Canonical store: SQLite at `~/.claude/memory-recall/db.sqlite`
+### 1. Canonical store: SQLite at `~/.claude/tool-engrams/db.sqlite`
 
-Separate directory, **not** inside `~/.claude/projects/`. Zero interference with Claude Code's harness-managed memory dir. Schema lives in `memctl/schema.sql`.
+Separate directory, **not** inside `~/.claude/projects/`. Zero interference with Claude Code's harness-managed memory dir. Schema lives in `toolengrams/schema.sql`.
 
 Tables:
 - `memories` — content, type, scope (global/project), lifecycle metrics
@@ -41,7 +41,7 @@ WAL mode, `PRAGMA synchronous=NORMAL`, `PRAGMA foreign_keys=ON`.
 
 ### 2. No daemon (v1)
 
-Every hook is a self-contained `memctl` subprocess. SQLite from cold Python is fast:
+Every hook is a self-contained `engram` subprocess (CLI for the `toolengrams` package). SQLite from cold Python is fast:
 - `import sqlite3` is stdlib — no torch-scale import cost
 - Opening the DB: microseconds
 - Single tool-head lookup: single-digit ms
@@ -58,7 +58,7 @@ The daemon was justified in earlier drafts by `sentence-transformers` cold start
 | **Mid-turn** ★ | `PreToolUse` | Tool-call-bound structural match. Top-3 injected via `hookSpecificOutput.additionalContext`. |
 | **Recovery** | `PostToolUseFailure` | Substring match on error text + tool head. |
 
-★ = the novel surface. Claude-mem and everyone else mostly trigger at the turn boundary; this is where claude-memory-recall's primary value lives.
+★ = the novel surface. Claude-mem and everyone else mostly trigger at the turn boundary; this is where ToolEngrams' primary value lives.
 
 ### 4. Scoring: reinforcement formula
 

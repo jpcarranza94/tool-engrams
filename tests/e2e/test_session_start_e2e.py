@@ -1,6 +1,6 @@
 """End-to-end test for the SessionStart hook.
 
-Seeds a user-type memory with a magic token, wires SessionStart to memctl,
+Seeds a user-type memory with a magic token, wires SessionStart to engram,
 and asks Claude to quote any identity/hook context it can see. Verifies
 the magic token appears in Claude's response.
 """
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-MAGIC = "MEMCTL_E2E_TOKEN_ZK7QV9P_SESSION_START"
+MAGIC = "ENGRAM_E2E_TOKEN_ZK7QV9P_SESSION_START"
 
 
 @pytest.mark.e2e

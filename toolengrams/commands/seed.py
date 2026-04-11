@@ -1,4 +1,4 @@
-"""Insert a handful of example memories so `memctl pretool` has something to find."""
+"""Insert a handful of example memories so `engram pretool` has something to find."""
 
 from __future__ import annotations
 

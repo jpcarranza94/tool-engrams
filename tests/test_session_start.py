@@ -7,7 +7,7 @@ import json
 import sys
 import time
 
-from memctl.commands import session_start
+from toolengrams.commands import session_start
 
 
 def _run(payload: dict, monkeypatch) -> dict:

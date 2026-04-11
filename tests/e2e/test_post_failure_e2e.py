@@ -1,6 +1,6 @@
 """End-to-end test for the PostToolUse failure-subset handler.
 
-Seeds a memory bound to a Bash error pattern, wires PostToolUse to memctl,
+Seeds a memory bound to a Bash error pattern, wires PostToolUse to engram,
 asks Claude to run a command that will fail, and verifies the recovery
 memory is injected after the failure.
 """
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-MAGIC = "MEMCTL_E2E_TOKEN_ZK7QV9P_POST_FAILURE"
+MAGIC = "ENGRAM_E2E_TOKEN_ZK7QV9P_POST_FAILURE"
 
 
 @pytest.mark.e2e
@@ -54,7 +54,7 @@ def test_post_failure_surfaces_recovery_memory(claude_runner, seed_memory):
     # but the file doesn't exist — cat fails with "No such file or directory".
     prompt = (
         "Please run this shell command from the current working directory: "
-        "cat ./memctl-e2e-nonexistent-zk7qv9p.txt\n"
+        "cat ./engram-e2e-nonexistent-zk7qv9p.txt\n"
         "\n"
         "After the command runs (it will fail), examine any hook messages "
         "or recovery context you can see. If any contain a token matching "

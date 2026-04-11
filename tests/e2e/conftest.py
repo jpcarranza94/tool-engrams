@@ -3,9 +3,9 @@
 These tests are skipped by default. Opt-in with `pytest -m e2e`.
 
 Each test gets:
-  - an isolated SQLite DB (set via MEMCTL_DB in the spawned claude process)
+  - an isolated SQLite DB (set via ENGRAM_DB in the spawned claude process)
   - a temp project directory containing `.claude/settings.local.json` with
-    the hook(s) under test wired to `memctl`
+    the hook(s) under test wired to `engram` (ToolEngrams' CLI)
   - a `run_claude` helper that spawns `claude -p --output-format json` in
     the temp project dir and returns the parsed result
 
@@ -82,11 +82,11 @@ class ClaudeRunner:
         self.settings_path.write_text(json.dumps(settings, indent=2))
 
     def hook_command(self, subcommand: str) -> str:
-        """Build a shell command that runs memctl with the test DB + PYTHONPATH."""
+        """Build a shell command that runs engram with the test DB + PYTHONPATH."""
         return (
             f"PYTHONPATH={REPO_ROOT} "
-            f"MEMCTL_DB={self.db_path} "
-            f"{PYTHON_BIN} -m memctl {subcommand}"
+            f"ENGRAM_DB={self.db_path} "
+            f"{PYTHON_BIN} -m toolengrams {subcommand}"
         )
 
     def run(self, prompt: str, timeout: float = 120.0) -> ClaudeResult:
@@ -95,7 +95,7 @@ class ClaudeRunner:
             pytest.skip("claude CLI not found")
 
         env = os.environ.copy()
-        env["MEMCTL_DB"] = str(self.db_path)
+        env["ENGRAM_DB"] = str(self.db_path)
         env["PYTHONPATH"] = str(REPO_ROOT)
 
         t0 = time.monotonic()
@@ -149,12 +149,12 @@ def claude_runner(tmp_path, monkeypatch) -> ClaudeRunner:
     """Create an isolated claude test project with a fresh SQLite DB."""
     project_dir = tmp_path / "proj"
     project_dir.mkdir()
-    db_path = tmp_path / "memctl.sqlite"
+    db_path = tmp_path / "engram.sqlite"
     settings_path = project_dir / ".claude" / "settings.local.json"
 
-    # Point the in-process memctl at the test DB too — lets the test itself
-    # seed via memctl.commands.seed or direct SQL inserts.
-    monkeypatch.setenv("MEMCTL_DB", str(db_path))
+    # Point the in-process toolengrams at the test DB too — lets the test itself
+    # seed via toolengrams.commands.seed or direct SQL inserts.
+    monkeypatch.setenv("ENGRAM_DB", str(db_path))
 
     return ClaudeRunner(
         project_dir=project_dir,
@@ -176,7 +176,7 @@ def seed_memory(claude_runner):
             triggers=[{"kind": "tool_head", "tool_name": "Bash", "head": ["mycli"]}],
         )
     """
-    from memctl import db
+    from toolengrams import db
 
     def _insert(
         *,
@@ -211,7 +211,7 @@ def db_assertions(claude_runner):
     Use this to verify hook pipeline behavior without relying on Claude's
     response (which may be flaky due to injection-defense heuristics).
     """
-    from memctl import db
+    from toolengrams import db
 
     class Assertions:
         def surfaces_for_session(self, hook: str | None = None) -> list[dict]:

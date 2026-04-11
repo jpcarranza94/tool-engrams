@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import math
 
-from memctl.models import Candidate, ClusterStats
-from memctl.rank import (
+from toolengrams.models import Candidate, ClusterStats
+from toolengrams.rank import (
     FilterConfig,
     filter_candidates,
     final_score,

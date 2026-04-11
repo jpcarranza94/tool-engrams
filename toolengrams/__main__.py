@@ -1,4 +1,4 @@
-"""memctl CLI entrypoint.
+"""engram CLI entrypoint — ToolEngrams command-line interface.
 
 v1 wires the four hook handlers (pretool, session-start, user-prompt,
 post-failure) plus `seed`. The formation subcommands (remember, forget,
@@ -15,7 +15,7 @@ from .commands import post_failure, pretool, seed, session_start, user_prompt
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="memctl")
+    parser = argparse.ArgumentParser(prog="engram")
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("pretool", help="PreToolUse hook handler (reads JSON on stdin)")
@@ -59,7 +59,7 @@ def main(argv: list[str] | None = None) -> int:
 
 def _stub_unimpl(name: str) -> Callable[[], int]:
     def _run() -> int:
-        print(f"memctl {name}: not yet implemented (v1.5)", file=sys.stderr)
+        print(f"engram {name}: not yet implemented (v1.5)", file=sys.stderr)
         return 0
 
     return _run

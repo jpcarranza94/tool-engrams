@@ -1,4 +1,4 @@
--- claude-memory-recall schema v1
+-- ToolEngrams schema v1
 -- Canonical store. See docs/design-v8.md for full design.
 
 PRAGMA journal_mode = WAL;
