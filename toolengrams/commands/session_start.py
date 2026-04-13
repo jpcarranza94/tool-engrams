@@ -71,18 +71,12 @@ def _run(payload: dict[str, Any]) -> int:
         (project_slug, MAX_MEMORIES),
     ).fetchall()
 
-    if not rows:
-        _emit({})
-        return 0
-
     now_ts = int(time.time())
-    _log_surfaces(conn, session_id, rows, now_ts)
+
+    if rows:
+        _log_surfaces(conn, session_id, rows, now_ts)
 
     context = _format_injection(rows)
-    if not context:
-        _emit({})
-        return 0
-
     _emit(
         {
             "hookSpecificOutput": {

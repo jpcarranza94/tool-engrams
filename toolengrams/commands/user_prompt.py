@@ -23,6 +23,7 @@ Output:
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import re
 import sys
@@ -132,8 +133,6 @@ def _retrieve_for_prompt(
     # --- path_glob trigger match (prompt text mentions a path) ---
     path_mentions = _extract_paths_from_text(prompt_text)
     if path_mentions:
-        import fnmatch
-
         path_rows = conn.execute(
             """
             SELECT m.id, m.name, m.body, m.type, m.scope,

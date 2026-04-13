@@ -50,21 +50,25 @@ def test_session_start_injects_pinned_non_user_memory(temp_db, monkeypatch):
     assert "critical detail" in result["hookSpecificOutput"]["additionalContext"]
 
 
-def test_session_start_skips_non_user_unpinned(temp_db, monkeypatch):
+def test_session_start_skips_non_user_unpinned_but_emits_guidance(temp_db, monkeypatch):
     _insert_memory(temp_db, name="project fact", body="IRRELEVANT_AT_START", type_="project", pinned=False)
     result = _run(
         {"session_id": "s3", "cwd": "/tmp/foo", "hook_event_name": "SessionStart", "source": "startup"},
         monkeypatch,
     )
-    assert result == {}
+    ctx = result["hookSpecificOutput"]["additionalContext"]
+    assert "IRRELEVANT_AT_START" not in ctx
+    assert "ToolEngrams: memory formation" in ctx
 
 
-def test_session_start_empty_db_returns_empty(temp_db, monkeypatch):
+def test_session_start_empty_db_still_emits_guidance(temp_db, monkeypatch):
     result = _run(
         {"session_id": "s4", "cwd": "/tmp/foo", "hook_event_name": "SessionStart", "source": "startup"},
         monkeypatch,
     )
-    assert result == {}
+    ctx = result["hookSpecificOutput"]["additionalContext"]
+    assert "ToolEngrams: memory formation" in ctx
+    assert "engram remember" in ctx
 
 
 def test_session_start_logs_surfaces(temp_db, monkeypatch):
