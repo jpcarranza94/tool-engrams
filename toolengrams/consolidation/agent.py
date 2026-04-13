@@ -194,42 +194,60 @@ These are JSONL transcripts from today. Each line is a JSON object with a "messa
 
 ## Your Tasks
 
-1. **Read through the sessions** (start with smaller ones, use Grep to search for "memory:" or "PreToolUse" to find surfacing events efficiently). Understand what happened in each session.
+### 1. Evaluate existing memory surfacings
 
-2. **Evaluate each memory surfacing**: When you find a memory that was injected via PreToolUse, assess:
-   - Was it relevant to what the user was doing?
-   - Did it actually influence the tool call or Claude's behavior?
-   - Was it noise (surfaced but completely irrelevant to the context)?
+Use Grep to find "PreToolUse" and "[memory:" in the JSONL files. For each surfacing:
+- Was the memory relevant to what the user was actually doing?
+- Did it influence Claude's behavior?
+- Was it noise?
 
-3. **Look for missed corrections**: Scan user messages for corrections about tool usage that should have become memories but weren't captured by the real-time formation system. These are things like "no, use X instead of Y" or "always run Z before doing W" that relate to specific commands.
+### 2. Discover new memories from the day's work
 
-4. **Take action**:
-   - For noisy/unhelpful memories: run `engram forget "<name>"` to soft-demote them
-   - For missed corrections about tool usage: run `engram remember "<body with backticked commands>" --type feedback --scope global --name "<name>"`
-   - For memories that deserve a boost: note them in your report (the surfacing + PostToolUse success handler already reinforces them mechanically)
+This is the most important task. Go beyond corrections — look for **patterns** the engineer relies on that would be valuable to remember. Specifically:
 
-5. **Write a consolidation report** as your final response. Include:
-   - Summary of sessions reviewed
-   - Which memory surfacings you evaluated and your verdict (helpful/noise/neutral)
-   - Any memories you demoted and why
-   - Any new memories you created from missed corrections
-   - Overall assessment of memory system health
+**Tool-usage patterns**: Commands the user or Claude ran repeatedly, specific flags or options that matter, workflows that follow a consistent sequence. If Claude had to figure out how to run something and the user confirmed it worked, that's a memory.
+
+**Context that had to be rediscovered**: If the user had to tell Claude "the service runs on port X" or "use this connection string" or "that file is at this path" — and it relates to a tool call — that's a memory that should persist.
+
+**Project-specific tool configurations**: Build commands, test commands, deployment steps, database access patterns. Things like "`make test` before pushing in this repo" or "`docker compose -f docker-compose.dev.yml up`".
+
+**Corrections**: "Don't do X, do Y instead" about specific commands.
+
+**Confirmed approaches**: When the user said "yes that's right" or accepted a non-obvious tool-call choice without pushback.
+
+### 3. Take action
+
+- For noisy memories: `engram forget "<name>"`
+- For new discoveries: `engram remember "<body>" --type <feedback|reference> --scope <global|project> --name "<name>"`
+  - Body MUST include backticked commands or file paths (triggers are extracted from these)
+  - type=feedback for corrections/preferences, type=reference for how-to-use facts
+  - scope=global if it applies everywhere, scope=project if it's repo-specific
+
+### 4. Write a consolidation report
+
+Your final response should include:
+- Sessions reviewed and what kind of work happened
+- Memory surfacing evaluations (helpful/noise/neutral)
+- New memories created and why
+- Memories demoted and why
+- Observations about the memory system's performance
 
 ## Tools Available
 
-- `Read` — read JSONL files and other files
-- `Grep` — search file contents (use to find "memory:" patterns in JSONLs efficiently)
-- `Bash(engram recall)` — see all current memories
-- `Bash(engram recall --id N)` — full detail on one memory
+- `Read` — read JSONL files
+- `Grep` — search file contents efficiently
+- `Bash(engram recall)` — list current memories
+- `Bash(engram recall --id N)` — detail on one memory
 - `Bash(engram forget "name")` — soft-demote a memory
-- `Bash(engram remember "body" --type feedback --scope global --name "name")` — create a new memory
-- `Bash(engram status)` — overall system health
+- `Bash(engram remember "body" --type T --scope S --name "name")` — create a memory
+- `Bash(engram status)` — system health
 
 ## Guidelines
 
-- Be thorough but efficient — grep for patterns before reading full files
-- Focus on quality of judgment, not speed
-- Only create memories for tool-bound corrections (must have backticked commands in body)
-- Err on the side of keeping memories (soft-demote is reversible, archival is not)
-- A memory surfacing that wasn't directly useful but wasn't harmful is "neutral" — don't demote neutrals
+- Be thorough — read the substantive sessions, not just grep for keywords
+- Prioritize discovery of genuinely useful tool-bound patterns over cataloging everything
+- Every memory you create must have backticked commands or file paths in the body
+- Err on the side of creating memories — it's cheap to forget later, expensive to miss a pattern
+- Don't create memories for one-off commands that won't recur
+- A good memory answers "what should Claude know next time it runs this tool?"
 """
