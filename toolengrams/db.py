@@ -8,8 +8,9 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 SCHEMA_PATH = Path(__file__).parent / "schema.sql"
+MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 
 DEFAULT_DB_PATH = Path.home() / ".claude" / "tool-engrams" / "db.sqlite"
 
@@ -39,9 +40,21 @@ def _migrate(conn: sqlite3.Connection) -> None:
         return
     if current == 0:
         conn.executescript(SCHEMA_PATH.read_text())
+        # Fresh DB — also apply all migrations so tables are complete.
+        for v in range(2, SCHEMA_VERSION + 1):
+            _apply_migration(conn, v)
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         return
-    # Future migrations go here: if current < 2: ...
+    # Incremental migrations for existing DBs.
+    for v in range(current + 1, SCHEMA_VERSION + 1):
+        _apply_migration(conn, v)
+    conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+
+def _apply_migration(conn: sqlite3.Connection, version: int) -> None:
+    path = MIGRATIONS_DIR / f"v{version}.sql"
+    if path.exists():
+        conn.executescript(path.read_text())
 
 
 @contextmanager

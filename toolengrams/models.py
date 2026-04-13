@@ -60,6 +60,7 @@ class Candidate:
     type: MemoryType
     scope: MemoryScope
     structural_match: float = 1.0
+    association_boost: float = 0.0
     final_score: float = 0.0
 
 
@@ -86,6 +87,18 @@ class SessionSurface:
     surfaced_ts: int
     hook: HookName
     tool_use_id: str | None = None
+
+
+@dataclass(slots=True)
+class Association:
+    """Hebbian co-activation link between two memories."""
+
+    memory_a_id: int  # always < memory_b_id (canonical ordering)
+    memory_b_id: int
+    strength: float = 0.0
+    co_fire_count: int = 0
+    last_co_fire_ts: int = 0
+    created_ts: int = 0
 
 
 @dataclass(slots=True)

@@ -37,6 +37,11 @@ from pathlib import Path
 from typing import Any
 
 from .. import db
+from ..associations import (
+    get_prior_surfaces_with_ts,
+    lookup_association_boosts,
+    record_co_activations,
+)
 from ..extract import extract_hints
 from ..models import Candidate
 from ..rank import (
@@ -95,6 +100,20 @@ def _run(payload: dict[str, Any]) -> int:
         _emit({})
         return 0
 
+    # Hebbian: get prior surfaces BEFORE logging this call's surfaces.
+    prior_surfaces_ts = get_prior_surfaces_with_ts(conn, session_id)
+    prior_surfaced_ids = set(prior_surfaces_ts.keys())
+
+    # Apply association boosts to candidates before filtering.
+    boosts = lookup_association_boosts(
+        conn,
+        [c.memory_id for c in candidates],
+        prior_surfaced_ids,
+        now_ts,
+    )
+    for c in candidates:
+        c.association_boost = boosts.get(c.memory_id, 0.0)
+
     cluster_stats = compute_cluster_stats(conn, project_slug, now_ts)
     surfaced_ids = _already_surfaced_this_session(conn, session_id)
     selected = filter_candidates(candidates, cluster_stats, surfaced_ids)
@@ -105,6 +124,14 @@ def _run(payload: dict[str, Any]) -> int:
 
     _log_surfaces(conn, session_id, selected, tool_use_id, now_ts)
     _bump_surface_counts(conn, selected, now_ts)
+
+    # Hebbian: record co-activations AFTER logging (uses prior set, not self).
+    record_co_activations(
+        conn, session_id,
+        newly_surfaced_ids=[c.memory_id for c in selected],
+        prior_surfaced=prior_surfaces_ts,
+        now_ts=now_ts,
+    )
 
     additional_context = _format_injection(selected)
     _emit(

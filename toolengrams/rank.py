@@ -63,6 +63,8 @@ def final_score(
     score = candidate.structural_match * (0.5 + u) * (0.5 + 0.5 * r)
     if candidate.pinned:
         score *= 1.5
+    # Hebbian association boost (set by pretool before filtering).
+    score *= (1.0 + candidate.association_boost)
     return score
 
 
