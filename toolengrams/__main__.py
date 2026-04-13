@@ -21,6 +21,7 @@ from .commands import (
     remember,
     seed,
     session_start,
+    status,
 )
 
 # Subcommands that own their own argparse (they accept flags that
@@ -32,6 +33,7 @@ _SELF_PARSING = {
     "pin": pin.main,
     "recall": recall.main,
     "consolidate": consolidate.main,
+    "status": status.main,
 }
 
 
@@ -56,6 +58,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("pin", help="Pin/unpin a memory", add_help=False)
     sub.add_parser("recall", help="Browse and search the memory store", add_help=False)
     sub.add_parser("consolidate", help="Nightly consolidation — replay and prune", add_help=False)
+    sub.add_parser("status", help="Memory health dashboard", add_help=False)
 
     sub.add_parser("export", help="Dump memories to markdown (stub)")
 
