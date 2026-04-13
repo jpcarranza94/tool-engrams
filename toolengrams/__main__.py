@@ -12,6 +12,7 @@ import sys
 from typing import Callable
 
 from .commands import (
+    consolidate,
     forget,
     pin,
     post_tool,
@@ -30,6 +31,7 @@ _SELF_PARSING = {
     "forget": forget.main,
     "pin": pin.main,
     "recall": recall.main,
+    "consolidate": consolidate.main,
 }
 
 
@@ -53,6 +55,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("forget", help="Soft-demote or archive a memory", add_help=False)
     sub.add_parser("pin", help="Pin/unpin a memory", add_help=False)
     sub.add_parser("recall", help="Browse and search the memory store", add_help=False)
+    sub.add_parser("consolidate", help="Nightly consolidation — replay and prune", add_help=False)
 
     sub.add_parser("export", help="Dump memories to markdown (stub)")
 
