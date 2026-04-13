@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS memories (
     name             TEXT NOT NULL,
     description      TEXT,
     body             TEXT NOT NULL,
-    type             TEXT NOT NULL CHECK (type IN ('user','feedback','project','reference')),
+    type             TEXT NOT NULL CHECK (type IN ('feedback','reference')),
     scope            TEXT NOT NULL CHECK (scope IN ('global','project')) DEFAULT 'project',
     project_slug     TEXT,
     created_ts       INTEGER NOT NULL,

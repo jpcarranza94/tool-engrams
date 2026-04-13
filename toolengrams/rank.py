@@ -13,9 +13,7 @@ from .models import Candidate, ClusterStats, MemoryType
 
 # Reinforcement constants
 HALF_LIFE_DAYS: dict[MemoryType, float] = {
-    "project": 14.0,
     "feedback": 30.0,
-    "user": 60.0,
     "reference": 60.0,
 }
 
@@ -60,7 +58,7 @@ def final_score(
 ) -> float:
     """Combine structural match with reinforcement-weighted modifiers."""
     u = usefulness(candidate.useful_count, candidate.surface_count)
-    half_life = HALF_LIFE_DAYS.get(candidate.type, HALF_LIFE_DAYS["project"])
+    half_life = HALF_LIFE_DAYS.get(candidate.type, HALF_LIFE_DAYS["reference"])
     r = recency(candidate.last_surfaced_ts, half_life, now_ts)
     score = candidate.structural_match * (0.5 + u) * (0.5 + 0.5 * r)
     if candidate.pinned:

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
-MemoryType = Literal["user", "feedback", "project", "reference"]
+MemoryType = Literal["feedback", "reference"]
 MemoryScope = Literal["global", "project"]
 TriggerKind = Literal["tool_head", "path_glob"]
 HookName = Literal[

@@ -24,7 +24,7 @@ def _candidate(
     useful_count: int = 0,
     last_surfaced_ts: int = 0,
     pinned: bool = False,
-    type_: str = "project",
+    type_: str = "reference",
     head_length: int = 1,
 ) -> Candidate:
     return Candidate(

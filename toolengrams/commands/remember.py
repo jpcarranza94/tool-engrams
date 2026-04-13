@@ -29,7 +29,7 @@ from ..formation import (
 )
 from .pretool import slugify_cwd
 
-VALID_TYPES = {"user", "feedback", "project", "reference"}
+VALID_TYPES = {"feedback", "reference"}
 VALID_SCOPES = {"global", "project"}
 DEFAULT_TYPE = "reference"
 DEFAULT_SCOPE = "project"
