@@ -1,8 +1,8 @@
 """engram CLI entrypoint — ToolEngrams command-line interface.
 
 v1 wires the four hook handlers (pretool, session-start, user-prompt,
-post-failure) plus `seed`. The formation subcommands (remember, forget,
-pin, recall, export) are stubs until v1.5.
+post-failure) plus `seed` and `remember`. The remaining formation
+subcommands (forget, pin, recall, export) are stubs until v1.5.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ import argparse
 import sys
 from typing import Callable
 
-from .commands import post_failure, pretool, seed, session_start, user_prompt
+from .commands import post_failure, pretool, remember, seed, session_start, user_prompt
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -24,8 +24,14 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("post-failure", help="PostToolUse hook handler — failure subset (reads JSON on stdin)")
     sub.add_parser("seed", help="Insert example memories for smoke testing")
 
-    remember = sub.add_parser("remember", help="Formation: extract triggers + insert (stub)")
-    remember.add_argument("text", nargs="?", default=None)
+    # `remember` owns its own argparse (see commands/remember.py); we add a
+    # passthrough subparser here just so --help at the top level lists it.
+    remember_p = sub.add_parser(
+        "remember",
+        help="Formation: extract triggers from body text and insert a memory",
+        add_help=False,
+    )
+    remember_p.add_argument("args", nargs=argparse.REMAINDER)
 
     forget = sub.add_parser("forget", help="Soft demote a memory (stub)")
     forget.add_argument("name", nargs="?", default=None)
@@ -39,6 +45,11 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("export", help="Dump memories to markdown (stub)")
 
+    # Split argv so `remember` gets its own argparse pass.
+    raw = list(sys.argv[1:] if argv is None else argv)
+    if raw and raw[0] == "remember":
+        return remember.main(raw[1:])
+
     args = parser.parse_args(argv)
 
     handlers: dict[str, Callable[[], int]] = {
@@ -47,7 +58,6 @@ def main(argv: list[str] | None = None) -> int:
         "user-prompt": user_prompt.main,
         "post-failure": post_failure.main,
         "seed": seed.main,
-        "remember": _stub_unimpl("remember"),
         "forget": _stub_unimpl("forget"),
         "pin": _stub_unimpl("pin"),
         "recall": _stub_unimpl("recall"),
