@@ -28,7 +28,7 @@ def _rows(conn, sql, *params):
 
 def test_positional_text_inserts_memory(temp_db, monkeypatch, capsys):
     payload = _run(["some body about `git status`"], monkeypatch, capsys=capsys)
-    assert payload["inserted"] is True
+    assert payload["action"] == "inserted"
     assert payload["memory"]["id"] is not None
     rows = _rows(temp_db, "SELECT name, body, type, scope FROM memories")
     assert len(rows) == 1
@@ -37,7 +37,7 @@ def test_positional_text_inserts_memory(temp_db, monkeypatch, capsys):
 
 def test_stdin_body_when_text_is_dash(temp_db, monkeypatch, capsys):
     payload = _run(["-"], monkeypatch, stdin="body via stdin `mycli`\n", capsys=capsys)
-    assert payload["inserted"] is True
+    assert payload["action"] == "inserted"
     rows = _rows(temp_db, "SELECT body FROM memories")
     assert rows[0]["body"].startswith("body via stdin")
 
@@ -66,7 +66,7 @@ def test_name_override_respected(temp_db, monkeypatch, capsys):
 
 
 def test_long_first_line_is_truncated(temp_db, monkeypatch, capsys):
-    long = "x" * 200
+    long = "x" * 200 + " use `git push`"
     payload = _run([long], monkeypatch, capsys=capsys)
     assert len(payload["memory"]["name"]) == 80
 
@@ -117,7 +117,7 @@ def test_extra_trigger_keyword_now_rejected(temp_db, monkeypatch):
 
 def test_extra_trigger_tool_head(temp_db, monkeypatch, capsys):
     payload = _run(
-        ["--extra-trigger", "tool_head:Bash:git,push", "body"],
+        ["--extra-trigger", "tool_head:Bash:git,push", "some `git` body"],
         monkeypatch,
         capsys=capsys,
     )
@@ -136,8 +136,7 @@ def test_extra_trigger_malformed_raises(temp_db, monkeypatch):
 
 def test_dry_run_does_not_insert(temp_db, monkeypatch, capsys):
     payload = _run(["--dry-run", "`git push`"], monkeypatch, capsys=capsys)
-    assert payload["inserted"] is False
-    assert payload["dry_run"] is True
+    assert payload["action"] == "dry_run"
     assert payload["memory"]["id"] is None
     rows = _rows(temp_db, "SELECT COUNT(*) AS c FROM memories")
     assert rows[0]["c"] == 0
@@ -160,13 +159,13 @@ def test_scope_global_stores_null_project_slug(temp_db, monkeypatch, capsys):
 
 def test_scope_project_defaults_slug_from_cwd(temp_db, monkeypatch, capsys):
     monkeypatch.setenv("ENGRAM_PROJECT_CWD", "/tmp/fake/project")
-    payload = _run(["body"], monkeypatch, capsys=capsys)
+    payload = _run(["use `make build` here"], monkeypatch, capsys=capsys)
     assert payload["memory"]["project_slug"] == "-tmp-fake-project"
 
 
 def test_scope_project_with_override(temp_db, monkeypatch, capsys):
     payload = _run(
-        ["--scope", "project", "--project-slug", "custom-slug", "body"],
+        ["--scope", "project", "--project-slug", "custom-slug", "use `make test`"],
         monkeypatch,
         capsys=capsys,
     )
@@ -179,18 +178,79 @@ def test_invalid_type_returns_2(temp_db, monkeypatch, capsys):
 
 
 def test_pinned_flag_stored(temp_db, monkeypatch, capsys):
-    _run(["--pinned", "body"], monkeypatch, capsys=capsys)
+    _run(["--pinned", "use `make deploy` carefully"], monkeypatch, capsys=capsys)
     rows = _rows(temp_db, "SELECT pinned FROM memories")
     assert rows[0]["pinned"] == 1
+
+
+# ---------- dedup ----------
+
+
+def test_dedup_updates_existing_on_trigger_overlap(temp_db, monkeypatch, capsys):
+    """Second memory with same triggers should UPDATE, not INSERT."""
+    p1 = _run(["`git push` -- always force push"], monkeypatch, capsys=capsys)
+    assert p1["action"] == "inserted"
+    mid = p1["memory"]["id"]
+
+    p2 = _run(["`git push` -- never force push actually"], monkeypatch, capsys=capsys)
+    assert p2["action"] == "updated"
+    assert p2["memory"]["id"] == mid
+    assert p2["existing_match"]["overlap_count"] >= 2
+
+    rows = _rows(temp_db, "SELECT COUNT(*) AS c FROM memories WHERE archived_ts IS NULL")
+    assert rows[0]["c"] == 1  # only one memory, not two
+
+    body = _rows(temp_db, "SELECT body FROM memories WHERE id = ?", mid)
+    assert "never force push" in body[0]["body"]  # body was replaced
+
+
+def test_dedup_allows_distinct_memories(temp_db, monkeypatch, capsys):
+    """Memories with different triggers should both insert."""
+    _run(["`git push` rule"], monkeypatch, capsys=capsys)
+    p2 = _run(["`docker compose up` rule"], monkeypatch, capsys=capsys)
+    assert p2["action"] == "inserted"
+
+    rows = _rows(temp_db, "SELECT COUNT(*) AS c FROM memories WHERE archived_ts IS NULL")
+    assert rows[0]["c"] == 2
+
+
+def test_dedup_by_name_match_with_single_trigger_overlap(temp_db, monkeypatch, capsys):
+    """Same name + 1 shared trigger → should update."""
+    _run(["--name", "git rule", "`git push` original"], monkeypatch, capsys=capsys)
+    p2 = _run(["--name", "git rule", "`git status` updated"], monkeypatch, capsys=capsys)
+    # (git) head overlaps, same name → update
+    assert p2["action"] == "updated"
+
+    rows = _rows(temp_db, "SELECT COUNT(*) AS c FROM memories WHERE archived_ts IS NULL")
+    assert rows[0]["c"] == 1
+
+
+# ---------- triggerless rejection ----------
+
+
+def test_triggerless_body_rejected(temp_db, monkeypatch, capsys):
+    """Body with no backticked commands or paths should be rejected."""
+    rc = remember.main(["The staging DB is on port 5433."])
+    assert rc == 1
+    out = capsys.readouterr().out
+    payload = json.loads(out)
+    assert payload["error"] == "no_triggers"
+
+
+def test_body_with_only_paths_is_accepted(temp_db, monkeypatch, capsys):
+    """Paths are valid triggers even without backticked commands."""
+    payload = _run(["Config lives at ~/.claude/settings.json"], monkeypatch, capsys=capsys)
+    assert payload["action"] == "inserted"
 
 
 # ---------- vocabulary consolidation ----------
 
 
-def test_consolidation_counts_after_second_insert(temp_db, monkeypatch, capsys):
+def test_consolidation_counts_on_update(temp_db, monkeypatch, capsys):
     _run(["`git push` one"], monkeypatch, capsys=capsys)
     payload = _run(["`git push` two"], monkeypatch, capsys=capsys)
-    # The second call should see 1 existing memory for each head.
+    # Dedup fires (same triggers), action is update
+    assert payload["action"] == "updated"
     counts = {
         (t["tool_name"], tuple(t["head"])): t["existing_memories"]
         for t in payload["extracted_triggers"]
