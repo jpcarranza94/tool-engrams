@@ -1,12 +1,9 @@
 """Nightly consolidation: `engram consolidate` — sleep for memories.
 
-Two modes:
-  1. Mechanical (default): auto-archive dead memories, flag stale, clean up surfaces.
-  2. Agent (--agent): spawn an Opus agent that freely explores today's sessions,
-     evaluates memory quality, identifies missed corrections, and takes action.
-
-The agent mode is the "sleep consolidation" — the brain replaying the day's
-experiences to decide what to keep and what to let go.
+Spawns an Opus agent that freely explores today's sessions, evaluates
+memory surfacing quality, identifies missed corrections, and takes
+action via the engram CLI. This is the "sleep consolidation" — the
+brain replaying the day's experiences.
 """
 
 from __future__ import annotations
@@ -15,20 +12,23 @@ import argparse
 import json
 import sys
 import time
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta
 
 from .. import db
-from ..consolidation.adjust import AdjustmentReport, run_mechanical_adjustments
+from ..consolidation.agent import run_consolidation_agent
 from ..consolidation.collect import collect_sessions
+
+
+# Session surfaces older than this are cleaned up.
+SURFACES_TTL_DAYS = 30
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
 
-    # Schedule management.
     if args.install_schedule:
         from ..schedule import install_schedule
-        path = install_schedule(use_agent=args.agent)
+        path = install_schedule(use_agent=True)
         print(json.dumps({"action": "schedule_installed", "plist_path": path}))
         return 0
     if args.uninstall_schedule:
@@ -38,10 +38,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     target = _resolve_date(args)
-
     conn = db.connect()
+
     try:
-        # Idempotency check.
+        # Idempotency.
         if not args.force:
             existing = conn.execute(
                 "SELECT id FROM consolidation_runs WHERE run_date = ?",
@@ -51,86 +51,63 @@ def main(argv: list[str] | None = None) -> int:
                 print(json.dumps({
                     "status": "already_run",
                     "run_date": target.isoformat(),
-                    "message": "Consolidation already ran for this date. Use --force to re-run.",
+                    "message": "Already consolidated. Use --force to re-run.",
                 }))
                 return 0
 
-        # Collect sessions.
         sessions = collect_sessions(target)
+        if not sessions:
+            print(json.dumps({"status": "no_sessions", "run_date": target.isoformat()}))
+            return 0
 
-        # Mechanical adjustments (always, unless dry-run).
+        # Housekeeping: clean old session_surfaces.
+        cutoff = int(time.time()) - (SURFACES_TTL_DAYS * 86400)
+        cleaned = conn.execute(
+            "DELETE FROM session_surfaces WHERE surfaced_ts < ?", (cutoff,)
+        ).rowcount
+
         if args.dry_run:
-            adjustment = AdjustmentReport()
-        else:
-            adjustment = run_mechanical_adjustments(conn)
+            print(json.dumps({
+                "status": "dry_run",
+                "run_date": target.isoformat(),
+                "sessions_found": len(sessions),
+                "surfaces_would_clean": cleaned,
+            }))
+            return 0
 
-        # Agent-based review (optional).
-        agent_report = None
-        if args.agent and sessions and not args.dry_run:
-            from ..consolidation.agent import run_consolidation_agent
-            result = run_consolidation_agent(
-                sessions=sessions,
-                db_path=db.db_path(),
-                target_date=target.isoformat(),
-            )
-            if result.error:
-                print(f"engram consolidate: agent error: {result.error}", file=sys.stderr)
-            agent_report = result.report or None
+        # Run the consolidation agent.
+        result = run_consolidation_agent(
+            sessions=sessions,
+            db_path=db.db_path(),
+            target_date=target.isoformat(),
+        )
 
-        # Build report.
-        report_lines = [
-            f"ToolEngrams consolidation — {target.isoformat()}",
-            "=" * 50,
-            f"Sessions scanned: {len(sessions)}",
-            f"Archived (dead): {len(adjustment.archived_ids)}",
-        ]
-        for name in adjustment.archived_names:
-            report_lines.append(f"  - {name}")
-        report_lines.append(f"Flagged stale: {len(adjustment.stale_ids)}")
-        for name in adjustment.stale_names:
-            report_lines.append(f"  - {name}")
-        report_lines.append(f"Session surfaces cleaned: {adjustment.surfaces_cleaned}")
-
-        if agent_report:
-            report_lines.append("")
-            report_lines.append("Agent review:")
-            report_lines.append("-" * 40)
-            report_lines.append(agent_report)
-
-        report_text = "\n".join(report_lines)
+        if result.error:
+            print(f"engram consolidate: agent error: {result.error}", file=sys.stderr)
 
         # Log the run.
-        if not args.dry_run:
-            now_ts = int(time.time())
-            conn.execute(
-                "INSERT OR REPLACE INTO consolidation_runs "
-                "(run_date, started_ts, completed_ts, sessions_scanned, "
-                "episodes_evaluated, memories_strengthened, memories_weakened, "
-                "memories_archived, memories_discovered, report) "
-                "VALUES (?, ?, ?, ?, 0, 0, 0, ?, 0, ?)",
-                (
-                    target.isoformat(),
-                    now_ts, now_ts,
-                    len(sessions),
-                    len(adjustment.archived_ids),
-                    report_text,
-                ),
-            )
+        now_ts = int(time.time())
+        conn.execute(
+            "INSERT OR REPLACE INTO consolidation_runs "
+            "(run_date, started_ts, completed_ts, sessions_scanned, "
+            "episodes_evaluated, memories_strengthened, memories_weakened, "
+            "memories_archived, memories_discovered, report) "
+            "VALUES (?, ?, ?, ?, 0, 0, 0, 0, 0, ?)",
+            (target.isoformat(), now_ts, now_ts, len(sessions), result.report),
+        )
 
         if args.json:
             print(json.dumps({
-                "status": "completed",
+                "status": "completed" if not result.error else "error",
                 "run_date": target.isoformat(),
                 "sessions_scanned": len(sessions),
-                "archived": len(adjustment.archived_ids),
-                "stale": len(adjustment.stale_ids),
-                "surfaces_cleaned": adjustment.surfaces_cleaned,
-                "agent_ran": agent_report is not None,
+                "surfaces_cleaned": cleaned,
+                "error": result.error,
             }))
         else:
-            print(report_text)
+            print(result.report or "Agent produced no report.")
 
-        return 0
+        return 0 if not result.error else 1
     finally:
         conn.close()
 
@@ -138,17 +115,15 @@ def main(argv: list[str] | None = None) -> int:
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="engram consolidate")
     parser.add_argument("--yesterday", action="store_true",
-                        help="Consolidate yesterday (default for scheduled runs).")
+                        help="Consolidate yesterday (for scheduled runs).")
     parser.add_argument("--date", default=None,
-                        help="Specific date to consolidate (YYYY-MM-DD).")
+                        help="Specific date (YYYY-MM-DD).")
     parser.add_argument("--dry-run", action="store_true",
-                        help="Report only; don't modify DB or spawn agent.")
+                        help="Show what would happen; don't spawn agent.")
     parser.add_argument("--force", action="store_true",
-                        help="Re-run even if already consolidated for this date.")
-    parser.add_argument("--agent", action="store_true",
-                        help="Spawn an Opus agent to review sessions and evaluate memories.")
+                        help="Re-run even if already consolidated.")
     parser.add_argument("--json", action="store_true",
-                        help="Output JSON instead of text report.")
+                        help="JSON output.")
     parser.add_argument("--install-schedule", action="store_true",
                         help="Install macOS launchd plist for nightly 2 AM runs.")
     parser.add_argument("--uninstall-schedule", action="store_true",
