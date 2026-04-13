@@ -266,23 +266,3 @@ def _insert_trigger(conn, memory_id: int, trigger: dict) -> None:
             "VALUES (?, 'path_glob', ?)",
             (memory_id, trigger["path_pattern"]),
         )
-    elif kind == "error_contains":
-        head = trigger.get("head") or []
-        conn.execute(
-            "INSERT INTO triggers "
-            "(memory_id, kind, tool_name, head_joined, head_length, error_substring) "
-            "VALUES (?, 'error_contains', ?, ?, ?, ?)",
-            (
-                memory_id,
-                trigger["tool_name"],
-                " ".join(head),
-                len(head),
-                trigger["error_substring"],
-            ),
-        )
-    elif kind == "keyword":
-        conn.execute(
-            "INSERT INTO triggers (memory_id, kind, keyword) "
-            "VALUES (?, 'keyword', ?)",
-            (memory_id, trigger["keyword"]),
-        )

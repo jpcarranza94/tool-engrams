@@ -131,10 +131,8 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--extra-trigger", action="append", default=None,
                         metavar="SPEC",
                         help=("Extra trigger. Repeatable. Formats: "
-                              "'keyword:foo'  |  "
                               "'tool_head:Bash:git,push'  |  "
-                              "'path_glob:**/*.py'  |  "
-                              "'error_contains:Bash:ssh:Connection refused'"))
+                              "'path_glob:**/*.py'"))
     parser.add_argument("--dry-run", action="store_true",
                         help="Extract and report candidates; do not insert.")
     return parser.parse_args(argv)
@@ -173,29 +171,17 @@ def _resolve_project_slug(scope: str, override: str | None) -> str | None:
 
 
 def _parse_extra_triggers(specs: list[str]) -> list[dict[str, Any]]:
-    """Parse --extra-trigger SPEC strings into dict rows mirroring seed format."""
+    """Parse --extra-trigger SPEC strings into dict rows."""
     out: list[dict[str, Any]] = []
     for spec in specs:
         parts = spec.split(":")
         kind = parts[0]
-        if kind == "keyword" and len(parts) == 2:
-            out.append({"kind": "keyword", "keyword": parts[1]})
-        elif kind == "path_glob" and len(parts) == 2:
+        if kind == "path_glob" and len(parts) == 2:
             out.append({"kind": "path_glob", "path_pattern": parts[1]})
         elif kind == "tool_head" and len(parts) == 3:
             tool_name = parts[1]
             head = tuple(t for t in parts[2].split(",") if t)
             out.append({"kind": "tool_head", "tool_name": tool_name, "head": head})
-        elif kind == "error_contains" and len(parts) >= 4:
-            tool_name = parts[1]
-            head = tuple(t for t in parts[2].split(",") if t)
-            substring = ":".join(parts[3:])
-            out.append({
-                "kind": "error_contains",
-                "tool_name": tool_name,
-                "head": head,
-                "error_substring": substring,
-            })
         else:
             raise SystemExit(f"engram remember: malformed --extra-trigger {spec!r}")
     return out
@@ -248,20 +234,6 @@ def _insert_extra_triggers(conn, memory_id: int, extras: list[dict[str, Any]]) -
                 "INSERT INTO triggers (memory_id, kind, path_pattern) "
                 "VALUES (?, 'path_glob', ?)",
                 (memory_id, t["path_pattern"]),
-            )
-        elif kind == "error_contains":
-            head = t.get("head") or ()
-            conn.execute(
-                "INSERT INTO triggers "
-                "(memory_id, kind, tool_name, head_joined, head_length, error_substring) "
-                "VALUES (?, 'error_contains', ?, ?, ?, ?)",
-                (memory_id, t["tool_name"], " ".join(head), len(head), t["error_substring"]),
-            )
-        elif kind == "keyword":
-            conn.execute(
-                "INSERT INTO triggers (memory_id, kind, keyword) "
-                "VALUES (?, 'keyword', ?)",
-                (memory_id, t["keyword"]),
             )
 
 

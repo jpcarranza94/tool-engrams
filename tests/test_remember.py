@@ -109,15 +109,10 @@ def test_triggers_are_persisted_to_db(temp_db, monkeypatch, capsys):
 # ---------- extra triggers ----------
 
 
-def test_extra_trigger_keyword(temp_db, monkeypatch, capsys):
-    payload = _run(
-        ["--extra-trigger", "keyword:mycli", "body text"],
-        monkeypatch,
-        capsys=capsys,
-    )
-    assert payload["extra_triggers"] == [{"kind": "keyword", "keyword": "mycli"}]
-    rows = _rows(temp_db, "SELECT kind, keyword FROM triggers WHERE kind='keyword'")
-    assert rows[0]["keyword"] == "mycli"
+def test_extra_trigger_keyword_now_rejected(temp_db, monkeypatch):
+    """keyword triggers were removed in the tool-bound refactor."""
+    with pytest.raises(SystemExit):
+        remember.main(["--extra-trigger", "keyword:mycli", "body text"])
 
 
 def test_extra_trigger_tool_head(temp_db, monkeypatch, capsys):
@@ -129,21 +124,6 @@ def test_extra_trigger_tool_head(temp_db, monkeypatch, capsys):
     assert payload["extra_triggers"][0]["kind"] == "tool_head"
     # JSON round-trips tuples to lists.
     assert list(payload["extra_triggers"][0]["head"]) == ["git", "push"]
-
-
-def test_extra_trigger_error_contains(temp_db, monkeypatch, capsys):
-    payload = _run(
-        ["--extra-trigger", "error_contains:Bash:ssh:Connection refused", "body"],
-        monkeypatch,
-        capsys=capsys,
-    )
-    rows = _rows(
-        temp_db,
-        "SELECT tool_name, head_joined, error_substring FROM triggers WHERE kind='error_contains'",
-    )
-    assert rows[0]["tool_name"] == "Bash"
-    assert rows[0]["head_joined"] == "ssh"
-    assert rows[0]["error_substring"] == "Connection refused"
 
 
 def test_extra_trigger_malformed_raises(temp_db, monkeypatch):

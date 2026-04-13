@@ -14,13 +14,12 @@ from typing import Callable
 from .commands import (
     forget,
     pin,
-    post_failure,
+    post_tool,
     pretool,
     recall,
     remember,
     seed,
     session_start,
-    user_prompt,
 )
 
 # Subcommands that own their own argparse (they accept flags that
@@ -46,8 +45,7 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("pretool", help="PreToolUse hook handler (reads JSON on stdin)")
     sub.add_parser("session-start", help="SessionStart hook handler (reads JSON on stdin)")
-    sub.add_parser("user-prompt", help="UserPromptSubmit hook handler (reads JSON on stdin)")
-    sub.add_parser("post-failure", help="PostToolUse hook handler — failure subset (reads JSON on stdin)")
+    sub.add_parser("post-tool", help="PostToolUse hook handler — success reinforcement (reads JSON on stdin)")
     sub.add_parser("seed", help="Insert example memories for smoke testing")
 
     # Listed so --help shows them, but dispatch goes through _SELF_PARSING above.
@@ -63,8 +61,7 @@ def main(argv: list[str] | None = None) -> int:
     handlers: dict[str, Callable[[], int]] = {
         "pretool": pretool.main,
         "session-start": session_start.main,
-        "user-prompt": user_prompt.main,
-        "post-failure": post_failure.main,
+        "post-tool": post_tool.main,
         "seed": seed.main,
         "export": _stub_unimpl("export"),
     }

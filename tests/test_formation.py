@@ -97,28 +97,6 @@ def test_http_and_https_both_extract():
     assert ("other.example.com",) in heads
 
 
-# ---------- bare CLI name extraction ----------
-
-
-def test_bare_known_cli_emits_head():
-    c = extract_candidates("When psql connects, make sure the port is right.")
-    assert ("psql",) in _heads(c, "Bash")
-
-
-def test_unknown_bare_word_is_not_extracted():
-    c = extract_candidates("The frobnicator widget is obsolete.")
-    heads = _heads(c, "Bash")
-    assert not heads
-
-
-def test_bare_cli_does_not_double_count_with_backtick():
-    # `git` appears in backtick and again bare in prose — should dedupe.
-    body = "`git push` — the git command is used here."
-    c = extract_candidates(body)
-    git_heads = [h for h in _heads(c, "Bash") if h == ("git",)]
-    assert len(git_heads) == 1
-
-
 # ---------- dedup ----------
 
 

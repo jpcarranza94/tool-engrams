@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import sys
 import time
 
 from .. import db
@@ -23,7 +22,6 @@ SEED_MEMORIES = [
         "scope": "global",
         "triggers": [
             {"kind": "tool_head", "tool_name": "Bash", "head": ["mycli"]},
-            {"kind": "keyword", "keyword": "mycli"},
         ],
     },
     {
@@ -52,41 +50,6 @@ SEED_MEMORIES = [
         "scope": "global",
         "triggers": [
             {"kind": "tool_head", "tool_name": "Bash", "head": ["ssh", "deploy@"]},
-            {
-                "kind": "error_contains",
-                "tool_name": "Bash",
-                "head": ["ssh"],
-                "error_substring": "Connection refused",
-            },
-        ],
-    },
-    {
-        "name": "no inline imports in Python",
-        "description": "Style rule — imports at module top only.",
-        "body": (
-            "All Python imports belong at module top. Do not add imports inside "
-            "functions or methods except in the rare case of avoiding a circular "
-            "import — and call those out in a comment when you do."
-        ),
-        "type": "feedback",
-        "scope": "global",
-        "triggers": [
-            {"kind": "path_glob", "path_pattern": "**/*.py"},
-        ],
-    },
-    {
-        "name": "settings.json configures Claude Code hooks",
-        "description": "Where hooks live.",
-        "body": (
-            "~/.claude/settings.json holds hook configuration under the `hooks` "
-            "key. Each entry is {matcher, hooks:[{type,command,timeout?}]}. "
-            "PreToolUse/PostToolUse/UserPromptSubmit/SessionStart are the "
-            "commonly-used events."
-        ),
-        "type": "reference",
-        "scope": "global",
-        "triggers": [
-            {"kind": "path_glob", "path_pattern": "**/settings.json"},
         ],
     },
 ]
@@ -141,24 +104,4 @@ def _insert_triggers(conn, memory_id: int, triggers: list[dict]) -> None:
                 "INSERT INTO triggers (memory_id, kind, path_pattern) "
                 "VALUES (?, 'path_glob', ?)",
                 (memory_id, t["path_pattern"]),
-            )
-        elif kind == "error_contains":
-            head_joined = " ".join(t.get("head") or [])
-            conn.execute(
-                "INSERT INTO triggers "
-                "(memory_id, kind, tool_name, head_joined, head_length, error_substring) "
-                "VALUES (?, 'error_contains', ?, ?, ?, ?)",
-                (
-                    memory_id,
-                    t["tool_name"],
-                    head_joined,
-                    len(t.get("head") or []),
-                    t["error_substring"],
-                ),
-            )
-        elif kind == "keyword":
-            conn.execute(
-                "INSERT INTO triggers (memory_id, kind, keyword) "
-                "VALUES (?, 'keyword', ?)",
-                (memory_id, t["keyword"]),
             )

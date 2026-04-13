@@ -7,12 +7,11 @@ from typing import Literal
 
 MemoryType = Literal["user", "feedback", "project", "reference"]
 MemoryScope = Literal["global", "project"]
-TriggerKind = Literal["tool_head", "path_glob", "error_contains", "keyword"]
+TriggerKind = Literal["tool_head", "path_glob"]
 HookName = Literal[
     "pre_tool_use",
-    "post_tool_use_failure",
+    "post_tool_use",
     "session_start",
-    "user_prompt_submit",
 ]
 
 
@@ -42,8 +41,6 @@ class Trigger:
     head_joined: str | None = None
     head_length: int | None = None
     path_pattern: str | None = None
-    error_substring: str | None = None
-    keyword: str | None = None
 
 
 @dataclass(slots=True)

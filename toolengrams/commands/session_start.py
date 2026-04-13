@@ -136,20 +136,21 @@ def _log_surfaces(conn, session_id: str, rows, now_ts: int) -> None:
 def _formation_guidance() -> str:
     return (
         "[ToolEngrams: memory formation]\n"
-        "You have a tool-bound memory system (ToolEngrams). Memories surface automatically "
-        "when you call tools — you don't need to manage recall.\n\n"
+        "You have a tool-bound memory system (ToolEngrams). Memories are bound to tool-call "
+        "patterns and surface automatically via PreToolUse hooks when you call matching tools.\n\n"
         "To SAVE a memory when you learn something worth keeping:\n"
         "  Run: engram remember \"<body>\" --type <user|feedback|project|reference> "
         "--scope <global|project> [--name \"<short name>\"]\n\n"
+        "IMPORTANT: Include backticked commands (e.g. `git push`, `mycli -c`) and/or file "
+        "paths in the body. Triggers are extracted from these patterns automatically — "
+        "a memory without tool patterns has nothing to bind to.\n\n"
         "When to save:\n"
-        "- User corrects your approach → type=feedback, include what to do and why\n"
+        "- User corrects your approach → type=feedback\n"
         "- User confirms a non-obvious approach → type=feedback\n"
         "- User explicitly asks you to remember → whichever type fits\n"
         "- You learn about user role/preferences/knowledge → type=user\n"
         "- You learn project facts (deadlines, ownership, decisions) → type=project\n"
         "- You discover a useful reference (where info lives, how to access) → type=reference\n\n"
-        "Include backticked commands, file paths, or URLs in the body — triggers are "
-        "extracted automatically from those patterns. No need to specify triggers manually.\n\n"
         "To FORGET: engram forget \"<name>\"  |  To BROWSE: engram recall [query]"
     )
 

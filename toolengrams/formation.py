@@ -48,17 +48,6 @@ _PATH_RE = re.compile(
 # A token that looks like a CLI name (starts with a letter, no shell metachars).
 _CLI_NAME_RE = re.compile(r"^[a-zA-Z_][\w.-]*$")
 
-# CLIs we recognize when they appear in prose without backticks. A narrow
-# allowlist — anything outside this set needs an explicit backtick to count.
-_KNOWN_CLIS = {
-    "git", "gh", "jira", "bq", "psql", "mycli", "ssh", "scp", "rsync",
-    "curl", "wget", "docker", "aws", "kubectl", "helm", "make",
-    "python", "python3", "uv", "pip", "poetry",
-    "npm", "yarn", "pnpm", "node", "cargo", "rustc", "go",
-    "brew", "apt", "terraform", "ansible", "systemctl", "journalctl",
-    "grep", "rg", "find", "fd", "ls",
-}
-
 
 @dataclass(slots=True)
 class FormationCandidate:
@@ -93,7 +82,6 @@ def extract_candidates(body: str) -> list[FormationCandidate]:
     _extract_backticks(body, _add)
     _extract_paths(body, _add)
     _extract_urls(body, _add)
-    _extract_bare_clis(body, _add)
 
     return out
 
@@ -170,18 +158,6 @@ def _extract_urls(body: str, add) -> None:
                 source="url",
             ))
 
-
-def _extract_bare_clis(body: str, add) -> None:
-    # Strip backticked regions first so we don't double-count.
-    stripped = _BACKTICK_RE.sub(" ", body)
-    for tok in re.findall(r"\b[a-zA-Z_][\w.-]*\b", stripped):
-        if tok in _KNOWN_CLIS:
-            add(FormationCandidate(
-                kind="tool_head",
-                tool_name="Bash",
-                head=(tok,),
-                source="cli-name",
-            ))
 
 
 # --------- consolidation ---------

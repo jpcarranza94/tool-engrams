@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import sys
+import time
 
 from toolengrams.commands import pretool, seed
 
@@ -132,17 +133,30 @@ def test_pretool_invalid_json_fails_open(temp_db, monkeypatch, capsys):
     assert buf.getvalue().strip() == "{}"
 
 
-def test_pretool_path_glob_match_on_bash_text(temp_db, monkeypatch):
-    seed.main()
+def test_pretool_path_glob_match_on_file_tool(temp_db, monkeypatch):
+    """path_glob triggers fire when Read/Edit/Write targets a matching path."""
+    # Insert a memory with a path_glob trigger manually.
+    now_ts = int(time.time())
+    cur = temp_db.execute(
+        "INSERT INTO memories (name, description, body, type, scope, project_slug, created_ts) "
+        "VALUES ('py rule', '', 'Python file rule', 'feedback', 'global', NULL, ?)",
+        (now_ts,),
+    )
+    mid = cur.lastrowid
+    temp_db.execute(
+        "INSERT INTO triggers (memory_id, kind, path_pattern) "
+        "VALUES (?, 'path_glob', '**/*.py')",
+        (mid,),
+    )
 
     payload = {
         "session_id": "sess-path",
         "cwd": "/tmp/test-projects/myapp",
         "hook_event_name": "PreToolUse",
-        "tool_name": "Bash",
-        "tool_input": {"command": "cat ~/.claude/settings.json"},
+        "tool_name": "Read",
+        "tool_input": {"file_path": "/tmp/test-projects/myapp/main.py"},
         "tool_use_id": "tu-path",
     }
     result = _run_pretool(payload, monkeypatch)
     ctx = result["hookSpecificOutput"]["additionalContext"]
-    assert "settings.json" in ctx
+    assert "Python file rule" in ctx
