@@ -36,7 +36,7 @@ def test_pretool_hits_seeded_memory(temp_db, monkeypatch):
     hso = result.get("hookSpecificOutput")
     assert hso is not None
     assert hso["hookEventName"] == "PreToolUse"
-    assert hso["permissionDecision"] == "allow"
+    assert hso["permissionDecision"] == "deny"
     assert "mycli" in hso["additionalContext"].lower()
 
 

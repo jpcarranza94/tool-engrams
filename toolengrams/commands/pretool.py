@@ -139,7 +139,7 @@ def _run(payload: dict[str, Any]) -> int:
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
                 "additionalContext": additional_context,
-                "permissionDecision": "allow",
+                "permissionDecision": "deny",
             }
         }
     )
