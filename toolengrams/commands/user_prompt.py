@@ -37,6 +37,7 @@ from ..rank import (
     filter_candidates,
     final_score,
 )
+from ..stopwords import ENGLISH_STOPWORDS
 from .pretool import slugify_cwd
 
 MAX_INJECTION_CHARS = 6000
@@ -194,15 +195,7 @@ def _build_fts_query(prompt_text: str) -> str | None:
     and OR them together. Skip if there are no usable tokens.
     """
     words = {w.lower() for w in _WORD_RE.findall(prompt_text)}
-    # Drop very common English stopwords that blow up recall.
-    stop = {
-        "the", "and", "for", "you", "are", "with", "this", "that", "from",
-        "what", "when", "where", "how", "why", "can", "will", "should",
-        "have", "has", "had", "but", "not", "any", "all", "get", "got",
-        "your", "been", "was", "were", "were", "its", "it's", "do", "does",
-        "did", "done", "make", "made", "one", "two", "some", "more",
-    }
-    tokens = [w for w in words if w not in stop and len(w) >= 3]
+    tokens = [w for w in words if w not in ENGLISH_STOPWORDS and len(w) >= 3]
     if not tokens:
         return None
     tokens = tokens[:12]
