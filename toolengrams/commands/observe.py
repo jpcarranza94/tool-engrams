@@ -1,11 +1,15 @@
-"""Async observer: background memory formation from tool-call context.
+"""Async observer: lightweight background candidate memory formation.
 
-Spawned by PostToolUse as a background process. Reads the session's JSONL
-transcript for recent context, asks Haiku if there's a pattern worth
-remembering, and runs engram remember if yes.
+Spawned by PostToolUse as a detached background process. Sends a simple
+Haiku prompt with recent context and the current tool call. If Haiku
+thinks it's a candidate worth keeping, saves it via engram remember.
 
-This runs OUTSIDE the hook pipeline — it's a fire-and-forget background
-process that never blocks the user's session.
+The consolidator (Opus, 6 PM) reviews these candidates with full context
+and prunes the ones that aren't worth keeping. The observer is fast
+triage, not thorough analysis.
+
+Sessions spawned by the observer use a distinctive cwd prefix
+(engram-observe-*) so the consolidator can skip them.
 """
 
 from __future__ import annotations
@@ -15,33 +19,28 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
-import tempfile
-
 from .. import db
-from ..prompts.observer import OBSERVER_SYSTEM
+from ..prompts.observer import OBSERVER_PROMPT
 from ..queries import get_existing_memories_summary
-from ..subprocess_utils import parse_claude_json_output, write_agent_settings
-from ..transcript import find_transcript, read_recent_context
+from ..subprocess_utils import parse_claude_json_output
+from ..transcript import read_recent_context
 
 CLAUDE_BIN = shutil.which("claude")
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
-# Only observe Bash calls with nontrivial commands.
-# Simple commands (ls, echo, cat, head, tail, wc) are not worth observing.
 _SKIP_HEADS = {
     "ls", "echo", "cat", "head", "tail", "wc", "pwd", "which", "true",
     "false", "cd", "mkdir", "touch", "rm", "cp", "mv", "chmod",
-    "engram",  # don't observe our own tool
+    "engram",
 }
 
-# Minimum command length worth observing.
 _MIN_CMD_LENGTH = 20
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Entry point — reads the PostToolUse payload from argv or stdin."""
     if argv and len(argv) >= 1:
         try:
             payload = json.loads(argv[0])
@@ -65,7 +64,6 @@ def _observe(payload: dict) -> int:
     session_id = payload.get("session_id") or ""
     transcript_path = payload.get("transcript_path") or ""
 
-    # Gate: only observe Bash with nontrivial commands.
     if tool_name != "Bash":
         return 0
 
@@ -77,25 +75,21 @@ def _observe(payload: dict) -> int:
     if first_token in _SKIP_HEADS:
         return 0
 
-    # Get recent context from the session transcript.
-    transcript_file = find_transcript(transcript_path, session_id)
     context = read_recent_context(transcript_path, session_id)
     if not context:
         return 0
 
-    # Get existing memories for dedup context.
     existing = get_existing_memories_summary(db.connect())
+    prompt = _build_prompt(command, context, existing)
 
-    # Build prompt with file path so the agent can explore.
-    prompt = _build_prompt(command, context, existing, transcript_file)
-
-    # Set up a temp working dir with permissions for the agent.
+    # Run from a temp dir with engram-observe- prefix so the consolidator
+    # can identify and skip these sessions.
     work_dir = tempfile.mkdtemp(prefix="engram-observe-")
-    work_path = Path(work_dir)
-    write_agent_settings(work_path, ["Read", "Grep", "Bash(engram *)"])
 
     env = os.environ.copy()
-    env["ENGRAM_DB"] = os.environ.get("ENGRAM_DB", str(Path.home() / ".claude" / "tool-engrams" / "db.sqlite"))
+    env["ENGRAM_DB"] = os.environ.get(
+        "ENGRAM_DB", str(Path.home() / ".claude" / "tool-engrams" / "db.sqlite")
+    )
     env["PYTHONPATH"] = str(REPO_ROOT)
 
     try:
@@ -105,29 +99,23 @@ def _observe(payload: dict) -> int:
             env=env,
             capture_output=True,
             text=True,
-            timeout=60,
+            timeout=30,
         )
     except (subprocess.TimeoutExpired, Exception):
         return 0
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
 
-    # The agent may have already run engram remember directly.
-    # Also check if it returned a JSON judgment in its response.
     response_text = parse_claude_json_output(proc.stdout)
     if not response_text:
         return 0
 
-    # Try to parse a JSON judgment from the response (if the agent
-    # returned one instead of calling engram remember directly).
     _try_save_from_judgment(response_text)
     return 0
 
 
-
-
 def _try_save_from_judgment(response_text: str) -> None:
-    """If the agent returned JSON instead of calling engram, save it."""
+    """Parse Haiku's JSON response and save if it's a candidate."""
     try:
         clean = response_text.strip()
         if clean.startswith("```"):
@@ -159,21 +147,10 @@ def _try_save_from_judgment(response_text: str) -> None:
     remember_main([body, "--type", type_, "--scope", scope, "--name", name])
 
 
+def _build_prompt(command: str, context: str, existing: str) -> str:
+    return f"""{OBSERVER_PROMPT}
 
-def _build_prompt(command: str, context: str, existing: str,
-                   transcript_file: Path | None = None) -> str:
-    transcript_section = ""
-    if transcript_file:
-        transcript_section = f"""
-## Session Transcript (for deeper investigation)
-
-File: {transcript_file}
-Use Read or Grep on this file if the excerpt suggests something worth investigating further.
-"""
-
-    return f"""{OBSERVER_SYSTEM}
-
-## Recent Context (excerpt)
+## Recent Context
 
 {context}
 
@@ -183,7 +160,7 @@ Use Read or Grep on this file if the excerpt suggests something worth investigat
 {command[:500]}
 ```
 
-## Existing Memories (don't duplicate)
+## Existing Memories (don't duplicate these)
 
 {existing}
-{transcript_section}"""
+"""

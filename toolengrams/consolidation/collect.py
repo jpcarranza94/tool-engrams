@@ -10,6 +10,10 @@ from pathlib import Path
 
 CLAUDE_PROJECTS_DIR = Path.home() / ".claude" / "projects"
 
+# Skip sessions from these cwd prefixes — they're ToolEngrams' own
+# observer/consolidation sessions, not real user work.
+_SKIP_SLUGS = {"engram-observe-", "engram-consolidate-", "engram-experiment-"}
+
 
 @dataclass(slots=True)
 class SessionFile:
@@ -34,6 +38,11 @@ def collect_sessions(
         if not project_dir.is_dir():
             continue
         project_slug = project_dir.name
+
+        # Skip ToolEngrams' own sessions (observer, consolidation, experiments).
+        if any(project_slug.endswith(prefix) or prefix in project_slug
+               for prefix in _SKIP_SLUGS):
+            continue
 
         for jsonl in project_dir.glob("*.jsonl"):
             mtime = jsonl.stat().st_mtime
