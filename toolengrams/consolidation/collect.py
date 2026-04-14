@@ -37,7 +37,7 @@ def collect_sessions(
 
         for jsonl in project_dir.glob("*.jsonl"):
             mtime = jsonl.stat().st_mtime
-            mdate = datetime.fromtimestamp(mtime, tz=timezone.utc).date()
+            mdate = datetime.fromtimestamp(mtime).date()  # local time
             if mdate != target_date:
                 continue
 

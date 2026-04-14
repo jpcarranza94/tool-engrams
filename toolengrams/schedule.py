@@ -37,7 +37,7 @@ def generate_plist(use_agent: bool = False) -> str:
     <key>StartCalendarInterval</key>
     <dict>
         <key>Hour</key>
-        <integer>2</integer>
+        <integer>18</integer>
         <key>Minute</key>
         <integer>0</integer>
     </dict>

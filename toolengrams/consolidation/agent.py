@@ -69,12 +69,12 @@ def run_consolidation_agent(
             env=env,
             capture_output=True,
             text=True,
-            timeout=600,  # 10 minutes max
+            timeout=1800,  # 30 minutes max
         )
     except subprocess.TimeoutExpired:
         return AgentResult(
             report="", returncode=1, raw_stdout="", raw_stderr="",
-            error="Consolidation agent timed out (10 min)",
+            error="Consolidation agent timed out (30 min)",
         )
     except Exception as e:
         return AgentResult(
@@ -191,6 +191,8 @@ Your job is to review today's ({target_date}) sessions and evaluate how well the
 These are JSONL transcripts from today. Each line is a JSON object with a "message" field containing "role" (user/assistant) and "content" (text or tool_use/tool_result blocks). Memory injections appear as system-reminder blocks containing "PreToolUse" and "[memory: ...]".
 
 {session_list}
+
+**Triage strategy**: Start with the larger sessions (>100 KB) — those are real work sessions with substantive tool usage. Small sessions (<20 KB) are often quick one-off questions or automated tests — scan them with Grep but don't deep-read unless something interesting shows up. Focus your time on sessions where the user was actively using tools.
 
 ## Your Tasks
 
