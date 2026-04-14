@@ -1,60 +1,146 @@
 # ToolEngrams
 
-Tool-bound automatic memory recall for Claude Code.
+Tool-bound automatic memory for Claude Code. Memories are tied to specific tool-call patterns, surface automatically when Claude is about to act, and strengthen with use — like biological engrams.
 
-When Claude is about to run a tool (`git push`, `mycli -c`, `Read config.yml`, etc.), surface memories bound to that exact tool-call pattern — not because a semantic search hopes to match, but because the memory was explicitly filed under that pattern, strengthened every time it helped, and decayed when it didn't.
+## What it does
 
-The name is literal: an **engram** is the physical substrate of a memory in neuroscience — the biological trace left by experience. ToolEngrams are memory traces bound to tool-call patterns, reinforced with use, forgotten on request.
+When Claude is about to run a command (e.g., `git push`, `mycli -c`, `docker compose up`), ToolEngrams checks if there's a memory bound to that pattern and **blocks the call** until Claude has read it. Claude then retries with the memory in context — using the right flags, the right connection string, the right workflow.
 
-## Status
+Memories form automatically from your work sessions. A background observer watches tool calls and flags patterns worth remembering. A nightly consolidation agent reviews the day's sessions, prunes noise, and discovers patterns that were missed.
 
-v1 under construction. See `docs/design-v8.md` for the frozen design.
+## How it works
 
-## What makes this different
+Three hooks, three layers:
 
-Most prior art for agent memory (claude-mem, memsearch, rag-cli, etc.) indexes memory by content and retrieves by semantic similarity to the prompt — a "search across everything you know" model. ToolEngrams inverts that:
+| Hook | When | What |
+|---|---|---|
+| **PreToolUse** (deny) | Before every tool call | Surfaces matching memories, blocks until Claude reads them |
+| **PostToolUse** | After every tool call | Reinforces useful memories, spawns async observer |
+| **SessionStart** | Session begins | Tells Claude about the engram CLI |
 
-1. **Memories are bound to tool-call patterns at write time**, not searched at read time. Every memory answers "when should Claude see this?" explicitly.
-2. **Retrieval happens mid-turn, not at the prompt boundary.** When Claude is about to call `mycli -c "..."`, the hook retrieves memories bound to `(Bash, mycli)` and injects them before the tool dispatches.
-3. **Brain-like reinforcement.** Memories strengthen with use (`useful_count`), decay without (`last_surfaced_ts` + half-life), and can be forgotten in-session via soft demote.
-4. **Self-organizing vocabulary.** New memories cluster around existing tool-call touchpoints via a vocabulary-consolidation step at formation time, so the binding vocabulary converges on what actually matters in your work.
+Two formation layers:
 
-## Architecture at a glance
+| Layer | Model | When | Job |
+|---|---|---|---|
+| **Observer** | Haiku | After each nontrivial Bash call (async) | Fast candidate triage |
+| **Consolidator** | Opus | Daily at 6 PM | Thorough review, pruning, discovery |
 
-- **Canonical store:** SQLite at `~/.claude/tool-engrams/db.sqlite` — fully separate from Claude Code's harness-managed memory dir, zero interference.
-- **Retrieval:** tiered structural match on `(tool, head_token_sequence)` with path globs, plus keyword/FTS fallback. Embeddings deferred to v2.
-- **Hooks:** `PreToolUse` is the novel surface (memories surface when Claude is about to act), plus `SessionStart`, `UserPromptSubmit`, `PostToolUse` (failure subset).
-- **Relevance filter:** per-cluster Laplace-smoothed threshold with an absolute floor — handles cold-start cleanly without hand-tuned global constants.
-- **No daemon.** Every hook invocation is a self-contained `engram` call — SQLite + Python stdlib, zero external dependencies on the hot path.
+Neuroscience-inspired reinforcement:
 
-## CLI surface
+- **Hebbian learning** — memories that fire together strengthen their association
+- **Usefulness scoring** — memories that surface before successful tool calls get reinforced
+- **Sleep consolidation** — nightly agent replays the day and curates the memory store
+
+## Install
+
+```bash
+git clone https://github.com/jpcarranza94/tool-engrams.git
+cd tool-engrams
+./install.sh
+```
+
+The install script:
+1. Installs the `toolengrams` Python package (editable mode)
+2. Adds hooks to `~/.claude/settings.json`
+3. Symlinks skills (`/engram-remember`, `/engram-forget`, `/engram-recall`)
+4. Seeds example memories
+5. Optionally installs the 6 PM nightly consolidation schedule
+
+### Requirements
+
+- Python 3.10+
+- Claude Code >= 2.1.59
+
+### Manual install
+
+If you prefer to set things up yourself:
+
+```bash
+# Install the package.
+uv pip install --system -e .   # or: pip install -e .
+
+# Verify.
+engram status
+
+# Add hooks to settings.json (see install.sh for the JSON structure).
+# Symlink skills.
+ln -sf "$(pwd)/skills/engram-remember" ~/.claude/skills/engram-remember
+ln -sf "$(pwd)/skills/engram-forget" ~/.claude/skills/engram-forget
+ln -sf "$(pwd)/skills/engram-recall" ~/.claude/skills/engram-recall
+
+# Seed example memories.
+engram seed
+
+# Optional: install nightly consolidation.
+engram consolidate --install-schedule
+```
+
+## CLI
 
 ```
-engram pretool              # consumed by PreToolUse hook (reads JSON on stdin)
-engram session-start        # consumed by SessionStart hook
-engram user-prompt          # consumed by UserPromptSubmit hook
-engram post-failure         # consumed by PostToolUse hook (failure subset)
-engram remember <text>      # formation: extract triggers, insert memory [v1.5]
-engram forget <name>        # soft demote; --delete to archive [v1.5]
-engram pin <name>           # pin so reinforcement doesn't gate it [v1.5]
-engram recall <query>       # user-facing deep browse [v1.5]
-engram export               # dump to markdown for backup / git snapshot [v1.5]
-engram seed                 # insert a few example memories for smoke testing
+engram recall [query]       Browse and search memories
+engram recall --id N        Full detail on one memory
+engram recall --stats       Summary counts
+engram remember "<body>"    Manually create a memory
+engram forget "<name>"      Soft-demote a memory
+engram pin "<name>"         Pin/unpin a memory
+engram dashboard            Open HTML dashboard in browser
+engram monitor              Resource usage and observer activity
+engram status               Memory health JSON
+engram consolidate          Run nightly consolidation now
+engram consolidate --force  Re-run even if already ran today
+engram seed                 Insert example memories
+```
+
+## Architecture
+
+```
+~/.claude/tool-engrams/
+  db.sqlite          SQLite database (memories, triggers, associations, surfaces)
+  observer.log       Observer activity log
+  consolidate.log    Consolidation output
+
+~/.claude/settings.json    Hook configuration (added by install.sh)
+~/.claude/skills/          Skill symlinks (added by install.sh)
+```
+
+### Database schema
+
+- **memories** — content, type (feedback/reference), scope (global/project), reinforcement counters
+- **triggers** — tool_head (`Bash: git push`) or path_glob (`**/*.py`) bindings
+- **memory_associations** — Hebbian co-activation strength between memory pairs
+- **session_surfaces** — which memories surfaced when (for dedup + reinforcement)
+- **consolidation_runs** — nightly run log
+
+### Scoring formula
+
+```
+usefulness = (useful_count + 1) / (surface_count + 2)         # Laplace-smoothed
+recency    = exp(-days_since_last_surface / half_life)         # 30d feedback, 60d reference
+final      = structural_match × (0.5 + usefulness) × (0.5 + 0.5 × recency)
+           × (1 + association_boost)                           # Hebbian boost, max 30%
 ```
 
 ## Testing
 
 ```bash
-# Unit tests (fast, deterministic)
-pytest tests/
+# Unit tests (fast, 133 tests)
+pytest
 
-# End-to-end tests (slow, spawns real `claude -p`, opt-in)
+# E2E tests (spawns real claude -p sessions, opt-in)
 pytest tests/e2e/ -m e2e
 ```
 
-Every hook has an end-to-end test that seeds a memory in an isolated SQLite DB, wires the hook via a temp `.claude/settings.local.json`, and spawns `claude -p` to verify the memory actually reaches Claude's context window at runtime.
+## Uninstall
 
-## Requirements
-
-- Python 3.10+
-- Claude Code >= 2.1.59 (for auto-memory + full hook event set)
+```bash
+# Remove hooks from settings.json (manually edit or re-run without the hook entries).
+# Remove skills.
+rm ~/.claude/skills/engram-{remember,forget,recall}
+# Remove the consolidation schedule.
+engram consolidate --uninstall-schedule
+# Remove the database.
+rm -rf ~/.claude/tool-engrams/
+# Uninstall the package.
+pip uninstall toolengrams
+```
