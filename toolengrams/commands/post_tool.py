@@ -1,32 +1,26 @@
-"""PostToolUse hook command — success reinforcement.
+"""PostToolUse hook command — success reinforcement + async observer.
 
-After a tool call completes, look up which memories were surfaced for that
-tool_use_id during the PreToolUse phase. If the tool call succeeded (no error),
-bump useful_count on those memories. This is the positive feedback loop that
-lets good memories strengthen over time.
+Two jobs:
+  1. (Sync) Bump useful_count for memories that were surfaced on this tool call.
+  2. (Async) Spawn a background observer that reads recent context and decides
+     if there's a new tool-usage pattern worth remembering.
 
-Input JSON on stdin (subset):
-    {
-      "session_id": "...",
-      "cwd": "...",
-      "hook_event_name": "PostToolUse",
-      "tool_name": "Bash",
-      "tool_use_id": "toolu_abc123",
-      "tool_response": "command output...",
-      "tool_input": {"command": "git status"},
-      "is_error": false
-    }
-
-Output: {} (no injection — reinforcement is silent).
+Output: {} (no injection — both jobs are silent).
 """
 
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import sys
+from pathlib import Path
 from typing import Any
 
 from .. import db
+
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+PYTHON_BIN = sys.executable
 
 
 def main() -> int:
@@ -54,37 +48,48 @@ def _run(payload: dict[str, Any]) -> int:
         _emit({})
         return 0
 
-    # Only reinforce on success — errors are neutral (the memory may have
-    # been trying to help avoid the error).
-    if is_error:
-        _emit({})
-        return 0
+    # Reinforcement: only on success.
+    if not is_error:
+        conn = db.connect()
+        try:
+            rows = conn.execute(
+                "SELECT memory_id FROM session_surfaces "
+                "WHERE session_id = ? AND tool_use_id = ? AND hook = 'pre_tool_use'",
+                (session_id, tool_use_id),
+            ).fetchall()
+            if rows:
+                memory_ids = [r["memory_id"] for r in rows]
+                placeholders = ",".join("?" * len(memory_ids))
+                conn.execute(
+                    f"UPDATE memories SET useful_count = useful_count + 1 "
+                    f"WHERE id IN ({placeholders})",
+                    memory_ids,
+                )
+        finally:
+            conn.close()
 
-    conn = db.connect()
+    # Async observer: spawn background process to analyze this tool call.
+    _spawn_observer(payload)
+
+    _emit({})
+    return 0
+
+
+def _spawn_observer(payload: dict[str, Any]) -> None:
+    """Fire-and-forget: spawn engram observe as a background process."""
     try:
-        # Find memories that were surfaced for this exact tool call.
-        rows = conn.execute(
-            "SELECT memory_id FROM session_surfaces "
-            "WHERE session_id = ? AND tool_use_id = ? AND hook = 'pre_tool_use'",
-            (session_id, tool_use_id),
-        ).fetchall()
-
-        if not rows:
-            _emit({})
-            return 0
-
-        memory_ids = [r["memory_id"] for r in rows]
-        placeholders = ",".join("?" * len(memory_ids))
-        conn.execute(
-            f"UPDATE memories SET useful_count = useful_count + 1 "
-            f"WHERE id IN ({placeholders})",
-            memory_ids,
+        payload_json = json.dumps(payload)
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(REPO_ROOT)
+        subprocess.Popen(
+            [PYTHON_BIN, "-m", "toolengrams", "observe", payload_json],
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,  # fully detach from parent
         )
-
-        _emit({})
-        return 0
-    finally:
-        conn.close()
+    except Exception:
+        pass  # observer is best-effort — never block the hook
 
 
 def _detect_error(payload: dict[str, Any]) -> bool:

@@ -29,20 +29,11 @@ def test_session_start_emits_guidance(monkeypatch):
     assert "engram remember" in ctx
 
 
-def test_guidance_explains_rejection(monkeypatch):
+def test_guidance_mentions_manual_commands(monkeypatch):
     result = _run(
         {"session_id": "s2", "cwd": "/tmp/foo", "hook_event_name": "SessionStart", "source": "startup"},
         monkeypatch,
     )
     ctx = result["hookSpecificOutput"]["additionalContext"]
-    assert "backticked commands" in ctx
-    assert "rejected" in ctx
-
-
-def test_guidance_separates_from_builtin_memory(monkeypatch):
-    result = _run(
-        {"session_id": "s3", "cwd": "/tmp/foo", "hook_event_name": "SessionStart", "source": "startup"},
-        monkeypatch,
-    )
-    ctx = result["hookSpecificOutput"]["additionalContext"]
-    assert "built-in memory" in ctx.lower() or "Claude's built-in" in ctx
+    assert "engram forget" in ctx
+    assert "engram recall" in ctx

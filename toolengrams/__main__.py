@@ -15,6 +15,7 @@ from .commands import (
     consolidate,
     dashboard,
     forget,
+    observe,
     pin,
     post_tool,
     pretool,
@@ -36,6 +37,7 @@ _SELF_PARSING = {
     "consolidate": consolidate.main,
     "status": status.main,
     "dashboard": dashboard.main,
+    "observe": observe.main,
 }
 
 
