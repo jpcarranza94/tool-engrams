@@ -26,11 +26,19 @@ def test_backtick_single_token_cli_emits_head1():
     assert ("mycli",) in _heads(c, "Bash")
 
 
-def test_backtick_subcommand_emits_head1_and_head2():
+def test_backtick_subcommand_emits_head2_only():
+    """When head-2 exists, head-1 is suppressed (too broad)."""
     c = extract_candidates("Use `git push origin main` to publish.")
     heads = _heads(c, "Bash")
-    assert ("git",) in heads
     assert ("git", "push") in heads
+    assert ("git",) not in heads  # suppressed — git alone is too noisy
+
+
+def test_backtick_subcommand_without_head2_emits_head1():
+    """Bare subcommand tool with no args still gets head-1."""
+    c = extract_candidates("Run `git` to see help.")
+    heads = _heads(c, "Bash")
+    assert ("git",) in heads
 
 
 def test_backtick_non_subcommand_tool_only_emits_head1():
@@ -125,9 +133,9 @@ def test_consolidation_counts_existing_memories(temp_db):
     candidates = extract_candidates("Use `git status` to check")
     annotated = consolidate_vocabulary(temp_db, candidates)
 
-    # (Bash, git) exists on 1 memory; (Bash, git status) exists on 0.
+    # Only (git, status) is emitted now (head-1 suppressed). It has 0 existing matches.
     by_head = {c.head: c.existing_memories for c in annotated if c.kind == "tool_head"}
-    assert by_head[("git",)] == 1
+    assert ("git",) not in by_head  # suppressed
     assert by_head[("git", "status")] == 0
 
 

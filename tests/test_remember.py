@@ -83,8 +83,8 @@ def test_extraction_emits_expected_triggers(temp_db, monkeypatch, capsys):
         for t in payload["extracted_triggers"]
         if t["kind"] == "tool_head"
     }
-    assert ("Bash", ("git",)) in heads
     assert ("Bash", ("git", "push")) in heads
+    assert ("Bash", ("git",)) not in heads  # head-1 suppressed when head-2 exists
     assert ("WebFetch", ("example.com",)) in heads
 
     globs = {
@@ -102,8 +102,8 @@ def test_triggers_are_persisted_to_db(temp_db, monkeypatch, capsys):
         "SELECT kind, tool_name, head_joined, head_length FROM triggers ORDER BY id",
     )
     kinds = [(r["kind"], r["tool_name"], r["head_joined"], r["head_length"]) for r in rows]
-    assert ("tool_head", "Bash", "git", 1) in kinds
     assert ("tool_head", "Bash", "git push", 2) in kinds
+    assert ("tool_head", "Bash", "git", 1) not in kinds  # suppressed
 
 
 # ---------- extra triggers ----------
@@ -195,7 +195,7 @@ def test_dedup_updates_existing_on_trigger_overlap(temp_db, monkeypatch, capsys)
     p2 = _run(["`git push` -- never force push actually"], monkeypatch, capsys=capsys)
     assert p2["action"] == "updated"
     assert p2["memory"]["id"] == mid
-    assert p2["existing_match"]["overlap_count"] >= 2
+    assert p2["existing_match"]["overlap_count"] >= 1  # (git, push) shared + name match
 
     rows = _rows(temp_db, "SELECT COUNT(*) AS c FROM memories WHERE archived_ts IS NULL")
     assert rows[0]["c"] == 1  # only one memory, not two
@@ -214,11 +214,11 @@ def test_dedup_allows_distinct_memories(temp_db, monkeypatch, capsys):
     assert rows[0]["c"] == 2
 
 
-def test_dedup_by_name_match_with_single_trigger_overlap(temp_db, monkeypatch, capsys):
-    """Same name + 1 shared trigger → should update."""
-    _run(["--name", "git rule", "`git push` original"], monkeypatch, capsys=capsys)
-    p2 = _run(["--name", "git rule", "`git status` updated"], monkeypatch, capsys=capsys)
-    # (git) head overlaps, same name → update
+def test_dedup_same_trigger_different_body_updates(temp_db, monkeypatch, capsys):
+    """Same trigger (git push) with different body → should update."""
+    _run(["--name", "git push rule", "`git push` -- always to origin"], monkeypatch, capsys=capsys)
+    p2 = _run(["--name", "git push updated", "`git push` -- with lease"], monkeypatch, capsys=capsys)
+    # (git, push) overlaps → update
     assert p2["action"] == "updated"
 
     rows = _rows(temp_db, "SELECT COUNT(*) AS c FROM memories WHERE archived_ts IS NULL")
@@ -256,5 +256,5 @@ def test_consolidation_counts_on_update(temp_db, monkeypatch, capsys):
         for t in payload["extracted_triggers"]
         if t["kind"] == "tool_head"
     }
-    assert counts[("Bash", ("git",))] == 1
+    # Only (git, push) emitted — head-1 suppressed
     assert counts[("Bash", ("git", "push"))] == 1

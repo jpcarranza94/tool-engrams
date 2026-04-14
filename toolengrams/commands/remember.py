@@ -37,8 +37,10 @@ DEFAULT_SCOPE = "project"
 _NAME_MAX = 80
 
 # Dedup: if an existing memory shares this many triggers with the new one,
-# update instead of insert. Also updates if normalized names match.
-_DEDUP_TRIGGER_THRESHOLD = 2
+# update instead of insert. Also updates if normalized names match + 1 overlap.
+# Set to 1 because we suppress head-1 for subcommand tools (git push emits
+# only (git, push), not (git) + (git, push)).
+_DEDUP_TRIGGER_THRESHOLD = 1
 
 
 def main(argv: list[str] | None = None) -> int:

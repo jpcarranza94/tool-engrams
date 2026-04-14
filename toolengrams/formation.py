@@ -104,13 +104,9 @@ def _extract_backticks(body: str, add) -> None:
         if not _CLI_NAME_RE.match(head1):
             continue
 
-        add(FormationCandidate(
-            kind="tool_head",
-            tool_name="Bash",
-            head=(head1,),
-            source="backtick",
-        ))
-
+        # For subcommand tools (git, aws, docker, etc.), prefer the more
+        # specific head-2 trigger. Only emit head-1 if no head-2 exists.
+        emitted_head2 = False
         if head1 in _SUBCOMMAND_TOOLS and len(tokens) >= 2:
             head2 = tokens[1]
             if _CLI_NAME_RE.match(head2):
@@ -120,6 +116,15 @@ def _extract_backticks(body: str, add) -> None:
                     head=(head1, head2),
                     source="backtick",
                 ))
+                emitted_head2 = True
+
+        if not emitted_head2:
+            add(FormationCandidate(
+                kind="tool_head",
+                tool_name="Bash",
+                head=(head1,),
+                source="backtick",
+            ))
 
 
 def _extract_paths(body: str, add) -> None:
