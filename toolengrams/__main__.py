@@ -13,6 +13,7 @@ from typing import Callable
 
 from .commands import (
     consolidate,
+    dashboard,
     forget,
     pin,
     post_tool,
@@ -34,6 +35,7 @@ _SELF_PARSING = {
     "recall": recall.main,
     "consolidate": consolidate.main,
     "status": status.main,
+    "dashboard": dashboard.main,
 }
 
 
@@ -58,7 +60,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("pin", help="Pin/unpin a memory", add_help=False)
     sub.add_parser("recall", help="Browse and search the memory store", add_help=False)
     sub.add_parser("consolidate", help="Nightly consolidation — replay and prune", add_help=False)
-    sub.add_parser("status", help="Memory health dashboard", add_help=False)
+    sub.add_parser("status", help="Memory health JSON", add_help=False)
+    sub.add_parser("dashboard", help="Open HTML dashboard in browser")
 
     sub.add_parser("export", help="Dump memories to markdown (stub)")
 
