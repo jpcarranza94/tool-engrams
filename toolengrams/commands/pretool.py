@@ -44,6 +44,7 @@ from ..associations import (
 )
 from ..extract import extract_hints
 from ..models import Candidate
+from ..prompts.pretool import format_injection
 from ..rank import (
     compute_cluster_stats,
     filter_candidates,
@@ -51,9 +52,6 @@ from ..rank import (
     retrieve_candidates,
 )
 
-# Cap the injected context to stay well under the 10k-char hook limit.
-MAX_INJECTION_CHARS = 6000
-MAX_BODY_CHARS = 1200
 
 # Tool whitelist — only these carry user-facing PreToolUse bindings.
 WHITELIST = {"Bash", "Read", "Edit", "Write", "MultiEdit", "Grep", "Glob", "WebFetch", "NotebookEdit"}
@@ -133,7 +131,7 @@ def _run(payload: dict[str, Any]) -> int:
         now_ts=now_ts,
     )
 
-    additional_context = _format_injection(selected)
+    additional_context = format_injection(selected)
     _emit(
         {
             "hookSpecificOutput": {
@@ -194,21 +192,6 @@ def _bump_surface_counts(conn, candidates: list[Candidate], now_ts: int) -> None
         (now_ts, *ids),
     )
 
-
-def _format_injection(candidates: list[Candidate]) -> str:
-    parts: list[str] = []
-    remaining = MAX_INJECTION_CHARS
-    for c in candidates:
-        body = c.body.strip()
-        if len(body) > MAX_BODY_CHARS:
-            body = body[: MAX_BODY_CHARS - 1].rstrip() + "…"
-        block = f"[memory: {c.name}]\n{body}"
-        if len(block) + 2 > remaining:
-            break
-        parts.append(block)
-        remaining -= len(block) + 2
-    header = "Relevant memories for this tool call:\n\n"
-    return header + "\n\n".join(parts) if parts else ""
 
 
 def _emit(obj: dict[str, Any]) -> None:
