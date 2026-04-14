@@ -15,6 +15,7 @@ from .commands import (
     consolidate,
     dashboard,
     forget,
+    monitor,
     observe,
     pin,
     post_tool,
@@ -38,6 +39,7 @@ _SELF_PARSING = {
     "status": status.main,
     "dashboard": dashboard.main,
     "observe": observe.main,
+    "monitor": monitor.main,
 }
 
 
@@ -64,6 +66,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("consolidate", help="Nightly consolidation — replay and prune", add_help=False)
     sub.add_parser("status", help="Memory health JSON", add_help=False)
     sub.add_parser("dashboard", help="Open HTML dashboard in browser")
+    sub.add_parser("monitor", help="Resource usage and observer activity", add_help=False)
 
     sub.add_parser("export", help="Dump memories to markdown (stub)")
 

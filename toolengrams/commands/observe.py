@@ -30,6 +30,7 @@ from ..transcript import read_recent_context
 
 CLAUDE_BIN = shutil.which("claude")
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+LOG_PATH = Path.home() / ".claude" / "tool-engrams" / "observer.log"
 
 _SKIP_HEADS = {
     "ls", "echo", "cat", "head", "tail", "wc", "pwd", "which", "true",
@@ -55,6 +56,17 @@ def main(argv: list[str] | None = None) -> int:
     return _observe(payload)
 
 
+def _log(msg: str) -> None:
+    """Append a line to the observer log for monitoring."""
+    try:
+        import time
+        ts = time.strftime("%Y-%m-%d %H:%M:%S")
+        with open(LOG_PATH, "a") as f:
+            f.write(f"{ts} {msg}\n")
+    except Exception:
+        pass
+
+
 def _observe(payload: dict) -> int:
     if not CLAUDE_BIN:
         return 0
@@ -78,6 +90,8 @@ def _observe(payload: dict) -> int:
     context = read_recent_context(transcript_path, session_id)
     if not context:
         return 0
+
+    _log(f"OBSERVE cmd={first_token} len={len(command)}")
 
     existing = get_existing_memories_summary(db.connect())
     prompt = _build_prompt(command, context, existing)
@@ -108,8 +122,10 @@ def _observe(payload: dict) -> int:
 
     response_text = parse_claude_json_output(proc.stdout)
     if not response_text:
+        _log("SKIP no-response")
         return 0
 
+    _log(f"RESULT {response_text[:100]}")
     _try_save_from_judgment(response_text)
     return 0
 
