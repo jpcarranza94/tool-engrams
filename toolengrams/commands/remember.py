@@ -21,13 +21,14 @@ import time
 from typing import Any
 
 from .. import db
+from ..dedup import _insert_extra_triggers, find_overlapping_memory, update_existing_memory
 from ..formation import (
     FormationCandidate,
     consolidate_vocabulary,
     extract_candidates,
     insert_candidate_triggers,
 )
-from .pretool import slugify_cwd
+from ..utils import slugify_cwd
 
 VALID_TYPES = {"feedback", "reference"}
 VALID_SCOPES = {"global", "project"}
@@ -35,12 +36,6 @@ DEFAULT_TYPE = "reference"
 DEFAULT_SCOPE = "project"
 
 _NAME_MAX = 80
-
-# Dedup: if an existing memory shares this many triggers with the new one,
-# update instead of insert. Also updates if normalized names match + 1 overlap.
-# Set to 1 because we suppress head-1 for subcommand tools (git push emits
-# only (git, push), not (git) + (git, push)).
-_DEDUP_TRIGGER_THRESHOLD = 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -95,7 +90,7 @@ def main(argv: list[str] | None = None) -> int:
 
         # --- Gate 2: dedup check ---
         project_slug = _resolve_project_slug(args.scope, args.project_slug)
-        existing = _find_overlapping_memory(conn, name, all_triggers, project_slug)
+        existing = find_overlapping_memory(conn, name, all_triggers, project_slug)
 
         if args.dry_run:
             payload = _build_payload(
@@ -116,7 +111,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if existing:
-            memory_id = _update_existing(
+            memory_id = update_existing_memory(
                 conn=conn,
                 existing_id=existing["id"],
                 name=name,
@@ -251,119 +246,6 @@ def _parse_extra_triggers(specs: list[str]) -> list[dict[str, Any]]:
     return out
 
 
-# ---------- dedup ----------
-
-
-def _normalize_name(name: str) -> str:
-    """Lowercase, strip punctuation, collapse whitespace."""
-    import re
-    return re.sub(r"[^a-z0-9]+", " ", name.lower()).strip()
-
-
-def _find_overlapping_memory(
-    conn,
-    name: str,
-    candidates: list[FormationCandidate],
-    project_slug: str | None,
-) -> dict | None:
-    """Find an existing non-archived memory that overlaps with the new one.
-
-    Returns the best match as a dict {id, name, overlap_count, match_reason}
-    or None if no strong overlap.
-    """
-    norm_name = _normalize_name(name)
-
-    # Collect trigger signatures from candidates.
-    new_heads = set()
-    new_globs = set()
-    for c in candidates:
-        if c.kind == "tool_head" and c.head:
-            new_heads.add((c.tool_name or "", " ".join(c.head)))
-        elif c.kind == "path_glob" and c.path_pattern:
-            new_globs.add(c.path_pattern)
-
-    if not new_heads and not new_globs:
-        return None
-
-    # Query existing memories + their triggers.
-    rows = conn.execute(
-        "SELECT m.id, m.name, t.kind, t.tool_name, t.head_joined, t.path_pattern "
-        "FROM memories m JOIN triggers t ON t.memory_id = m.id "
-        "WHERE m.archived_ts IS NULL "
-        "AND (m.scope = 'global' OR m.project_slug = ?)",
-        (project_slug,),
-    ).fetchall()
-
-    # Score each existing memory by trigger overlap.
-    scores: dict[int, dict] = {}
-    for row in rows:
-        mid = row["id"]
-        if mid not in scores:
-            scores[mid] = {"id": mid, "name": row["name"], "overlap": 0, "reason": []}
-
-        if row["kind"] == "tool_head":
-            key = (row["tool_name"] or "", row["head_joined"] or "")
-            if key in new_heads:
-                scores[mid]["overlap"] += 1
-                scores[mid]["reason"].append(f"tool_head:{key[1]}")
-        elif row["kind"] == "path_glob":
-            if row["path_pattern"] in new_globs:
-                scores[mid]["overlap"] += 1
-                scores[mid]["reason"].append(f"path_glob:{row['path_pattern']}")
-
-    # Find best match.
-    best = None
-    for s in scores.values():
-        # Strong overlap: ≥ threshold shared triggers
-        if s["overlap"] >= _DEDUP_TRIGGER_THRESHOLD:
-            if best is None or s["overlap"] > best["overlap"]:
-                best = s
-        # Or: same normalized name with any trigger overlap
-        elif s["overlap"] >= 1 and _normalize_name(s["name"]) == norm_name:
-            s["reason"].append("name_match")
-            if best is None or s["overlap"] > best["overlap"]:
-                best = s
-
-    if best:
-        return {
-            "id": best["id"],
-            "name": best["name"],
-            "overlap_count": best["overlap"],
-            "match_reason": ", ".join(best["reason"]),
-        }
-    return None
-
-
-# ---------- insert / update ----------
-
-
-def _update_existing(
-    *,
-    conn,
-    existing_id: int,
-    name: str,
-    description: str,
-    body: str,
-    type_: str,
-    pinned: bool,
-    candidates: list[FormationCandidate],
-    extra_triggers: list[dict[str, Any]],
-) -> int:
-    """Replace body/name/type on an existing memory, merge triggers."""
-    now_ts = int(time.time())
-    with db.transaction(conn):
-        conn.execute(
-            "UPDATE memories SET name = ?, description = ?, body = ?, type = ?, "
-            "pinned = ?, created_ts = ? WHERE id = ?",
-            (name, description, body, type_, 1 if pinned else 0, now_ts, existing_id),
-        )
-        # Remove old triggers and replace with new extraction.
-        conn.execute("DELETE FROM triggers WHERE memory_id = ?", (existing_id,))
-        insert_candidate_triggers(conn, existing_id, candidates)
-        _insert_extra_triggers(conn, existing_id, extra_triggers)
-    return existing_id
-
-
 def _insert(
     *,
     conn,
@@ -390,25 +272,6 @@ def _insert(
         _insert_extra_triggers(conn, memory_id, extra_triggers)
     return memory_id
 
-
-def _insert_extra_triggers(conn, memory_id: int, extras: list[dict[str, Any]]) -> None:
-    """Mirrors seed._insert_triggers; kept local so remember.py owns its own schema writes."""
-    for t in extras:
-        kind = t["kind"]
-        if kind == "tool_head":
-            head = t["head"]
-            conn.execute(
-                "INSERT INTO triggers "
-                "(memory_id, kind, tool_name, head_joined, head_length) "
-                "VALUES (?, 'tool_head', ?, ?, ?)",
-                (memory_id, t["tool_name"], " ".join(head), len(head)),
-            )
-        elif kind == "path_glob":
-            conn.execute(
-                "INSERT INTO triggers (memory_id, kind, path_pattern) "
-                "VALUES (?, 'path_glob', ?)",
-                (memory_id, t["path_pattern"]),
-            )
 
 
 # ---------- output payload ----------

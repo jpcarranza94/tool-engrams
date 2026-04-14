@@ -21,6 +21,9 @@ import tempfile
 
 from .. import db
 from ..prompts.observer import OBSERVER_SYSTEM
+from ..queries import get_existing_memories_summary
+from ..subprocess_utils import parse_claude_json_output, write_agent_settings
+from ..transcript import find_transcript, read_recent_context
 
 CLAUDE_BIN = shutil.which("claude")
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -35,15 +38,6 @@ _SKIP_HEADS = {
 
 # Minimum command length worth observing.
 _MIN_CMD_LENGTH = 20
-
-# Max recent JSONL lines to scan for context.
-_MAX_CONTEXT_LINES = 200
-
-# Max tool call excerpts to include (most recent).
-_MAX_TOOL_EXCERPTS = 10
-
-# Max user message excerpts to include (ALL from session, truncated).
-_MAX_USER_MSG_CHARS = 300
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -84,13 +78,13 @@ def _observe(payload: dict) -> int:
         return 0
 
     # Get recent context from the session transcript.
-    transcript_file = _find_transcript(transcript_path, session_id)
-    context = _read_recent_context(transcript_path, session_id)
+    transcript_file = find_transcript(transcript_path, session_id)
+    context = read_recent_context(transcript_path, session_id)
     if not context:
         return 0
 
     # Get existing memories for dedup context.
-    existing = _get_existing_memories()
+    existing = get_existing_memories_summary(db.connect())
 
     # Build prompt with file path so the agent can explore.
     prompt = _build_prompt(command, context, existing, transcript_file)
@@ -98,7 +92,7 @@ def _observe(payload: dict) -> int:
     # Set up a temp working dir with permissions for the agent.
     work_dir = tempfile.mkdtemp(prefix="engram-observe-")
     work_path = Path(work_dir)
-    _write_observer_settings(work_path)
+    write_agent_settings(work_path, ["Read", "Grep", "Bash(engram *)"])
 
     env = os.environ.copy()
     env["ENGRAM_DB"] = os.environ.get("ENGRAM_DB", str(Path.home() / ".claude" / "tool-engrams" / "db.sqlite"))
@@ -120,17 +114,7 @@ def _observe(payload: dict) -> int:
 
     # The agent may have already run engram remember directly.
     # Also check if it returned a JSON judgment in its response.
-    response_text = ""
-    for line in proc.stdout.splitlines():
-        line = line.strip()
-        if line.startswith("{"):
-            try:
-                outer = json.loads(line)
-                response_text = outer.get("result", "")
-                break
-            except json.JSONDecodeError:
-                continue
-
+    response_text = parse_claude_json_output(proc.stdout)
     if not response_text:
         return 0
 
@@ -140,20 +124,6 @@ def _observe(payload: dict) -> int:
     return 0
 
 
-def _write_observer_settings(work_dir: Path) -> None:
-    """Grant the observer agent Read, Grep, and engram access."""
-    settings_dir = work_dir / ".claude"
-    settings_dir.mkdir(parents=True, exist_ok=True)
-    settings = {
-        "permissions": {
-            "allow": [
-                "Read",
-                "Grep",
-                "Bash(engram *)",
-            ]
-        }
-    }
-    (settings_dir / "settings.local.json").write_text(json.dumps(settings, indent=2))
 
 
 def _try_save_from_judgment(response_text: str) -> None:
@@ -188,95 +158,6 @@ def _try_save_from_judgment(response_text: str) -> None:
     from .remember import main as remember_main
     remember_main([body, "--type", type_, "--scope", scope, "--name", name])
 
-
-def _read_recent_context(transcript_path: str, session_id: str) -> str:
-    """Extract ALL user prompts + recent tool calls from the session.
-
-    User prompts carry intent and corrections — they're the most valuable
-    signal for deciding if a tool pattern is worth remembering. We include
-    every user message from the entire session, plus the most recent tool
-    calls for immediate context.
-    """
-    path = _find_transcript(transcript_path, session_id)
-    if not path:
-        return ""
-
-    try:
-        with open(path) as f:
-            lines = f.readlines()
-    except Exception:
-        return ""
-
-    user_messages: list[str] = []
-    tool_calls: list[str] = []
-
-    for line in lines[-_MAX_CONTEXT_LINES:]:
-        try:
-            obj = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-
-        msg = obj.get("message", {})
-        role = msg.get("role", "")
-        content = msg.get("content", "")
-
-        # Collect ALL user messages — they carry corrections and intent.
-        if role == "user" and isinstance(content, str):
-            text = content.strip()
-            if text and not text.startswith("<"):  # skip system tags
-                user_messages.append(f"USER: {text[:_MAX_USER_MSG_CHARS]}")
-
-        # Collect recent tool calls.
-        if isinstance(content, list):
-            for block in content:
-                if block.get("type") == "tool_use" and block.get("name") == "Bash":
-                    cmd = block.get("input", {}).get("command", "")
-                    if cmd:
-                        tool_calls.append(f"TOOL: {cmd[:300]}")
-                elif block.get("type") == "tool_result":
-                    rc = block.get("content", "")
-                    text = rc if isinstance(rc, str) else str(rc)
-                    if text and len(text) > 5:
-                        tool_calls.append(f"RESULT: {text[:200]}")
-
-    # All user messages + last N tool calls.
-    parts = []
-    if user_messages:
-        parts.append("=== User messages (full session) ===")
-        parts.extend(user_messages)
-    if tool_calls:
-        parts.append(f"\n=== Recent tool calls (last {_MAX_TOOL_EXCERPTS}) ===")
-        parts.extend(tool_calls[-_MAX_TOOL_EXCERPTS * 2:])  # *2 for TOOL+RESULT pairs
-
-    return "\n".join(parts)
-
-
-def _find_transcript(transcript_path: str, session_id: str) -> Path | None:
-    """Locate the session JSONL file."""
-    if transcript_path and Path(transcript_path).exists():
-        return Path(transcript_path)
-
-    projects = Path.home() / ".claude" / "projects"
-    if projects.is_dir():
-        for d in projects.iterdir():
-            if d.is_dir():
-                candidate = d / f"{session_id}.jsonl"
-                if candidate.exists():
-                    return candidate
-    return None
-
-
-def _get_existing_memories() -> str:
-    conn = db.connect()
-    try:
-        rows = conn.execute(
-            "SELECT name, body FROM memories WHERE archived_ts IS NULL ORDER BY id"
-        ).fetchall()
-        if not rows:
-            return "No existing memories."
-        return "\n".join(f"- {r['name']}: {r['body'][:100]}" for r in rows)
-    finally:
-        conn.close()
 
 
 def _build_prompt(command: str, context: str, existing: str,

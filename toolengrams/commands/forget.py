@@ -17,6 +17,7 @@ import sys
 import time
 
 from .. import db
+from ..queries import find_memory, fts_quote
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -48,66 +49,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-# ---------- lookup ----------
-
-
-def _find_memory(conn, name: str):
-    """Find a memory by exact name, then FTS, then LIKE. Returns Row or None."""
-    row = conn.execute(
-        "SELECT id, name, surface_count, useful_count, archived_ts "
-        "FROM memories WHERE name = ? AND archived_ts IS NULL",
-        (name,),
-    ).fetchone()
-    if row:
-        return row
-
-    # FTS match
-    rows = conn.execute(
-        "SELECT m.id, m.name, m.surface_count, m.useful_count, m.archived_ts "
-        "FROM memories m JOIN memories_fts f ON m.id = f.rowid "
-        "WHERE memories_fts MATCH ? AND m.archived_ts IS NULL "
-        "ORDER BY rank LIMIT 1",
-        (_fts_quote(name),),
-    ).fetchall()
-    if rows:
-        return rows[0]
-
-    # LIKE fallback
-    row = conn.execute(
-        "SELECT id, name, surface_count, useful_count, archived_ts "
-        "FROM memories WHERE name LIKE ? AND archived_ts IS NULL LIMIT 1",
-        (f"%{name}%",),
-    ).fetchone()
-    return row
-
-
-def _find_memory_including_archived(conn, name: str):
-    """Like _find_memory but also searches archived memories (for --restore)."""
-    row = conn.execute(
-        "SELECT id, name, surface_count, useful_count, archived_ts "
-        "FROM memories WHERE name = ?",
-        (name,),
-    ).fetchone()
-    if row:
-        return row
-    row = conn.execute(
-        "SELECT id, name, surface_count, useful_count, archived_ts "
-        "FROM memories WHERE name LIKE ? LIMIT 1",
-        (f"%{name}%",),
-    ).fetchone()
-    return row
-
-
-def _fts_quote(text: str) -> str:
-    tokens = text.split()
-    return " OR ".join(f'"{t}"' for t in tokens if t)
-
-
 # ---------- actions ----------
 
 
 def _forget_one(conn, name: str, hard_delete: bool) -> int:
-    row = _find_memory(conn, name)
+    row = find_memory(conn, name)
     if not row:
         print(json.dumps({"error": "not_found", "query": name}))
         return 1
@@ -140,7 +86,7 @@ def _forget_topic(conn, keyword: str, hard_delete: bool) -> int:
         "SELECT m.id, m.name FROM memories m "
         "JOIN memories_fts f ON m.id = f.rowid "
         "WHERE memories_fts MATCH ? AND m.archived_ts IS NULL",
-        (_fts_quote(keyword),),
+        (fts_quote(keyword),),
     ).fetchall()
 
     if not rows:
@@ -171,7 +117,7 @@ def _forget_topic(conn, keyword: str, hard_delete: bool) -> int:
 
 
 def _restore(conn, name: str) -> int:
-    row = _find_memory_including_archived(conn, name)
+    row = find_memory(conn, name, include_archived=True)
     if not row:
         print(json.dumps({"error": "not_found", "query": name}))
         return 1

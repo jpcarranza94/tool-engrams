@@ -45,6 +45,7 @@ from ..associations import (
 from ..extract import extract_hints
 from ..models import Candidate
 from ..prompts.pretool import format_injection
+from ..utils import slugify_cwd
 from ..rank import (
     compute_cluster_stats,
     filter_candidates,
@@ -146,10 +147,6 @@ def _run(payload: dict[str, Any]) -> int:
 
 # ---------- helpers ----------
 
-
-def slugify_cwd(cwd: str) -> str:
-    """Match Claude Code's project-slug convention: `/` → `-`."""
-    return cwd.replace("/", "-")
 
 
 def _already_surfaced_this_session(conn, session_id: str) -> set[int]:

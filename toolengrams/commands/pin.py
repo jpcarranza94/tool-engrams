@@ -11,6 +11,7 @@ import json
 import sys
 
 from .. import db
+from ..queries import find_memory
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -21,19 +22,7 @@ def main(argv: list[str] | None = None) -> int:
 
     conn = db.connect()
     try:
-        row = conn.execute(
-            "SELECT id, name, pinned FROM memories "
-            "WHERE name = ? AND archived_ts IS NULL",
-            (args.name,),
-        ).fetchone()
-
-        if not row:
-            row = conn.execute(
-                "SELECT id, name, pinned FROM memories "
-                "WHERE name LIKE ? AND archived_ts IS NULL LIMIT 1",
-                (f"%{args.name}%",),
-            ).fetchone()
-
+        row = find_memory(conn, args.name)
         if not row:
             print(json.dumps({"error": "not_found", "query": args.name}))
             return 1
