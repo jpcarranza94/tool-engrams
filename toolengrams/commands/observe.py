@@ -17,10 +17,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+import tempfile
+
 from .. import db
 from ..prompts.observer import OBSERVER_SYSTEM
 
 CLAUDE_BIN = shutil.which("claude")
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 # Only observe Bash calls with nontrivial commands.
 # Simple commands (ls, echo, cat, head, tail, wc) are not worth observing.
@@ -81,6 +84,7 @@ def _observe(payload: dict) -> int:
         return 0
 
     # Get recent context from the session transcript.
+    transcript_file = _find_transcript(transcript_path, session_id)
     context = _read_recent_context(transcript_path, session_id)
     if not context:
         return 0
@@ -88,21 +92,34 @@ def _observe(payload: dict) -> int:
     # Get existing memories for dedup context.
     existing = _get_existing_memories()
 
-    # Build prompt.
-    prompt = _build_prompt(command, context, existing)
+    # Build prompt with file path so the agent can explore.
+    prompt = _build_prompt(command, context, existing, transcript_file)
 
-    # Call Haiku in background — fire and forget.
+    # Set up a temp working dir with permissions for the agent.
+    work_dir = tempfile.mkdtemp(prefix="engram-observe-")
+    work_path = Path(work_dir)
+    _write_observer_settings(work_path)
+
+    env = os.environ.copy()
+    env["ENGRAM_DB"] = os.environ.get("ENGRAM_DB", str(Path.home() / ".claude" / "tool-engrams" / "db.sqlite"))
+    env["PYTHONPATH"] = str(REPO_ROOT)
+
     try:
         proc = subprocess.run(
             [CLAUDE_BIN, "-p", "--model", "haiku", "--output-format", "json", prompt],
+            cwd=work_dir,
+            env=env,
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=60,
         )
     except (subprocess.TimeoutExpired, Exception):
         return 0
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
 
-    # Parse response.
+    # The agent may have already run engram remember directly.
+    # Also check if it returned a JSON judgment in its response.
     response_text = ""
     for line in proc.stdout.splitlines():
         line = line.strip()
@@ -117,42 +134,59 @@ def _observe(payload: dict) -> int:
     if not response_text:
         return 0
 
-    # Parse Haiku's judgment.
+    # Try to parse a JSON judgment from the response (if the agent
+    # returned one instead of calling engram remember directly).
+    _try_save_from_judgment(response_text)
+    return 0
+
+
+def _write_observer_settings(work_dir: Path) -> None:
+    """Grant the observer agent Read, Grep, and engram access."""
+    settings_dir = work_dir / ".claude"
+    settings_dir.mkdir(parents=True, exist_ok=True)
+    settings = {
+        "permissions": {
+            "allow": [
+                "Read",
+                "Grep",
+                "Bash(engram *)",
+            ]
+        }
+    }
+    (settings_dir / "settings.local.json").write_text(json.dumps(settings, indent=2))
+
+
+def _try_save_from_judgment(response_text: str) -> None:
+    """If the agent returned JSON instead of calling engram, save it."""
     try:
-        # Strip markdown fences if present.
         clean = response_text.strip()
         if clean.startswith("```"):
             lines = clean.splitlines()
             clean = "\n".join(l for l in lines if not l.startswith("```")).strip()
-
         judgment = json.loads(clean)
     except json.JSONDecodeError:
-        # Try finding JSON in the response.
         start = response_text.find("{")
         end = response_text.rfind("}") + 1
         if start < 0 or end <= start:
-            return 0
+            return
         try:
             judgment = json.loads(response_text[start:end])
         except json.JSONDecodeError:
-            return 0
+            return
 
     if judgment.get("action") == "skip":
-        return 0
+        return
 
-    # Has a memory to save.
     name = judgment.get("name", "")
     body = judgment.get("body", "")
     type_ = judgment.get("type", "reference")
     scope = judgment.get("scope", "global")
 
     if not name or not body or "`" not in body:
-        return 0
+        return
 
-    # Run engram remember (gets dedup + triggerless gate for free).
     from .remember import main as remember_main
     remember_main([body, "--type", type_, "--scope", scope, "--name", name])
-    return 0
 
 
 def _read_recent_context(transcript_path: str, session_id: str) -> str:
@@ -245,10 +279,20 @@ def _get_existing_memories() -> str:
         conn.close()
 
 
-def _build_prompt(command: str, context: str, existing: str) -> str:
+def _build_prompt(command: str, context: str, existing: str,
+                   transcript_file: Path | None = None) -> str:
+    transcript_section = ""
+    if transcript_file:
+        transcript_section = f"""
+## Session Transcript (for deeper investigation)
+
+File: {transcript_file}
+Use Read or Grep on this file if the excerpt suggests something worth investigating further.
+"""
+
     return f"""{OBSERVER_SYSTEM}
 
-## Recent Context
+## Recent Context (excerpt)
 
 {context}
 
@@ -261,4 +305,4 @@ def _build_prompt(command: str, context: str, existing: str) -> str:
 ## Existing Memories (don't duplicate)
 
 {existing}
-"""
+{transcript_section}"""
