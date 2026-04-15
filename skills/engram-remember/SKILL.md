@@ -1,11 +1,11 @@
 ---
 name: engram-remember
-description: "Save a tool-bound memory to ToolEngrams. Use ONLY for facts about how to use specific commands, CLIs, or files — not for user/project facts (those go in Claude's built-in memory)."
+description: "Save a tool-bound memory to ToolEngrams. Use ONLY for facts about how to use specific commands, CLIs, or files."
 ---
 
 # ToolEngrams: Remember
 
-Save a tool-bound memory. The body MUST include backticked commands or file paths — triggers are extracted from those patterns. A body without tool patterns is rejected.
+Save a tool-bound memory. Use `--trigger` to specify the exact command prefix the memory should fire on.
 
 ## When to Use
 
@@ -15,37 +15,55 @@ Save a tool-bound memory. The body MUST include backticked commands or file path
 
 ## When NOT to Use
 
-Do NOT save user preferences, project deadlines, team info, or anything that doesn't bind to a tool call. Those belong in Claude's built-in memory system (`Write` to `~/.claude/projects/.../memory/`), not ToolEngrams.
+Do NOT save user preferences, project deadlines, team info, or anything that doesn't bind to a tool call. Those belong in Claude's built-in memory system.
 
 ## Command
 
 ```bash
 engram remember "<body>" \
+  --trigger "<command prefix>" \
   --type <feedback|reference> \
   --scope <global|project> \
   [--name "<short name>"] \
-  [--extra-trigger "tool_head:Bash:git,push"] \
-  [--extra-trigger "path_glob:**/*.py"]
+  [--path "**/*.py"]
 ```
 
-## Writing Good Bodies
+## Examples
 
-Include backticked commands so triggers extract automatically:
+```bash
+# Correction: block git push --force, suggest --force-with-lease
+engram remember "Use --force-with-lease instead of --force to avoid overwriting others' work" \
+  --trigger "git push --force" \
+  --trigger "git push -f" \
+  --type feedback --name "git-force-with-lease"
 
-Good: "When running `mycli -c`, it's a read-only replica — SELECT only, no writes."
-→ Extracts: (Bash, mycli) tool_head trigger
+# Reference: context when using mycli
+engram remember "mycli connects to a read-only replica. SELECT only, no writes." \
+  --trigger "mycli" \
+  --type reference --name "psql-replica-read-only"
 
-Good: "Config for hooks lives in `~/.claude/settings.json` — each entry is {matcher, hooks}."
-→ Extracts: path_glob for settings.json
+# Path-based: fire when editing Python test files
+engram remember "Use pytest.raises as context manager, never decorator form" \
+  --path "**/test_*.py" \
+  --type feedback --name "pytest-raises-context-manager"
+```
 
-Bad: "The database is read-only." → REJECTED (no tool pattern to bind to).
+## Triggers
+
+`--trigger` specifies a command prefix. The memory surfaces when Claude runs a Bash command that starts with that prefix:
+- `--trigger "git push --force"` matches `git push --force origin main`
+- `--trigger "docker compose up"` matches `docker compose up --build -d`
+- `--trigger "ssh -i ~/.ssh/aws"` matches `ssh -i ~/.ssh/aws-ec2 user@host`
+
+`--path` specifies a file glob. The memory surfaces when Claude Reads/Edits/Writes a matching file.
+
+If neither `--trigger` nor `--path` is provided, triggers are auto-extracted from backticked commands in the body (fallback).
+
+## Types
+
+- `--type feedback` — corrections. **Blocks the tool call** until Claude reads the memory and retries.
+- `--type reference` — informational. Injected as context alongside the tool call (no blocking).
 
 ## Dedup
 
-If an existing memory already has overlapping triggers, the body is updated instead of creating a duplicate. This is automatic — just run the command normally.
-
-## Defaults
-
-- `--type reference`
-- `--scope project` (scoped to current working directory)
-- `--name` auto-synthesized from first line if not provided
+If an existing memory already has overlapping triggers, the body is updated instead of creating a duplicate.

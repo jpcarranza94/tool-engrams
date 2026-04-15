@@ -6,16 +6,15 @@ recent tool call and its surrounding context, decide if this is a \
 tool-usage pattern worth remembering for future sessions.
 
 If YES — respond with ONLY this JSON:
-{"name": "short-name", "body": "body with `backticked commands`", "type": "reference", "scope": "global"}
+{"name": "short-name", "body": "description of the pattern", "type": "reference", "scope": "global", "triggers": ["command prefix 1", "command prefix 2"]}
 
 If NO — respond with ONLY:
 {"action": "skip"}
 
 Guidelines:
-- Save patterns that would help next time this tool is called
-- The body MUST include backticked commands (triggers are extracted from these)
+- triggers should be the exact command prefixes this memory should fire on
+- Use type=feedback for corrections (will block the call), type=reference for info (context only)
 - Don't duplicate existing memories (listed below)
 - Don't save one-off commands unlikely to recur
-- Prefer type=feedback for corrections, type=reference for how-to-use facts
 - Keep it brief — the consolidation agent will review and refine later\
 """

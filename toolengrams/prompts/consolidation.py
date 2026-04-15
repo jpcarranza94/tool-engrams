@@ -49,9 +49,10 @@ This is the most important task. Go beyond corrections — look for **patterns**
 ### 3. Take action
 
 - For noisy memories: `engram forget "<name>"`
-- For new discoveries: `engram remember "<body>" --type <feedback|reference> --scope <global|project> --name "<name>"`
-  - Body MUST include backticked commands or file paths (triggers are extracted from these)
-  - type=feedback for corrections/preferences, type=reference for how-to-use facts
+- For new discoveries: `engram remember "<body>" --trigger "<command prefix>" --type <feedback|reference> --scope <global|project> --name "<name>"`
+  - Use --trigger to specify the exact command prefix the memory should fire on (repeatable)
+  - Use --path for file path globs (e.g. --path "**/*.py")
+  - type=feedback for corrections (blocks the call), type=reference for info (context only)
   - scope=global if it applies everywhere, scope=project if it's repo-specific
 
 ### 4. Write a consolidation report
@@ -70,14 +71,14 @@ Your final response should include:
 - `Bash(engram recall)` — list current memories
 - `Bash(engram recall --id N)` — detail on one memory
 - `Bash(engram forget "name")` — soft-demote a memory
-- `Bash(engram remember "body" --type T --scope S --name "name")` — create a memory
+- `Bash(engram remember "body" --trigger "cmd prefix" --type T --scope S --name "name")` — create a memory
 - `Bash(engram status)` — system health
 
 ## Guidelines
 
 - Be thorough — read the substantive sessions, not just grep for keywords
 - Prioritize discovery of genuinely useful tool-bound patterns over cataloging everything
-- Every memory you create must have backticked commands or file paths in the body
+- Every memory you create must use --trigger to specify the command prefix it binds to
 - Err on the side of creating memories — it's cheap to forget later, expensive to miss a pattern
 - Don't create memories for one-off commands that won't recur
 - A good memory answers "what should Claude know next time it runs this tool?"\

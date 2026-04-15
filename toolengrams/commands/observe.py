@@ -155,12 +155,17 @@ def _try_save_from_judgment(response_text: str) -> None:
     body = judgment.get("body", "")
     type_ = judgment.get("type", "reference")
     scope = judgment.get("scope", "global")
+    triggers = judgment.get("triggers", [])
 
-    if not name or not body or "`" not in body:
+    if not name or not body:
         return
 
     from .remember import main as remember_main
-    remember_main([body, "--type", type_, "--scope", scope, "--name", name])
+    argv = [body, "--type", type_, "--scope", scope, "--name", name]
+    for t in triggers:
+        if isinstance(t, str) and t.strip():
+            argv.extend(["--trigger", t.strip()])
+    remember_main(argv)
 
 
 def _build_prompt(command: str, context: str, existing: str) -> str:
