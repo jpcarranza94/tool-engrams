@@ -138,13 +138,36 @@ echo ""
 # 5. Optional: install nightly consolidation schedule.
 echo "5. Nightly consolidation schedule"
 echo "   The consolidation agent reviews your day's sessions at 6 PM."
-read -p "   Install the 6 PM daily schedule? [y/N] " -n 1 -r
-echo ""
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-    engram consolidate --install-schedule
-    echo "   Schedule installed."
-else
-    echo "   Skipped. Run 'engram consolidate --install-schedule' later."
+OS="$(uname -s)"
+case "$OS" in
+    Darwin)
+        echo "   Platform: macOS (will use launchd)"
+        ;;
+    Linux)
+        echo "   Platform: Linux (will use cron)"
+        if ! command -v crontab &>/dev/null; then
+            echo "   WARNING: crontab not found. Install cron to use scheduled consolidation."
+            echo "   You can always run 'engram consolidate' manually."
+            echo ""
+            OS="unsupported"
+        fi
+        ;;
+    *)
+        echo "   Platform: $OS (unsupported for scheduling)"
+        echo "   You can run 'engram consolidate' manually anytime."
+        echo ""
+        OS="unsupported"
+        ;;
+esac
+if [ "$OS" != "unsupported" ]; then
+    read -p "   Install the 6 PM daily schedule? [y/N] " -n 1 -r
+    echo ""
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        engram consolidate --install-schedule
+        echo "   Schedule installed."
+    else
+        echo "   Skipped. Run 'engram consolidate --install-schedule' later."
+    fi
 fi
 echo ""
 

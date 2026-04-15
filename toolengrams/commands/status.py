@@ -6,7 +6,7 @@ import json
 import sys
 
 from .. import db
-from ..consolidation.schedule import PLIST_PATH
+from ..consolidation.schedule import is_installed as schedule_is_installed
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -46,7 +46,7 @@ def main(argv: list[str] | None = None) -> int:
         ).fetchone()
 
         # Schedule status.
-        schedule_installed = PLIST_PATH.exists()
+        schedule_installed = schedule_is_installed()
 
         result = {
             "memories": {

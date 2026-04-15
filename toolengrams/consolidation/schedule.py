@@ -1,7 +1,12 @@
-"""launchd plist generation for nightly consolidation."""
+"""Platform-aware scheduling for nightly consolidation.
+
+macOS: launchd plist in ~/Library/LaunchAgents/
+Linux: cron job via crontab
+"""
 
 from __future__ import annotations
 
+import platform
 import shutil
 import subprocess
 from pathlib import Path
@@ -9,15 +14,62 @@ from pathlib import Path
 PLIST_NAME = "com.toolengrams.consolidate"
 PLIST_DIR = Path.home() / "Library" / "LaunchAgents"
 PLIST_PATH = PLIST_DIR / f"{PLIST_NAME}.plist"
+CRON_MARKER = "# toolengrams-consolidate"
+
+LOG_DIR = Path.home() / ".claude" / "tool-engrams"
 
 
-def generate_plist(**kwargs) -> str:
+def _get_platform() -> str:
+    return platform.system()  # "Darwin" or "Linux"
+
+
+def _find_engram() -> str:
     engram_bin = shutil.which("engram")
     if not engram_bin:
         raise RuntimeError("engram not found on PATH — install with: uv pip install --system -e .")
+    return engram_bin
 
+
+# ---------- public API ----------
+
+
+def install_schedule(**kwargs) -> str:
+    """Install the nightly consolidation schedule. Returns path/description."""
+    plat = _get_platform()
+    if plat == "Darwin":
+        return _install_launchd()
+    elif plat == "Linux":
+        return _install_cron()
+    else:
+        raise RuntimeError(f"Unsupported platform: {plat}. Supported: macOS (launchd), Linux (cron).")
+
+
+def uninstall_schedule() -> bool:
+    """Remove the nightly schedule. Returns True if it existed."""
+    plat = _get_platform()
+    if plat == "Darwin":
+        return _uninstall_launchd()
+    elif plat == "Linux":
+        return _uninstall_cron()
+    return False
+
+
+def is_installed() -> bool:
+    """Check if a schedule is currently installed."""
+    plat = _get_platform()
+    if plat == "Darwin":
+        return PLIST_PATH.exists()
+    elif plat == "Linux":
+        return _cron_entry_exists()
+    return False
+
+
+# ---------- macOS: launchd ----------
+
+
+def _generate_plist() -> str:
+    engram_bin = _find_engram()
     args = ["--yesterday", "--json"]
-
     args_xml = "\n".join(f"        <string>{a}</string>" for a in args)
 
     return f"""<?xml version="1.0" encoding="UTF-8"?>
@@ -40,9 +92,9 @@ def generate_plist(**kwargs) -> str:
         <integer>0</integer>
     </dict>
     <key>StandardOutPath</key>
-    <string>{Path.home()}/.claude/tool-engrams/consolidate.log</string>
+    <string>{LOG_DIR}/consolidate.log</string>
     <key>StandardErrorPath</key>
-    <string>{Path.home()}/.claude/tool-engrams/consolidate.err</string>
+    <string>{LOG_DIR}/consolidate.err</string>
     <key>RunAtLoad</key>
     <false/>
 </dict>
@@ -50,23 +102,17 @@ def generate_plist(**kwargs) -> str:
 """
 
 
-def install_schedule(**kwargs) -> str:
-    """Write plist and load into launchd. Returns the plist path."""
+def _install_launchd() -> str:
     PLIST_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Unload existing if present.
     if PLIST_PATH.exists():
         subprocess.run(
             ["launchctl", "unload", str(PLIST_PATH)],
             capture_output=True,
         )
 
-    plist_content = generate_plist()
-    PLIST_PATH.write_text(plist_content)
-
-    # Ensure log directory exists.
-    log_dir = Path.home() / ".claude" / "tool-engrams"
-    log_dir.mkdir(parents=True, exist_ok=True)
+    PLIST_PATH.write_text(_generate_plist())
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
 
     subprocess.run(
         ["launchctl", "load", str(PLIST_PATH)],
@@ -77,8 +123,7 @@ def install_schedule(**kwargs) -> str:
     return str(PLIST_PATH)
 
 
-def uninstall_schedule() -> bool:
-    """Unload and remove the plist. Returns True if it existed."""
+def _uninstall_launchd() -> bool:
     if not PLIST_PATH.exists():
         return False
     subprocess.run(
@@ -86,4 +131,64 @@ def uninstall_schedule() -> bool:
         capture_output=True,
     )
     PLIST_PATH.unlink()
+    return True
+
+
+# ---------- Linux: cron ----------
+
+
+def _build_cron_line() -> str:
+    engram_bin = _find_engram()
+    log_path = LOG_DIR / "consolidate.log"
+    return f"0 18 * * * {engram_bin} consolidate --yesterday --json >> {log_path} 2>&1 {CRON_MARKER}"
+
+
+def _get_current_crontab() -> str:
+    try:
+        result = subprocess.run(
+            ["crontab", "-l"],
+            capture_output=True, text=True, timeout=5,
+        )
+        return result.stdout if result.returncode == 0 else ""
+    except Exception:
+        return ""
+
+
+def _cron_entry_exists() -> bool:
+    return CRON_MARKER in _get_current_crontab()
+
+
+def _install_cron() -> str:
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    current = _get_current_crontab()
+
+    # Remove existing entry if present.
+    lines = [l for l in current.splitlines() if CRON_MARKER not in l]
+    lines.append(_build_cron_line())
+    new_crontab = "\n".join(lines) + "\n"
+
+    proc = subprocess.run(
+        ["crontab", "-"],
+        input=new_crontab, text=True,
+        capture_output=True, timeout=5,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(f"Failed to install cron job: {proc.stderr}")
+
+    return f"cron: daily at 18:00 ({CRON_MARKER})"
+
+
+def _uninstall_cron() -> bool:
+    current = _get_current_crontab()
+    if CRON_MARKER not in current:
+        return False
+
+    lines = [l for l in current.splitlines() if CRON_MARKER not in l]
+    new_crontab = "\n".join(lines) + "\n" if lines else ""
+
+    subprocess.run(
+        ["crontab", "-"],
+        input=new_crontab, text=True,
+        capture_output=True, timeout=5,
+    )
     return True
