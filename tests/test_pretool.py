@@ -28,7 +28,7 @@ def test_pretool_hits_seeded_memory(temp_db, monkeypatch):
         "cwd": "/tmp/test-projects/foo",
         "hook_event_name": "PreToolUse",
         "tool_name": "Bash",
-        "tool_input": {"command": "mycli -c 'SELECT 1'"},
+        "tool_input": {"command": "psql -h replica.internal -c 'SELECT 1'"},
         "tool_use_id": "tu-1",
     }
     result = _run_pretool(payload, monkeypatch)
@@ -36,10 +36,10 @@ def test_pretool_hits_seeded_memory(temp_db, monkeypatch):
     hso = result.get("hookSpecificOutput")
     assert hso is not None
     assert hso["hookEventName"] == "PreToolUse"
-    # Seeded mycli memory is type=reference → allow (not deny).
+    # Seeded psql replica memory is type=reference → allow (not deny).
     # Only feedback memories with tool_head triggers get denied.
     assert hso["permissionDecision"] == "allow"
-    assert "mycli" in hso["additionalContext"].lower()
+    assert "replica" in hso["additionalContext"].lower()
 
 
 def test_pretool_git_commit_surfaces_commit_memory(temp_db, monkeypatch):
@@ -84,7 +84,7 @@ def test_pretool_session_dedup_skips_second_time(temp_db, monkeypatch):
         "cwd": "/tmp/test-projects/myapp",
         "hook_event_name": "PreToolUse",
         "tool_name": "Bash",
-        "tool_input": {"command": "mycli -c 'SELECT 1'"},
+        "tool_input": {"command": "psql -h replica.internal -c 'SELECT 1'"},
         "tool_use_id": "tu-a",
     }
     first = _run_pretool(payload, monkeypatch)

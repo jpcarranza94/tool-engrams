@@ -150,7 +150,7 @@ def retrieve_candidates(
 def _head_matches(stored_head: str | None, call_heads: list[str]) -> bool:
     """Stored head must be a space-joined prefix of at least one of the extracted heads.
 
-    'git' matches 'git push'. 'ssh deploy@' matches 'ssh deploy@10.0.1.50'
+    'git' matches 'git push'. 'ssh deploy@' matches 'ssh deploy@35.1.2.3'
     (prefix match on the joined string, not on tokens alone).
     """
     if not stored_head:
@@ -158,7 +158,7 @@ def _head_matches(stored_head: str | None, call_heads: list[str]) -> bool:
     for call in call_heads:
         if call == stored_head or call.startswith(stored_head + " ") or call.startswith(stored_head):
             # Exact token equality OR token-boundary prefix OR raw string prefix
-            # (the last case handles 'ssh deploy@' -> 'ssh deploy@10.0.1.50')
+            # (the last case handles 'ssh deploy@' -> 'ssh deploy@35.1.2.3')
             if _is_valid_prefix(stored_head, call):
                 return True
     return False
@@ -171,7 +171,7 @@ def _is_valid_prefix(stored: str, call: str) -> bool:
     if call.startswith(stored + " "):
         return True
     # Raw string prefix — only valid when the stored head already ends in a
-    # partial token (no trailing space). Catches 'ssh deploy@' -> 'ssh deploy@10.0.1.50'.
+    # partial token (no trailing space). Catches 'ssh deploy@' -> 'ssh deploy@35.1.2.3'.
     return call.startswith(stored) and not stored.endswith(" ")
 
 

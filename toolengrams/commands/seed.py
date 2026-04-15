@@ -10,10 +10,10 @@ from .. import db
 
 SEED_MEMORIES = [
     {
-        "name": "mycli is read-only prod replica",
-        "description": "Trigger phrase 'check the db' uses mycli against a read-only replica.",
+        "name": "psql replica is read-only",
+        "description": "Production replica is SELECT-only, no writes allowed.",
         "body": (
-            "`mycli -c \"SQL\"` runs against a PostgreSQL production replica. "
+            "`psql -h replica.internal` connects to a PostgreSQL production replica. "
             "SELECT-only — the connection cannot mutate state. Never attempt "
             "INSERT/UPDATE/DELETE; they will fail and the replica is not a safe "
             "place to test writes."
@@ -21,7 +21,7 @@ SEED_MEMORIES = [
         "type": "reference",
         "scope": "global",
         "triggers": [
-            {"kind": "tool_head", "tool_name": "Bash", "head": ["mycli"]},
+            {"kind": "tool_head", "tool_name": "Bash", "head": ["psql", "-h"]},
         ],
     },
     {
@@ -40,9 +40,9 @@ SEED_MEMORIES = [
     },
     {
         "name": "ssh to production: check VPN first on connection timeout",
-        "description": "Recovery hint for ssh to production.",
+        "description": "Recovery hint for ssh to production servers.",
         "body": (
-            "If `ssh deploy@production` to production times out or gives "
+            "If `ssh deploy@production` times out or gives "
             "'Connection refused', the usual cause is the VPN not being "
             "connected. Check VPN state before debugging further."
         ),

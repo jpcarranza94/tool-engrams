@@ -47,10 +47,10 @@ def test_unpin_memory(temp_db, capsys):
 
 
 def test_pin_fuzzy_match(temp_db, capsys):
-    _seed(temp_db, name="mycli is read-only prod replica")
-    rc, payload = _run(["mycli"], capsys)
+    _seed(temp_db, name="psql replica is read-only")
+    rc, payload = _run(["psql"], capsys)
     assert rc == 0
-    assert "mycli" in payload["name"]
+    assert "psql" in payload["name"]
 
 
 def test_pin_not_found(temp_db, capsys):

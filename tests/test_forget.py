@@ -55,11 +55,11 @@ def test_soft_demote_by_exact_name(temp_db, capsys):
 
 
 def test_soft_demote_by_fuzzy_name(temp_db, capsys):
-    _seed(temp_db, name="mycli is read-only prod replica")
-    rc, payload = _run(["mycli"], capsys)
+    _seed(temp_db, name="psql replica is read-only")
+    rc, payload = _run(["psql"], capsys)
     assert rc == 0
     assert payload["action"] == "soft_demoted"
-    assert "mycli" in payload["name"]
+    assert "psql" in payload["name"]
 
 
 def test_not_found_returns_1(temp_db, capsys):

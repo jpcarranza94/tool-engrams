@@ -36,7 +36,7 @@ def test_positional_text_inserts_memory(temp_db, monkeypatch, capsys):
 
 
 def test_stdin_body_when_text_is_dash(temp_db, monkeypatch, capsys):
-    payload = _run(["-"], monkeypatch, stdin="body via stdin `mycli`\n", capsys=capsys)
+    payload = _run(["-"], monkeypatch, stdin="body via stdin `psql -h replica`\n", capsys=capsys)
     assert payload["action"] == "inserted"
     rows = _rows(temp_db, "SELECT body FROM memories")
     assert rows[0]["body"].startswith("body via stdin")
@@ -112,7 +112,7 @@ def test_triggers_are_persisted_to_db(temp_db, monkeypatch, capsys):
 def test_extra_trigger_keyword_now_rejected(temp_db, monkeypatch):
     """keyword triggers were removed in the tool-bound refactor."""
     with pytest.raises(SystemExit):
-        remember.main(["--extra-trigger", "keyword:mycli", "body text"])
+        remember.main(["--extra-trigger", "keyword:psql", "body text"])
 
 
 def test_extra_trigger_tool_head(temp_db, monkeypatch, capsys):

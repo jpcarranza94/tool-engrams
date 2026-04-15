@@ -11,7 +11,7 @@ Contract (input JSON on stdin):
       "cwd": "/home/user/projects/myapp",
       "hook_event_name": "PreToolUse",
       "tool_name": "Bash",
-      "tool_input": {"command": "mycli -c 'SELECT 1'"},
+      "tool_input": {"command": "psql -h replica.internal -c 'SELECT 1'"},
       "tool_use_id": "..."
     }
 

@@ -4,7 +4,7 @@ Tool-bound automatic memory for Claude Code. Memories are tied to specific tool-
 
 ## What it does
 
-When Claude is about to run a command (e.g., `git push --force`, `mycli -c`, `docker compose up`), ToolEngrams checks if there's a memory bound to that command prefix. If the memory is a correction (`feedback` type), the call is **blocked** until Claude reads the memory and retries with corrected arguments. If it's informational (`reference` type), the memory is injected as context alongside the call.
+When Claude is about to run a command (e.g., `git push --force`, `psql -h replica -c`, `docker compose up`), ToolEngrams checks if there's a memory bound to that command prefix. If the memory is a correction (`feedback` type), the call is **blocked** until Claude reads the memory and retries with corrected arguments. If it's informational (`reference` type), the memory is injected as context alongside the call.
 
 Memories form automatically. A background observer watches tool calls and flags patterns worth remembering. A nightly consolidation agent reviews the day's sessions, prunes noise, and discovers patterns that were missed.
 
@@ -43,9 +43,9 @@ engram remember "Use --force-with-lease instead of --force to avoid overwriting"
   --trigger "git push -f" \
   --type feedback
 
-# Informational: context when using mycli (doesn't block)
-engram remember "mycli connects to a read-only replica. SELECT only." \
-  --trigger "mycli" \
+# Informational: context when using psql -h replica (doesn't block)
+engram remember "psql -h replica connects to a read-only replica. SELECT only." \
+  --trigger "psql -h replica" \
   --type reference
 
 # File-based: fires when editing Python test files
@@ -80,8 +80,10 @@ The install script:
 1. Installs the `toolengrams` Python package (editable mode)
 2. Adds hooks to `~/.claude/settings.json`
 3. Symlinks skills (`/engram-remember`, `/engram-forget`, `/engram-recall`)
-4. Seeds example memories
+4. Initializes the SQLite database
 5. Optionally installs the 6 PM nightly consolidation schedule
+
+Memories form automatically as you use Claude Code. You can also run `engram seed` to insert a few example memories to explore the system.
 
 ### Requirements
 
@@ -105,8 +107,8 @@ ln -sf "$(pwd)/skills/engram-remember" ~/.claude/skills/engram-remember
 ln -sf "$(pwd)/skills/engram-forget" ~/.claude/skills/engram-forget
 ln -sf "$(pwd)/skills/engram-recall" ~/.claude/skills/engram-recall
 
-# Seed example memories.
-engram seed
+# Optional: seed example memories to explore the system.
+# engram seed
 
 # Optional: install nightly consolidation.
 engram consolidate --install-schedule

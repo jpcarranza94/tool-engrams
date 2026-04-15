@@ -37,9 +37,9 @@ engram remember "Use --force-with-lease instead of --force to avoid overwriting 
   --trigger "git push -f" \
   --type feedback --name "git-force-with-lease"
 
-# Reference: context when using mycli
-engram remember "mycli connects to a read-only replica. SELECT only, no writes." \
-  --trigger "mycli" \
+# Reference: context when using psql -h replica
+engram remember "psql -h replica connects to a read-only replica. SELECT only, no writes." \
+  --trigger "psql -h replica" \
   --type reference --name "psql-replica-read-only"
 
 # Path-based: fire when editing Python test files

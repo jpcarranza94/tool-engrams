@@ -53,7 +53,7 @@ def main(argv: list[str] | None = None) -> int:
             "error": "no_triggers",
             "message": (
                 "No tool-call triggers could be extracted from the body. "
-                "Include backticked commands (e.g. `git push`, `mycli -c`) "
+                "Include backticked commands (e.g. `git push`, `docker compose up`) "
                 "or file paths so the memory has something to bind to. "
                 "A memory without triggers will never surface."
             ),

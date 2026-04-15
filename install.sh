@@ -3,7 +3,7 @@ set -euo pipefail
 
 # ToolEngrams installer
 # Installs the package, wires hooks into Claude Code, symlinks skills,
-# seeds example memories, and optionally installs the nightly schedule.
+# initializes the database, and optionally installs the nightly schedule.
 
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 SETTINGS="$HOME/.claude/settings.json"
@@ -127,10 +127,12 @@ for skill in engram-remember engram-forget engram-recall; do
 done
 echo ""
 
-# 4. Initialize DB + seed memories.
+# 4. Initialize DB.
 echo "4. Initializing database..."
 mkdir -p "$DB_DIR"
-engram seed
+engram status >/dev/null 2>&1
+echo "  Database ready at $DB_DIR/db.sqlite"
+echo "  (Run 'engram seed' if you want example memories to explore)"
 echo ""
 
 # 5. Optional: install nightly consolidation schedule.

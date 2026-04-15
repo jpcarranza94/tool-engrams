@@ -169,11 +169,11 @@ def seed_memory(claude_runner):
 
     Usage:
         seed_memory(
-            name="mycli is read-only",
-            body="Do not INSERT into mycli",
+            name="psql replica is read-only",
+            body="Do not INSERT into the replica",
             type="reference",
             scope="global",
-            triggers=[{"kind": "tool_head", "tool_name": "Bash", "head": ["mycli"]}],
+            triggers=[{"kind": "tool_head", "tool_name": "Bash", "head": ["psql", "-h"]}],
         )
     """
     from toolengrams import db
