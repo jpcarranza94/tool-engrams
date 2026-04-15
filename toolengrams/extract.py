@@ -75,6 +75,11 @@ def _extract_from_bash(tool_input: dict[str, Any], hint: ExtractedTriggerHint) -
         head2 = tokens[1]
         hint.head_prefixes.append((head1, head2))
 
+    # Also include the full command as a head so that longer stored
+    # triggers (e.g. "git push --force") can prefix-match against it.
+    if len(tokens) > 2:
+        hint.head_prefixes.append(tuple(tokens))
+
     for match in _PATH_RE.findall(command):
         if match not in hint.paths:
             hint.paths.append(match)

@@ -57,10 +57,18 @@ def main(argv: list[str] | None = None) -> int:
     description = args.description or ""
 
     extra_triggers = _parse_extra_triggers(args.extra_trigger or [])
+    explicit_triggers = _parse_explicit_triggers(args.trigger or [], args.path or [])
 
     conn = db.connect()
     try:
-        candidates = extract_candidates(body)
+        # If explicit --trigger/--path flags are given, use those instead
+        # of auto-extracting from the body. This lets Claude (or the user)
+        # specify exactly what command prefix the memory should bind to.
+        if explicit_triggers:
+            candidates = explicit_triggers
+        else:
+            candidates = extract_candidates(body)
+
         all_triggers = candidates + [
             FormationCandidate(
                 kind=t["kind"],
@@ -187,11 +195,17 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
                         help="Override the project slug (defaults to slugified cwd for scope=project).")
     parser.add_argument("--pinned", action="store_true",
                         help="Pin this memory so reinforcement doesn't gate it.")
+    parser.add_argument("--trigger", action="append", default=None,
+                        metavar="CMD_PREFIX",
+                        help=("Command prefix to bind to (repeatable). "
+                              "e.g. --trigger 'git push --force' "
+                              "--trigger 'git push -f'"))
+    parser.add_argument("--path", action="append", default=None,
+                        metavar="GLOB",
+                        help="Path glob to bind to (repeatable). e.g. --path '**/*.py'")
     parser.add_argument("--extra-trigger", action="append", default=None,
                         metavar="SPEC",
-                        help=("Extra trigger. Repeatable. Formats: "
-                              "'tool_head:Bash:git,push'  |  "
-                              "'path_glob:**/*.py'"))
+                        help="(Legacy) tool_head:Bash:git,push | path_glob:**/*.py")
     parser.add_argument("--dry-run", action="store_true",
                         help="Extract and report candidates; do not insert.")
     return parser.parse_args(argv)
@@ -226,7 +240,40 @@ def _resolve_project_slug(scope: str, override: str | None) -> str | None:
     return slugify_cwd(cwd)
 
 
-# ---------- extra triggers ----------
+# ---------- triggers ----------
+
+
+def _parse_explicit_triggers(
+    cmd_prefixes: list[str],
+    path_globs: list[str],
+) -> list[FormationCandidate]:
+    """Parse --trigger and --path flags into FormationCandidates.
+
+    --trigger takes a command prefix string like 'git push --force'.
+    The full string is stored as head_joined for prefix matching.
+    """
+    out: list[FormationCandidate] = []
+    for prefix in cmd_prefixes:
+        prefix = prefix.strip()
+        if not prefix:
+            continue
+        tokens = tuple(prefix.split())
+        out.append(FormationCandidate(
+            kind="tool_head",
+            tool_name="Bash",
+            head=tokens,
+            source="explicit",
+        ))
+    for glob in path_globs:
+        glob = glob.strip()
+        if not glob:
+            continue
+        out.append(FormationCandidate(
+            kind="path_glob",
+            path_pattern=glob,
+            source="explicit",
+        ))
+    return out
 
 
 def _parse_extra_triggers(specs: list[str]) -> list[dict[str, Any]]:
