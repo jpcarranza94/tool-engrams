@@ -11,13 +11,25 @@ from dataclasses import dataclass
 from .extract import ExtractedTriggerHint, join_head
 from .models import Candidate, ClusterStats, MemoryType
 
-# Reinforcement constants
+# Reinforcement constants — how quickly unused memories decay.
+# feedback memories decay faster (30 days) because stale corrections are harmful.
+# reference memories are more evergreen (60 days).
 HALF_LIFE_DAYS: dict[MemoryType, float] = {
     "feedback": 30.0,
     "reference": 60.0,
 }
 
-# Laplace threshold constants (v1)
+# Laplace threshold constants — control which candidates pass the quality gate.
+#
+# PRIOR_MEAN: assumed average quality of a memory before any data. Lower values
+#   make the gate more permissive (more memories surface). Range: 0.0–1.0.
+# PRIOR_WEIGHT: how many "virtual observations" the prior counts for. Higher
+#   values make the threshold harder to move with real data. Range: 1.0–10.0.
+# CLUSTER_FACTOR: multiplier on the per-cluster smoothed mean to get the
+#   threshold. Below 1.0 means "accept slightly below-average memories".
+# ABSOLUTE_FLOOR: minimum threshold regardless of cluster stats. Prevents
+#   surfacing truly useless memories even in sparse clusters.
+# TOP_K: maximum memories surfaced per tool call after filtering.
 PRIOR_MEAN = 0.3
 PRIOR_WEIGHT = 3.0
 CLUSTER_FACTOR = 0.9

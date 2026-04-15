@@ -21,13 +21,13 @@ import time
 from typing import Any
 
 from .. import db
-from ..dedup import _insert_extra_triggers, find_overlapping_memory, update_existing_memory
+from ..dedup import find_overlapping_memory, update_existing_memory
 from ..formation import (
     FormationCandidate,
     consolidate_vocabulary,
     extract_candidates,
-    insert_candidate_triggers,
 )
+from ..triggers import extras_to_candidates, insert_candidate_triggers
 from ..utils import slugify_cwd
 
 VALID_TYPES = {"feedback", "reference"}
@@ -41,141 +41,117 @@ _NAME_MAX = 80
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
 
-    body = _read_body(args)
-    if not body:
-        print("engram remember: body is empty (pass text as arg, -, or pipe stdin)", file=sys.stderr)
-        return 2
-
-    if args.type not in VALID_TYPES:
-        print(f"engram remember: --type must be one of {sorted(VALID_TYPES)}", file=sys.stderr)
-        return 2
-    if args.scope not in VALID_SCOPES:
-        print(f"engram remember: --scope must be one of {sorted(VALID_SCOPES)}", file=sys.stderr)
-        return 2
-
-    name = args.name or _synthesize_name(body)
-    description = args.description or ""
+    rc, body, name, description = _validate_and_parse(args)
+    if rc is not None:
+        return rc
 
     extra_triggers = _parse_extra_triggers(args.extra_trigger or [])
-    explicit_triggers = _parse_explicit_triggers(args.trigger or [], args.path or [])
+    candidates, all_triggers = _resolve_triggers(body, args, extra_triggers)
+
+    if not all_triggers:
+        print(json.dumps({
+            "error": "no_triggers",
+            "message": (
+                "No tool-call triggers could be extracted from the body. "
+                "Include backticked commands (e.g. `git push`, `mycli -c`) "
+                "or file paths so the memory has something to bind to. "
+                "A memory without triggers will never surface."
+            ),
+            "body_preview": body[:200],
+        }))
+        return 1
 
     conn = db.connect()
     try:
-        # If explicit --trigger/--path flags are given, use those instead
-        # of auto-extracting from the body. This lets Claude (or the user)
-        # specify exactly what command prefix the memory should bind to.
-        if explicit_triggers:
-            candidates = explicit_triggers
-        else:
-            candidates = extract_candidates(body)
-
-        all_triggers = candidates + [
-            FormationCandidate(
-                kind=t["kind"],
-                tool_name=t.get("tool_name"),
-                head=t.get("head", ()),
-                path_pattern=t.get("path_pattern"),
-                source="extra",
-            )
-            for t in extra_triggers
-        ]
-
-        # --- Gate 1: reject triggerless memories ---
-        if not all_triggers:
-            print(json.dumps({
-                "error": "no_triggers",
-                "message": (
-                    "No tool-call triggers could be extracted from the body. "
-                    "Include backticked commands (e.g. `git push`, `mycli -c`) "
-                    "or file paths so the memory has something to bind to. "
-                    "A memory without triggers will never surface."
-                ),
-                "body_preview": body[:200],
-            }))
-            return 1
-
         candidates = consolidate_vocabulary(conn, candidates)
-
-        # --- Gate 2: dedup check ---
         project_slug = _resolve_project_slug(args.scope, args.project_slug)
         existing = find_overlapping_memory(conn, name, all_triggers, project_slug)
 
+        common = dict(
+            name=name, description=description, body=body,
+            type_=args.type, scope=args.scope, project_slug=project_slug,
+            pinned=args.pinned, candidates=candidates,
+            extra_triggers=extra_triggers,
+        )
+
         if args.dry_run:
             payload = _build_payload(
-                memory_id=None,
-                name=name,
-                description=description,
-                body=body,
-                type_=args.type,
-                scope=args.scope,
-                project_slug=project_slug,
-                pinned=args.pinned,
-                candidates=candidates,
-                extra_triggers=extra_triggers,
-                action="dry_run",
-                existing_match=existing,
+                memory_id=None, action="dry_run",
+                existing_match=existing, **common,
             )
             print(json.dumps(payload, indent=2))
             return 0
 
         if existing:
             memory_id = update_existing_memory(
-                conn=conn,
-                existing_id=existing["id"],
-                name=name,
-                description=description,
-                body=body,
-                type_=args.type,
-                pinned=args.pinned,
-                candidates=candidates,
-                extra_triggers=extra_triggers,
+                conn=conn, existing_id=existing["id"],
+                name=name, description=description, body=body,
+                type_=args.type, pinned=args.pinned,
+                candidates=candidates, extra_triggers=extra_triggers,
             )
-            payload = _build_payload(
-                memory_id=memory_id,
-                name=name,
-                description=description,
-                body=body,
-                type_=args.type,
-                scope=args.scope,
-                project_slug=project_slug,
-                pinned=args.pinned,
-                candidates=candidates,
-                extra_triggers=extra_triggers,
-                action="updated",
-                existing_match=existing,
-            )
+            action = "updated"
         else:
-            memory_id = _insert(
-                conn=conn,
-                name=name,
-                description=description,
-                body=body,
-                type_=args.type,
-                scope=args.scope,
-                project_slug=project_slug,
-                pinned=args.pinned,
-                candidates=candidates,
-                extra_triggers=extra_triggers,
-            )
-            payload = _build_payload(
-                memory_id=memory_id,
-                name=name,
-                description=description,
-                body=body,
-                type_=args.type,
-                scope=args.scope,
-                project_slug=project_slug,
-                pinned=args.pinned,
-                candidates=candidates,
-                extra_triggers=extra_triggers,
-                action="inserted",
-                existing_match=None,
-            )
+            memory_id = _insert(conn=conn, **common)
+            action = "inserted"
+            existing = None
 
+        payload = _build_payload(
+            memory_id=memory_id, action=action,
+            existing_match=existing, **common,
+        )
         print(json.dumps(payload))
         return 0
     finally:
         conn.close()
+
+
+def _validate_and_parse(
+    args: argparse.Namespace,
+) -> tuple[int | None, str, str, str]:
+    """Validate inputs and extract body/name/description.
+
+    Returns (error_code, body, name, description). error_code is None on success.
+    """
+    body = _read_body(args)
+    if not body:
+        print("engram remember: body is empty (pass text as arg, -, or pipe stdin)", file=sys.stderr)
+        return 2, "", "", ""
+
+    if args.type not in VALID_TYPES:
+        print(f"engram remember: --type must be one of {sorted(VALID_TYPES)}", file=sys.stderr)
+        return 2, "", "", ""
+    if args.scope not in VALID_SCOPES:
+        print(f"engram remember: --scope must be one of {sorted(VALID_SCOPES)}", file=sys.stderr)
+        return 2, "", "", ""
+
+    name = args.name or _synthesize_name(body)
+    description = args.description or ""
+    return None, body, name, description
+
+
+def _resolve_triggers(
+    body: str,
+    args: argparse.Namespace,
+    extra_triggers: list[dict[str, Any]],
+) -> tuple[list[FormationCandidate], list[FormationCandidate]]:
+    """Build candidates from explicit flags or body extraction.
+
+    Returns (candidates, all_triggers) where all_triggers includes extras.
+    """
+    explicit = _parse_explicit_triggers(args.trigger or [], args.path or [])
+    candidates = explicit if explicit else extract_candidates(body)
+
+    all_triggers = candidates + [
+        FormationCandidate(
+            kind=t["kind"],
+            tool_name=t.get("tool_name"),
+            head=t.get("head", ()),
+            path_pattern=t.get("path_pattern"),
+            source="extra",
+        )
+        for t in extra_triggers
+    ]
+    return candidates, all_triggers
 
 
 # ---------- argparse ----------
@@ -316,7 +292,7 @@ def _insert(
         )
         memory_id = int(cur.lastrowid)
         insert_candidate_triggers(conn, memory_id, candidates)
-        _insert_extra_triggers(conn, memory_id, extra_triggers)
+        insert_candidate_triggers(conn, memory_id, extras_to_candidates(extra_triggers))
     return memory_id
 
 

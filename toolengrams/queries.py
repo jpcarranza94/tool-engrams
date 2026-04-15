@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sqlite3
-from pathlib import Path
 
 
 def fts_quote(text: str) -> str:
@@ -66,38 +65,3 @@ def get_existing_memories_summary(conn: sqlite3.Connection) -> str:
     return "\n".join(f"- {r['name']}: {r['body'][:100]}" for r in rows)
 
 
-def get_memory_summary_detailed(db_path: Path) -> str:
-    """Detailed memory state for consolidation agent context."""
-    import sqlite3 as _sqlite3
-    conn = _sqlite3.connect(str(db_path))
-    conn.row_factory = _sqlite3.Row
-
-    memories = conn.execute(
-        "SELECT m.id, m.name, m.body, m.type, m.surface_count, m.useful_count "
-        "FROM memories m WHERE m.archived_ts IS NULL ORDER BY m.id"
-    ).fetchall()
-
-    lines = [f"Active memories ({len(memories)}):"]
-    for m in memories:
-        usefulness = (m["useful_count"] + 1.0) / (m["surface_count"] + 2.0)
-        lines.append(
-            f"  [{m['id']}] \"{m['name']}\" type={m['type']} "
-            f"surfaces={m['surface_count']} useful={m['useful_count']} "
-            f"usefulness={usefulness:.2f}"
-        )
-        lines.append(f"       body: {m['body'][:150]}")
-
-    surfaces = conn.execute(
-        "SELECT ss.memory_id, m.name, ss.session_id, ss.hook "
-        "FROM session_surfaces ss JOIN memories m ON m.id = ss.memory_id "
-        "ORDER BY ss.surfaced_ts DESC LIMIT 20"
-    ).fetchall()
-    lines.append(f"\nRecent surfaces ({len(surfaces)}):")
-    for s in surfaces:
-        lines.append(
-            f"  memory={s['memory_id']} \"{s['name']}\" "
-            f"session={s['session_id'][:12]}... hook={s['hook']}"
-        )
-
-    conn.close()
-    return "\n".join(lines)

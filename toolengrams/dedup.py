@@ -12,8 +12,9 @@ import re
 import sqlite3
 from typing import Any
 
-from .formation import FormationCandidate, insert_candidate_triggers
 from . import db
+from .formation import FormationCandidate
+from .triggers import extras_to_candidates, insert_candidate_triggers
 
 # If an existing memory shares this many triggers with the new one,
 # update instead of insert. Set to 1 because we suppress head-1 for
@@ -115,24 +116,7 @@ def update_existing_memory(
         )
         conn.execute("DELETE FROM triggers WHERE memory_id = ?", (existing_id,))
         insert_candidate_triggers(conn, existing_id, candidates)
-        _insert_extra_triggers(conn, existing_id, extra_triggers)
+        insert_candidate_triggers(conn, existing_id, extras_to_candidates(extra_triggers))
     return existing_id
 
 
-def _insert_extra_triggers(conn: sqlite3.Connection, memory_id: int, extras: list[dict[str, Any]]) -> None:
-    for t in extras:
-        kind = t["kind"]
-        if kind == "tool_head":
-            head = t["head"]
-            conn.execute(
-                "INSERT INTO triggers "
-                "(memory_id, kind, tool_name, head_joined, head_length) "
-                "VALUES (?, 'tool_head', ?, ?, ?)",
-                (memory_id, t["tool_name"], " ".join(head), len(head)),
-            )
-        elif kind == "path_glob":
-            conn.execute(
-                "INSERT INTO triggers (memory_id, kind, path_pattern) "
-                "VALUES (?, 'path_glob', ?)",
-                (memory_id, t["path_pattern"]),
-            )

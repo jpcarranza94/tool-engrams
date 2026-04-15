@@ -36,25 +36,47 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
 
 def _migrate(conn: sqlite3.Connection) -> None:
     current = conn.execute("PRAGMA user_version").fetchone()[0]
-    if current >= SCHEMA_VERSION:
+    latest = _discover_latest_version()
+    if current >= latest:
         return
     if current == 0:
         conn.executescript(SCHEMA_PATH.read_text())
         # Fresh DB — also apply all migrations so tables are complete.
-        for v in range(2, SCHEMA_VERSION + 1):
-            _apply_migration(conn, v)
-        conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+        _apply_migrations(conn, from_version=2, to_version=latest)
+        conn.execute(f"PRAGMA user_version = {latest}")
         return
     # Incremental migrations for existing DBs.
-    for v in range(current + 1, SCHEMA_VERSION + 1):
-        _apply_migration(conn, v)
-    conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+    _apply_migrations(conn, from_version=current + 1, to_version=latest)
+    conn.execute(f"PRAGMA user_version = {latest}")
 
 
-def _apply_migration(conn: sqlite3.Connection, version: int) -> None:
-    path = MIGRATIONS_DIR / f"v{version}.sql"
-    if path.exists():
-        conn.executescript(path.read_text())
+def _discover_latest_version() -> int:
+    """Scan migrations/ for v*.sql files and return the highest version found.
+
+    Falls back to SCHEMA_VERSION if no migration files exist (fresh install
+    with only schema.sql).
+    """
+    versions = [SCHEMA_VERSION]
+    if MIGRATIONS_DIR.is_dir():
+        for path in MIGRATIONS_DIR.glob("v*.sql"):
+            stem = path.stem  # e.g. "v2"
+            try:
+                versions.append(int(stem[1:]))
+            except ValueError:
+                continue
+    return max(versions)
+
+
+def _apply_migrations(
+    conn: sqlite3.Connection,
+    from_version: int,
+    to_version: int,
+) -> None:
+    """Apply all migration files from from_version to to_version inclusive."""
+    for v in range(from_version, to_version + 1):
+        path = MIGRATIONS_DIR / f"v{v}.sql"
+        if path.exists():
+            conn.executescript(path.read_text())
 
 
 @contextmanager

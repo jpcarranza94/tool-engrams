@@ -13,6 +13,7 @@ import json
 import sys
 
 from .. import db
+from ..queries import fts_quote
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -52,8 +53,7 @@ def _list_all(conn, limit: int) -> int:
 
 
 def _search(conn, query: str, limit: int) -> int:
-    tokens = query.split()
-    fts_query = " OR ".join(f'"{t}"' for t in tokens if t)
+    fts_query = fts_quote(query)
     if not fts_query:
         return _list_all(conn, limit)
 
@@ -81,8 +81,8 @@ def _show_detail(conn, memory_id: int) -> int:
         return 1
 
     triggers = conn.execute(
-        "SELECT kind, tool_name, head_joined, head_length, path_pattern, "
-        "error_substring, keyword FROM triggers WHERE memory_id = ?",
+        "SELECT kind, tool_name, head_joined, head_length, path_pattern "
+        "FROM triggers WHERE memory_id = ?",
         (memory_id,),
     ).fetchall()
 

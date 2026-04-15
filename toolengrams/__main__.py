@@ -11,12 +11,12 @@ import argparse
 import sys
 from typing import Callable
 
+from . import observe
 from .commands import (
     consolidate,
     dashboard,
     forget,
     monitor,
-    observe,
     pin,
     post_tool,
     pretool,

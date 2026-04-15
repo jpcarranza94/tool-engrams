@@ -27,6 +27,9 @@ CREATE INDEX IF NOT EXISTS idx_memories_scope
 CREATE TABLE IF NOT EXISTS triggers (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     memory_id       INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+    -- NOTE: CHECK constraint includes legacy kinds (error_contains, keyword) for
+    -- backwards compatibility with existing DBs. Only tool_head and path_glob
+    -- are used. The error_substring and keyword columns are vestigial nulls.
     kind            TEXT NOT NULL CHECK (kind IN ('tool_head','path_glob','error_contains','keyword')),
     tool_name       TEXT,
     head_joined     TEXT,

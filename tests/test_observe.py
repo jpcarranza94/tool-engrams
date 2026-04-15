@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from toolengrams.commands.observe import _SKIP_HEADS, _MIN_CMD_LENGTH, _try_save_from_judgment
+from toolengrams.observe import _SKIP_HEADS, _MIN_CMD_LENGTH, _try_save_from_judgment
 
 
 # ---------- gating ----------

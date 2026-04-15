@@ -9,8 +9,11 @@ ToolEngrams is a tool-bound memory system for Claude Code. Memories bind to comm
 - `toolengrams/` — core package
   - `commands/` — CLI handlers (one per subcommand: pretool, post_tool, remember, forget, etc.)
   - `prompts/` — all prompt text in one place (session_start, pretool, observer, consolidation)
-  - `consolidation/` — nightly agent (collect sessions, spawn Opus review)
-  - `migrations/` — SQL migration files (v2.sql adds associations + consolidation tables)
+  - `consolidation/` — nightly agent (collect sessions, spawn Opus review, launchd schedule)
+  - `migrations/` — SQL migration files (auto-discovered by db.py)
+  - `observe.py` — async background observer (spawned by post_tool, not a user command)
+  - `triggers.py` — trigger persistence (shared by remember, dedup)
+  - `formation.py` — pure trigger extraction from memory body text (no DB writes)
 - `skills/` — Claude Code skill files (symlinked to ~/.claude/skills/)
 - `tests/` — unit tests + `tests/e2e/` for claude -p integration tests
 - `experiments/` — experiment scripts (not production)

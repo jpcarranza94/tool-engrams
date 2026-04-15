@@ -22,14 +22,14 @@ import sys
 import tempfile
 from pathlib import Path
 
-from .. import db
-from ..prompts.observer import OBSERVER_PROMPT
-from ..queries import get_existing_memories_summary
-from ..subprocess_utils import parse_claude_json_output
-from ..transcript import read_recent_context
+from . import db
+from .prompts.observer import OBSERVER_PROMPT
+from .queries import get_existing_memories_summary
+from .subprocess_utils import parse_claude_json_output
+from .transcript import read_recent_context
 
 CLAUDE_BIN = shutil.which("claude")
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+REPO_ROOT = Path(__file__).resolve().parent.parent
 LOG_PATH = Path.home() / ".claude" / "tool-engrams" / "observer.log"
 
 _SKIP_HEADS = {
@@ -160,7 +160,7 @@ def _try_save_from_judgment(response_text: str) -> None:
     if not name or not body:
         return
 
-    from .remember import main as remember_main
+    from .commands.remember import main as remember_main
     argv = [body, "--type", type_, "--scope", scope, "--name", name]
     for t in triggers:
         if isinstance(t, str) and t.strip():

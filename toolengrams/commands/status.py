@@ -6,7 +6,7 @@ import json
 import sys
 
 from .. import db
-from ..schedule import PLIST_PATH
+from ..consolidation.schedule import PLIST_PATH
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -27,12 +27,12 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
 
     if args.install_schedule:
-        from ..schedule import install_schedule
+        from ..consolidation.schedule import install_schedule
         path = install_schedule(use_agent=True)
         print(json.dumps({"action": "schedule_installed", "plist_path": path}))
         return 0
     if args.uninstall_schedule:
-        from ..schedule import uninstall_schedule
+        from ..consolidation.schedule import uninstall_schedule
         removed = uninstall_schedule()
         print(json.dumps({"action": "schedule_uninstalled", "was_installed": removed}))
         return 0
