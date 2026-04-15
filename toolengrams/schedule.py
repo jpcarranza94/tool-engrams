@@ -11,14 +11,12 @@ PLIST_DIR = Path.home() / "Library" / "LaunchAgents"
 PLIST_PATH = PLIST_DIR / f"{PLIST_NAME}.plist"
 
 
-def generate_plist(use_agent: bool = False) -> str:
+def generate_plist(**kwargs) -> str:
     engram_bin = shutil.which("engram")
     if not engram_bin:
         raise RuntimeError("engram not found on PATH — install with: uv pip install --system -e .")
 
     args = ["--yesterday", "--json"]
-    if use_agent:
-        args.append("--agent")
 
     args_xml = "\n".join(f"        <string>{a}</string>" for a in args)
 
@@ -52,7 +50,7 @@ def generate_plist(use_agent: bool = False) -> str:
 """
 
 
-def install_schedule(use_agent: bool = False) -> str:
+def install_schedule(**kwargs) -> str:
     """Write plist and load into launchd. Returns the plist path."""
     PLIST_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -63,7 +61,7 @@ def install_schedule(use_agent: bool = False) -> str:
             capture_output=True,
         )
 
-    plist_content = generate_plist(use_agent=use_agent)
+    plist_content = generate_plist()
     PLIST_PATH.write_text(plist_content)
 
     # Ensure log directory exists.

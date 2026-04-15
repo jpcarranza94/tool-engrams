@@ -133,12 +133,20 @@ def _run(payload: dict[str, Any]) -> int:
     )
 
     additional_context = format_injection(selected)
+
+    # Deny only for feedback memories matched by tool_head triggers.
+    # Reference memories and path_glob matches are informational — allow through.
+    should_deny = any(
+        c.type == "feedback" and c.head_joined is not None
+        for c in selected
+    )
+
     _emit(
         {
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
                 "additionalContext": additional_context,
-                "permissionDecision": "deny",
+                "permissionDecision": "deny" if should_deny else "allow",
             }
         }
     )
