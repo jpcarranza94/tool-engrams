@@ -6,7 +6,7 @@ Things to do before sharing this repo publicly as a proper open source project.
 
 - [x] **Add LICENSE file** — MIT license added.
 - [x] **Remove hardcoded personal paths from tests** — Replaced all `/home/user/` with generic paths.
-- [x] **Remove company-specific references** — Replaced `mycli`, `deploy@`, `production` with generic examples (`psql -h replica`, `ssh deploy@`, etc.)
+- [x] **Remove company-specific references** — Replaced all company-specific CLI names and SSH targets with generic examples
 - [x] **Fix author name in pyproject.toml**
 - [x] **Make seed memories opt-in** — `install.sh` no longer auto-seeds; `engram seed` is available but optional.
 - [ ] **Add author email/URL to pyproject.toml** — So people know how to reach you.
@@ -35,4 +35,4 @@ Things to do before sharing this repo publicly as a proper open source project.
 
 - [ ] **Review install.sh for portability** — Currently macOS-specific (launchd, `open` command). Document that the consolidation schedule only works on macOS, or add Linux cron support.
 
-- [ ] **Clean up docs/design-v8.md** — Still has `mycli`/`deploy@` references. Internal design doc but visible in the public repo.
+- [ ] **Clean up docs/design-v8.md** — Internal design doc still has old example references. Visible in the public repo.
