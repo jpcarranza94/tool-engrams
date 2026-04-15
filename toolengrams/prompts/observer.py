@@ -16,6 +16,7 @@ Guidelines:
 - Use type=feedback for corrections (will block the call), type=reference for info (context only)
 - scope=project for repo-specific patterns (default), scope=global only for universal tool knowledge (e.g. git flags, common CLI usage)
 - Don't duplicate existing memories (listed below)
+- NEVER include API keys, passwords, tokens, secrets, or connection strings in the body — describe the pattern without the actual credentials
 - Don't save one-off commands unlikely to recur
 - Keep it brief — the consolidation agent will review and refine later\
 """

@@ -81,5 +81,6 @@ Your final response should include:
 - Every memory you create must use --trigger to specify the command prefix it binds to
 - Err on the side of creating memories — it's cheap to forget later, expensive to miss a pattern
 - Don't create memories for one-off commands that won't recur
+- NEVER include API keys, passwords, tokens, secrets, or connection strings in memory bodies — describe the pattern without actual credentials
 - A good memory answers "what should Claude know next time it runs this tool?"\
 """

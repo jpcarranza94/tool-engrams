@@ -22,6 +22,7 @@ from typing import Any
 
 from .. import db
 from ..dedup import find_overlapping_memory, update_existing_memory
+from ..secrets import scan_for_secrets
 from ..formation import (
     FormationCandidate,
     consolidate_vocabulary,
@@ -57,6 +58,22 @@ def main(argv: list[str] | None = None) -> int:
                 "or file paths so the memory has something to bind to. "
                 "A memory without triggers will never surface."
             ),
+            "body_preview": body[:200],
+        }))
+        return 1
+
+    # --- Gate 2: reject memories containing secrets ---
+    secret_findings = scan_for_secrets(body)
+    if not args.dry_run and secret_findings:
+        print(json.dumps({
+            "error": "contains_secrets",
+            "message": (
+                "Memory body appears to contain sensitive data and was rejected. "
+                "Never store API keys, passwords, tokens, or connection strings "
+                "in memories. Describe the tool pattern without including the "
+                "actual credentials."
+            ),
+            "findings": secret_findings,
             "body_preview": body[:200],
         }))
         return 1
