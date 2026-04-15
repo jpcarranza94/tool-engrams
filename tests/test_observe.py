@@ -76,3 +76,33 @@ def test_try_save_handles_garbage(temp_db, capsys):
     _try_save_from_judgment("this is not json at all")
     rows = temp_db.execute("SELECT COUNT(*) AS c FROM memories").fetchone()
     assert rows["c"] == 0
+
+
+def test_try_save_defaults_to_project_scope(temp_db, capsys):
+    """Judgment without explicit scope should default to project."""
+    _try_save_from_judgment(
+        '{"name": "scoped-mem", "body": "Use `make deploy` in this repo.", '
+        '"type": "reference", "triggers": ["make deploy"]}',
+        cwd="/tmp/test-projects/myapp",
+    )
+    row = temp_db.execute(
+        "SELECT scope, project_slug FROM memories WHERE name = 'scoped-mem'"
+    ).fetchone()
+    assert row is not None
+    assert row["scope"] == "project"
+    assert row["project_slug"] == "-tmp-test-projects-myapp"
+
+
+def test_try_save_global_scope_has_no_slug(temp_db, capsys):
+    """Explicit scope=global should not bind to a project."""
+    _try_save_from_judgment(
+        '{"name": "global-mem", "body": "Use `git push --force-with-lease`.", '
+        '"type": "feedback", "scope": "global", "triggers": ["git push --force"]}',
+        cwd="/tmp/test-projects/myapp",
+    )
+    row = temp_db.execute(
+        "SELECT scope, project_slug FROM memories WHERE name = 'global-mem'"
+    ).fetchone()
+    assert row is not None
+    assert row["scope"] == "global"
+    assert row["project_slug"] is None

@@ -75,6 +75,7 @@ def _observe(payload: dict) -> int:
     tool_input = payload.get("tool_input") or {}
     session_id = payload.get("session_id") or ""
     transcript_path = payload.get("transcript_path") or ""
+    cwd = payload.get("cwd") or ""
 
     if tool_name != "Bash":
         return 0
@@ -94,7 +95,7 @@ def _observe(payload: dict) -> int:
     _log(f"OBSERVE cmd={first_token} len={len(command)}")
 
     existing = get_existing_memories_summary(db.connect())
-    prompt = _build_prompt(command, context, existing)
+    prompt = _build_prompt(command, context, existing, cwd)
 
     # Run from a temp dir with engram-observe- prefix so the consolidator
     # can identify and skip these sessions.
@@ -126,11 +127,11 @@ def _observe(payload: dict) -> int:
         return 0
 
     _log(f"RESULT {response_text[:100]}")
-    _try_save_from_judgment(response_text)
+    _try_save_from_judgment(response_text, cwd)
     return 0
 
 
-def _try_save_from_judgment(response_text: str) -> None:
+def _try_save_from_judgment(response_text: str, cwd: str = "") -> None:
     """Parse Haiku's JSON response and save if it's a candidate."""
     try:
         clean = response_text.strip()
@@ -154,11 +155,16 @@ def _try_save_from_judgment(response_text: str) -> None:
     name = judgment.get("name", "")
     body = judgment.get("body", "")
     type_ = judgment.get("type", "reference")
-    scope = judgment.get("scope", "global")
+    scope = judgment.get("scope", "project")
     triggers = judgment.get("triggers", [])
 
     if not name or not body:
         return
+
+    # Set ENGRAM_PROJECT_CWD so remember.py resolves the correct project slug
+    # (the observer runs from a temp dir, not the original session's cwd).
+    if cwd:
+        os.environ["ENGRAM_PROJECT_CWD"] = cwd
 
     from .commands.remember import main as remember_main
     argv = [body, "--type", type_, "--scope", scope, "--name", name]
@@ -168,9 +174,10 @@ def _try_save_from_judgment(response_text: str) -> None:
     remember_main(argv)
 
 
-def _build_prompt(command: str, context: str, existing: str) -> str:
+def _build_prompt(command: str, context: str, existing: str, cwd: str = "") -> str:
+    cwd_section = f"\n## Project Directory\n\n{cwd}\n" if cwd else ""
     return f"""{OBSERVER_PROMPT}
-
+{cwd_section}
 ## Recent Context
 
 {context}
