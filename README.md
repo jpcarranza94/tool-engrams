@@ -4,32 +4,69 @@ Tool-bound automatic memory for Claude Code. Memories are tied to specific tool-
 
 ## What it does
 
-When Claude is about to run a command (e.g., `git push`, `mycli -c`, `docker compose up`), ToolEngrams checks if there's a memory bound to that pattern and **blocks the call** until Claude has read it. Claude then retries with the memory in context — using the right flags, the right connection string, the right workflow.
+When Claude is about to run a command (e.g., `git push --force`, `mycli -c`, `docker compose up`), ToolEngrams checks if there's a memory bound to that command prefix. If the memory is a correction (`feedback` type), the call is **blocked** until Claude reads the memory and retries with corrected arguments. If it's informational (`reference` type), the memory is injected as context alongside the call.
 
-Memories form automatically from your work sessions. A background observer watches tool calls and flags patterns worth remembering. A nightly consolidation agent reviews the day's sessions, prunes noise, and discovers patterns that were missed.
+Memories form automatically. A background observer watches tool calls and flags patterns worth remembering. A nightly consolidation agent reviews the day's sessions, prunes noise, and discovers patterns that were missed.
 
-## How it works
+## How memories surface
 
-Three hooks, three layers:
+1. **Claude decides to call a tool** — e.g., `git push --force origin main`.
 
-| Hook | When | What |
-|---|---|---|
-| **PreToolUse** (deny) | Before every tool call | Surfaces matching memories, blocks until Claude reads them |
-| **PostToolUse** | After every tool call | Reinforces useful memories, spawns async observer |
-| **SessionStart** | Session begins | Tells Claude about the engram CLI |
+2. **Claude Code fires the PreToolUse hook** before executing the tool, piping the tool call details to `engram pretool` via stdin.
 
-Two formation layers:
+3. **The hook extracts the full command** for matching. `git push --force origin main` becomes the matchable string that stored triggers are checked against.
+
+4. **SQLite is queried for matching memories.** Two kinds of triggers:
+   - **Command prefix** (`tool_head`): `"git push --force"` matches `git push --force origin main` because it's a prefix. But `"git push"` is a different trigger on a different memory — only exact prefix matches fire.
+   - **File path glob** (`path_glob`): `**/*.py` matches when Claude Reads/Edits/Writes any Python file.
+
+5. **Matched memories are scored and filtered.** Usefulness (how often it helped), recency (when it last surfaced), and Hebbian association boosts (co-activation with other memories) determine which memories surface. Top 3 win. Session dedup ensures each memory surfaces only once per session.
+
+6. **The hook responds — deny or allow.**
+   - `feedback` memories with a command prefix trigger → **deny**. The tool call is blocked. Claude sees the memory as the reason, understands the correction, and retries with the right arguments.
+   - `reference` memories or path glob triggers → **allow** with `additionalContext`. The tool runs normally but Claude sees the memory alongside the result.
+
+7. **Claude acts on the memory.** If denied, it retries — e.g., `git push --force-with-lease origin main`. If allowed, the memory informs the current and future tool calls in the session.
+
+8. **PostToolUse reinforces the outcome.** If the tool call succeeded after a memory surfaced, `useful_count` is incremented — strengthening the memory for future sessions.
+
+9. **The async observer watches for new patterns.** PostToolUse also spawns a background Haiku agent that reviews recent context and decides if there's a new tool-usage pattern worth remembering.
+
+## How memories form
+
+Memories are created with explicit command prefix triggers — Claude (or the observer, or the consolidation agent) decides exactly which commands a memory should fire on:
+
+```bash
+# Correction: blocks git push --force, Claude must retry with --force-with-lease
+engram remember "Use --force-with-lease instead of --force to avoid overwriting" \
+  --trigger "git push --force" \
+  --trigger "git push -f" \
+  --type feedback
+
+# Informational: context when using mycli (doesn't block)
+engram remember "mycli connects to a read-only replica. SELECT only." \
+  --trigger "mycli" \
+  --type reference
+
+# File-based: fires when editing Python test files
+engram remember "Use pytest.raises as context manager, never decorator form" \
+  --path "**/test_*.py" \
+  --type feedback
+```
+
+Three formation layers work together:
 
 | Layer | Model | When | Job |
 |---|---|---|---|
-| **Observer** | Haiku | After each nontrivial Bash call (async) | Fast candidate triage |
-| **Consolidator** | Opus | Daily at 6 PM | Thorough review, pruning, discovery |
+| **Observer** | Haiku | After each nontrivial Bash call (async) | Fast candidate triage — flags patterns worth remembering |
+| **Consolidator** | Opus | Daily at 6 PM | Thorough review — prunes noise, discovers missed patterns |
+| **Manual** | N/A | User or Claude initiated | Escape hatch via `engram remember` |
 
-Neuroscience-inspired reinforcement:
+## Neuroscience-inspired reinforcement
 
-- **Hebbian learning** — memories that fire together strengthen their association
-- **Usefulness scoring** — memories that surface before successful tool calls get reinforced
-- **Sleep consolidation** — nightly agent replays the day and curates the memory store
+- **Hebbian learning** — memories that surface near each other in a session strengthen their association. Next time one fires, the other gets a score boost ("neurons that fire together wire together").
+- **Usefulness scoring** — memories that surface before successful tool calls get reinforced. Memories that surface without helping decay over time.
+- **Sleep consolidation** — a nightly Opus agent replays the day's sessions, evaluates memory quality, discovers missed patterns, and prunes noise. Like how sleep consolidates daily experiences into long-term memory.
 
 ## Install
 
@@ -81,7 +118,7 @@ engram consolidate --install-schedule
 engram recall [query]       Browse and search memories
 engram recall --id N        Full detail on one memory
 engram recall --stats       Summary counts
-engram remember "<body>"    Manually create a memory
+engram remember "<body>"    Manually create a memory (use --trigger, --type, --path)
 engram forget "<name>"      Soft-demote a memory
 engram pin "<name>"         Pin/unpin a memory
 engram dashboard            Open HTML dashboard in browser
@@ -107,7 +144,7 @@ engram seed                 Insert example memories
 ### Database schema
 
 - **memories** — content, type (feedback/reference), scope (global/project), reinforcement counters
-- **triggers** — tool_head (`Bash: git push`) or path_glob (`**/*.py`) bindings
+- **triggers** — command prefix (`Bash: git push --force`) or path glob (`**/*.py`) bindings
 - **memory_associations** — Hebbian co-activation strength between memory pairs
 - **session_surfaces** — which memories surfaced when (for dedup + reinforcement)
 - **consolidation_runs** — nightly run log
