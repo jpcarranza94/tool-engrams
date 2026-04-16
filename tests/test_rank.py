@@ -92,6 +92,14 @@ def test_final_score_useful_memory_beats_fresh():
     assert proven > fresh
 
 
+def test_final_score_ignores_association_boost():
+    """Hebbian boost runs on a separate track and must NOT affect primary score."""
+    plain = _candidate()
+    boosted = _candidate()
+    boosted.association_boost = 0.5  # a big boost
+    assert math.isclose(final_score(plain, NOW), final_score(boosted, NOW))
+
+
 # ---------- smoothed_threshold ----------
 
 

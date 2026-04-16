@@ -122,3 +122,59 @@ def test_stderr_exit_code_detected_as_error(temp_db, monkeypatch, capsys):
 
     row = temp_db.execute("SELECT useful_count FROM memories WHERE id = ?", (mid,)).fetchone()
     assert row["useful_count"] == 0
+
+
+# ---------- session turn counter ----------
+
+
+def test_session_turns_increments_on_success(temp_db, monkeypatch, capsys):
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({
+        "session_id": "turn-sess",
+        "tool_use_id": "tu-1",
+        "tool_name": "Bash",
+        "tool_response": "ok",
+        "is_error": False,
+    })))
+    post_tool.main()
+
+    row = temp_db.execute(
+        "SELECT turn_count FROM session_turns WHERE session_id='turn-sess'"
+    ).fetchone()
+    assert row["turn_count"] == 1
+
+
+def test_session_turns_increments_on_error_too(temp_db, monkeypatch, capsys):
+    """Turn counter tracks EVERY tool call, not just successes."""
+    for i in range(3):
+        monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({
+            "session_id": "err-sess",
+            "tool_use_id": f"tu-{i}",
+            "tool_name": "Bash",
+            "tool_response": "<error>boom</error>",
+            "is_error": True,
+        })))
+        post_tool.main()
+
+    row = temp_db.execute(
+        "SELECT turn_count FROM session_turns WHERE session_id='err-sess'"
+    ).fetchone()
+    assert row["turn_count"] == 3
+
+
+def test_session_turns_per_session_isolated(temp_db, monkeypatch, capsys):
+    """Turn counter is scoped per session_id."""
+    for sess, n in [("s1", 2), ("s2", 5)]:
+        for i in range(n):
+            monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({
+                "session_id": sess,
+                "tool_use_id": f"{sess}-{i}",
+                "tool_name": "Bash",
+                "tool_response": "ok",
+                "is_error": False,
+            })))
+            post_tool.main()
+
+    rows = {r["session_id"]: r["turn_count"] for r in temp_db.execute(
+        "SELECT session_id, turn_count FROM session_turns"
+    ).fetchall()}
+    assert rows == {"s1": 2, "s2": 5}

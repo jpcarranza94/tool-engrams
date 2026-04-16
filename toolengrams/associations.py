@@ -3,10 +3,18 @@
 When two memories surface in the same session, their association strengthens.
 When one surfaces later, it boosts the score of its associates.
 
-Three operations:
-  1. record_co_activations() — called after _log_surfaces in pretool
-  2. lookup_association_boosts() — called before filter_candidates in pretool
-  3. Bounded Hebbian growth + read-time decay (no background jobs)
+Operations:
+  1. record_co_activations() — called after _log_surfaces in pretool.
+  2. retrieve_associates_of() — pretool's associative-track retrieval; walks
+     outward from prior session surfaces and returns linked memory ids + boosts.
+  3. lookup_association_boosts() — for a given candidate set, returns max
+     effective boost against prior surfaces (kept for completeness + tests).
+  4. Bounded Hebbian growth + read-time decay (no background jobs).
+
+Signal distance is measured in *conversational turns* (tool calls), not
+wall-clock seconds. A 5-minute gap might be 20 rapid tool calls of dense work
+or a single long thinking pause — turn count captures interaction density
+better than time.
 """
 
 from __future__ import annotations
@@ -16,13 +24,20 @@ import sqlite3
 import time
 
 
-# Co-activation window: signal = exp(-Δt / TAU). 5 min = 0.37, 15 min = 0.05.
+# DEPRECATED: previous time-based signal window, kept for a release so external
+# callers don't break. Co-fire formation now uses TAU_TURNS. Safe to remove
+# once no migration paths reference it.
 TAU_SECONDS = 300.0
+
+# Co-activation window in turns: signal = exp(-Δturns / TAU_TURNS).
+# 1 turn ≈ 0.82, 5 turns = 1/e ≈ 0.37, 20 turns ≪ 0.01 (skipped).
+TAU_TURNS = 5.0
 
 # Learning rate: new = old + ALPHA * signal * (1 - old). Bounded in [0, 1).
 ALPHA = 0.2
 
 # Association half-life in days. Unused associations decay over ~3 months.
+# Calendar time IS the right signal for "stale association" — keep days-based.
 ASSOC_HALF_LIFE_DAYS = 90.0
 
 # Max score boost from associations: score *= (1 + ASSOC_BOOST * max_strength).
@@ -37,15 +52,18 @@ def record_co_activations(
     session_id: str,
     newly_surfaced_ids: list[int],
     prior_surfaced: dict[int, int],
+    current_turn: int,
     now_ts: int,
 ) -> int:
     """Record co-activation between newly surfaced memories and prior surfaces.
 
     Args:
         newly_surfaced_ids: Memory IDs surfaced on this tool call (post-filter).
-        prior_surfaced: {memory_id: surfaced_ts} for memories surfaced earlier
-                        in this session (BEFORE this call's log).
-        now_ts: Current timestamp.
+        prior_surfaced: {memory_id: turn_at_surface} for memories surfaced
+                        earlier in this session (BEFORE this call's log).
+                        Entries with turn_at_surface < 0 (unknown) are skipped.
+        current_turn: Turn number at which the new memories are surfacing.
+        now_ts: Current timestamp (stored on the association as last_co_fire_ts).
 
     Returns:
         Number of association pairs updated.
@@ -53,19 +71,23 @@ def record_co_activations(
     if not newly_surfaced_ids:
         return 0
 
-    # Limit prior surfaces to most recent MAX_PRIOR_SURFACES to bound work.
+    # Limit prior surfaces to the MAX_PRIOR_SURFACES closest turns (max turn value
+    # = most recent). This bounds work in marathon sessions.
     if prior_surfaced and len(prior_surfaced) > MAX_PRIOR_SURFACES:
         sorted_prior = sorted(prior_surfaced.items(), key=lambda x: x[1], reverse=True)
         prior_surfaced = dict(sorted_prior[:MAX_PRIOR_SURFACES])
 
     pairs_updated = 0
     for new_id in newly_surfaced_ids:
-        for prior_id, prior_ts in prior_surfaced.items():
+        for prior_id, prior_turn in prior_surfaced.items():
             if new_id == prior_id:
                 continue
+            if prior_turn is None or prior_turn < 0:
+                # Unknown distance (e.g. pre-v3 surface rows) — skip.
+                continue
 
-            dt = abs(now_ts - prior_ts)
-            signal = math.exp(-dt / TAU_SECONDS)
+            dturns = abs(current_turn - prior_turn)
+            signal = math.exp(-dturns / TAU_TURNS)
             if signal < 0.01:
                 continue  # negligible — skip the write
 
@@ -134,23 +156,94 @@ def lookup_association_boosts(
     return boosts
 
 
-def get_prior_surfaces_with_ts(
+def retrieve_associates_of(
+    conn: sqlite3.Connection,
+    prior_surfaced_ids: set[int],
+    exclude_ids: set[int],
+    project_slug: str | None,
+    now_ts: int,
+    min_boost: float,
+) -> list[tuple[int, float]]:
+    """Find memories linked to prior session surfaces, for the associative track.
+
+    Walks outward from prior_surfaced_ids across memory_associations, decays by
+    calendar time, and returns (memory_id, boost) pairs whose effective boost
+    meets min_boost. Excludes archived memories, respects project scope, and
+    skips any memory_id in exclude_ids (primary selections + already-surfaced).
+    """
+    if not prior_surfaced_ids:
+        return []
+
+    placeholders_p = ",".join("?" * len(prior_surfaced_ids))
+    prior_list = list(prior_surfaced_ids)
+
+    rows = conn.execute(
+        f"""
+        SELECT other_id AS mem_id, strength, last_co_fire_ts
+        FROM (
+            SELECT memory_b_id AS other_id, strength, last_co_fire_ts
+            FROM memory_associations
+            WHERE memory_a_id IN ({placeholders_p})
+            UNION ALL
+            SELECT memory_a_id AS other_id, strength, last_co_fire_ts
+            FROM memory_associations
+            WHERE memory_b_id IN ({placeholders_p})
+        ) AS links
+        JOIN memories m ON m.id = links.other_id
+        WHERE m.archived_ts IS NULL
+          AND (m.scope = 'global' OR m.project_slug = ?)
+        """,
+        (*prior_list, *prior_list, project_slug),
+    ).fetchall()
+
+    # Keep the strongest boost per memory.
+    best: dict[int, float] = {}
+    for row in rows:
+        mem_id = row["mem_id"]
+        if mem_id in prior_surfaced_ids or mem_id in exclude_ids:
+            continue
+        effective = _decayed_strength(row["strength"], row["last_co_fire_ts"], now_ts)
+        if effective < 0.01:
+            continue
+        boost = ASSOC_BOOST * effective
+        if boost < min_boost:
+            continue
+        if mem_id not in best or boost > best[mem_id]:
+            best[mem_id] = boost
+
+    return sorted(best.items(), key=lambda x: -x[1])
+
+
+def get_prior_surfaces_with_turn(
     conn: sqlite3.Connection,
     session_id: str,
 ) -> dict[int, int]:
-    """Get {memory_id: max(surfaced_ts)} for all surfaces in this session so far.
+    """Get {memory_id: max(turn_at_surface)} for all surfaces in this session.
 
-    Used to compute co-activation signal strength based on temporal distance.
+    Used to compute co-activation signal strength based on turn distance.
+    Rows with NULL turn_at_surface (pre-v3 migration) surface as -1 so
+    record_co_activations can cheaply detect and skip them.
     """
     if not session_id:
         return {}
     rows = conn.execute(
-        "SELECT memory_id, MAX(surfaced_ts) AS ts "
+        "SELECT memory_id, MAX(turn_at_surface) AS turn "
         "FROM session_surfaces WHERE session_id = ? "
         "GROUP BY memory_id",
         (session_id,),
     ).fetchall()
-    return {r["memory_id"]: r["ts"] for r in rows}
+    return {r["memory_id"]: (r["turn"] if r["turn"] is not None else -1) for r in rows}
+
+
+def get_session_turn(conn: sqlite3.Connection, session_id: str) -> int:
+    """Current turn counter for this session, or 0 if not yet seen."""
+    if not session_id:
+        return 0
+    row = conn.execute(
+        "SELECT turn_count FROM session_turns WHERE session_id = ?",
+        (session_id,),
+    ).fetchone()
+    return row["turn_count"] if row else 0
 
 
 # ---------- internals ----------

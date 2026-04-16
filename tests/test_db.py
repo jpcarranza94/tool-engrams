@@ -19,27 +19,66 @@ def test_fresh_db_gets_all_tables(tmp_path):
     assert "session_surfaces" in tables
     assert "memory_associations" in tables
     assert "consolidation_runs" in tables
+    assert "session_turns" in tables
     ver = conn.execute("PRAGMA user_version").fetchone()[0]
     assert ver == db.SCHEMA_VERSION
     conn.close()
 
 
-def test_v1_to_v2_migration(tmp_path):
+def test_v1_to_latest_migration(tmp_path):
     path = tmp_path / "v1.sqlite"
     conn = sqlite3.connect(str(path))
     conn.executescript(db.SCHEMA_PATH.read_text())
     conn.execute("PRAGMA user_version = 1")
     conn.close()
 
-    # Reopen via db.connect — should migrate to v2.
+    # Reopen via db.connect — should migrate all the way to current.
     conn = db.connect(path)
     ver = conn.execute("PRAGMA user_version").fetchone()[0]
-    assert ver == 2
+    assert ver == db.SCHEMA_VERSION
     tables = {r[0] for r in conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table'"
     ).fetchall()}
     assert "memory_associations" in tables
     assert "consolidation_runs" in tables
+    assert "session_turns" in tables
+    conn.close()
+
+
+def test_v2_to_v3_adds_turn_at_surface_column(tmp_path):
+    """Existing v2 DBs should pick up the turn_at_surface column + session_turns table."""
+    path = tmp_path / "v2.sqlite"
+    # Build a v2-shape DB manually: schema + v2.sql, user_version=2.
+    conn = sqlite3.connect(str(path))
+    conn.executescript(db.SCHEMA_PATH.read_text())
+    v2_sql = (db.MIGRATIONS_DIR / "v2.sql").read_text()
+    conn.executescript(v2_sql)
+    conn.execute("PRAGMA user_version = 2")
+    conn.close()
+
+    # Reopen — should migrate to v3.
+    conn = db.connect(path)
+    ver = conn.execute("PRAGMA user_version").fetchone()[0]
+    assert ver == 3
+
+    # session_turns exists and is empty.
+    row = conn.execute("SELECT COUNT(*) AS n FROM session_turns").fetchone()
+    assert row["n"] == 0
+
+    # session_surfaces has the new turn_at_surface column.
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(session_surfaces)").fetchall()}
+    assert "turn_at_surface" in cols
+
+    conn.close()
+
+
+def test_v3_index_on_turn_at_surface_exists(tmp_path):
+    path = tmp_path / "idx.sqlite"
+    conn = db.connect(path)
+    indexes = {r[0] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='index'"
+    ).fetchall()}
+    assert "idx_session_surfaces_turn" in indexes
     conn.close()
 
 

@@ -14,6 +14,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -48,10 +49,13 @@ def _run(payload: dict[str, Any]) -> int:
         _emit({})
         return 0
 
-    # Reinforcement: only on success.
-    if not is_error:
-        conn = db.connect()
-        try:
+    now_ts = int(time.time())
+    conn = db.connect()
+    try:
+        # Reinforcement: only on success. Filter to hook = 'pre_tool_use' so
+        # associative-track surfaces (hook = 'pre_tool_use_assoc') don't count —
+        # their tool call wasn't aimed at them.
+        if not is_error:
             rows = conn.execute(
                 "SELECT memory_id FROM session_surfaces "
                 "WHERE session_id = ? AND tool_use_id = ? AND hook = 'pre_tool_use'",
@@ -65,8 +69,19 @@ def _run(payload: dict[str, Any]) -> int:
                     f"WHERE id IN ({placeholders})",
                     memory_ids,
                 )
-        finally:
-            conn.close()
+
+        # Always increment the per-session turn counter (tracks conversational
+        # distance for Hebbian co-activation). Runs regardless of error state —
+        # every tool call is a turn.
+        conn.execute(
+            "INSERT INTO session_turns (session_id, turn_count, updated_ts) "
+            "VALUES (?, 1, ?) "
+            "ON CONFLICT(session_id) DO UPDATE SET "
+            "turn_count = turn_count + 1, updated_ts = ?",
+            (session_id, now_ts, now_ts),
+        )
+    finally:
+        conn.close()
 
     # Async observer: spawn background process to analyze this tool call.
     _spawn_observer(payload)
