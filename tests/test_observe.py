@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from toolengrams.observe import _SKIP_HEADS, _MIN_CMD_LENGTH, _try_save_from_judgment
+from toolengrams.transcript import is_sidechain_call
 
 
 # ---------- gating ----------
@@ -91,6 +92,38 @@ def test_try_save_defaults_to_project_scope(temp_db, capsys):
     assert row is not None
     assert row["scope"] == "project"
     assert row["project_slug"] == "-tmp-test-projects-myapp"
+
+
+# ---------- sidechain detection ----------
+
+
+def test_sidechain_detection_normal_call():
+    """Normal user-driven call has no agent_id/agent_type."""
+    payload = {
+        "session_id": "abc",
+        "tool_name": "Bash",
+        "tool_input": {"command": "git status"},
+        "cwd": "/tmp/project",
+    }
+    assert is_sidechain_call(payload) is False
+
+
+def test_sidechain_detection_task_subagent():
+    """Task-spawned subagent call has agent_id and agent_type."""
+    payload = {
+        "session_id": "abc",
+        "tool_name": "Bash",
+        "tool_input": {"command": "ls"},
+        "agent_id": "xyz-123",
+        "agent_type": "general-purpose",
+    }
+    assert is_sidechain_call(payload) is True
+
+
+def test_sidechain_detection_agent_type_only():
+    """agent_type alone is enough to identify a sidechain."""
+    payload = {"tool_name": "Bash", "agent_type": "Explore"}
+    assert is_sidechain_call(payload) is True
 
 
 def test_try_save_global_scope_has_no_slug(temp_db, capsys):

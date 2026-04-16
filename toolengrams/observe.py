@@ -26,7 +26,7 @@ from . import db
 from .prompts.observer import OBSERVER_PROMPT
 from .queries import get_existing_memories_summary
 from .subprocess_utils import parse_claude_json_output
-from .transcript import read_recent_context
+from .transcript import is_sidechain_call, read_recent_context
 
 CLAUDE_BIN = shutil.which("claude")
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -86,6 +86,15 @@ def _observe(payload: dict) -> int:
 
     first_token = command.split()[0] if command.split() else ""
     if first_token in _SKIP_HEADS:
+        return 0
+
+    # Skip tool calls originating from Task-tool-spawned sidechains.
+    # These are Claude-initiated exploration/research (detected via
+    # agent_id/agent_type in the hook payload), not user-driven
+    # workflow. Agent-team subagents are NOT filtered — their tool
+    # calls are real work explicitly requested by the user.
+    if is_sidechain_call(payload):
+        _log(f"SKIP sidechain cmd={first_token} agent_type={payload.get('agent_type')}")
         return 0
 
     context = read_recent_context(transcript_path, session_id)

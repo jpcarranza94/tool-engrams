@@ -26,6 +26,22 @@ def find_transcript(transcript_path: str, session_id: str) -> Path | None:
     return None
 
 
+def is_sidechain_call(payload: dict) -> bool:
+    """Check whether this tool call originated inside a Task-spawned subagent.
+
+    Claude Code's PreToolUse/PostToolUse hook payload includes `agent_id`
+    and `agent_type` fields ONLY when the tool call was made by a
+    sidechain subagent spawned via the Task tool. Normal user-driven
+    calls and agent-team subagent calls (different mechanism) do not
+    include these fields.
+
+    Rationale: Task sidechains are autonomous exploration/research that
+    Claude spawned mid-conversation — not part of the user's actual
+    workflow — so we skip memory formation on them.
+    """
+    return bool(payload.get("agent_id") or payload.get("agent_type"))
+
+
 def read_recent_context(transcript_path: str, session_id: str) -> str:
     """Extract ALL user prompts + recent tool calls from a session.
 
