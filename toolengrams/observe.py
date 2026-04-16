@@ -40,6 +40,18 @@ _SKIP_HEADS = {
 
 _MIN_CMD_LENGTH = 20
 
+# File tools (Edit/Write/MultiEdit) give us path-bound signal — Claude is
+# modifying code in a specific area. Edit/Write carry clearer intent than
+# Read, so we only observe mutations.
+_FILE_TOOLS = {"Edit", "Write", "MultiEdit"}
+
+# Path substrings that indicate generated/dependency code not worth memory
+# formation. Keep the list small — we want to be lenient here.
+_PATH_NOISE = (
+    "node_modules/", ".venv/", "venv/", "__pycache__/",
+    ".git/", "dist/", "build/", ".next/", "target/",
+)
+
 
 def main(argv: list[str] | None = None) -> int:
     if argv and len(argv) >= 1:
@@ -77,34 +89,25 @@ def _observe(payload: dict) -> int:
     transcript_path = payload.get("transcript_path") or ""
     cwd = payload.get("cwd") or ""
 
-    if tool_name != "Bash":
-        return 0
-
-    command = tool_input.get("command", "")
-    if not command or len(command) < _MIN_CMD_LENGTH:
-        return 0
-
-    first_token = command.split()[0] if command.split() else ""
-    if first_token in _SKIP_HEADS:
+    # Extract the signal depending on the tool kind. Bash gives us a
+    # command; Edit/Write/MultiEdit give us a file path.
+    signal_kind, signal_value = _extract_signal(tool_name, tool_input)
+    if signal_kind is None:
         return 0
 
     # Skip tool calls originating from Task-tool-spawned sidechains.
-    # These are Claude-initiated exploration/research (detected via
-    # agent_id/agent_type in the hook payload), not user-driven
-    # workflow. Agent-team subagents are NOT filtered — their tool
-    # calls are real work explicitly requested by the user.
     if is_sidechain_call(payload):
-        _log(f"SKIP sidechain cmd={first_token} agent_type={payload.get('agent_type')}")
+        _log(f"SKIP sidechain tool={tool_name} agent_type={payload.get('agent_type')}")
         return 0
 
     context = read_recent_context(transcript_path, session_id)
     if not context:
         return 0
 
-    _log(f"OBSERVE cmd={first_token} len={len(command)}")
+    _log(f"OBSERVE tool={tool_name} {signal_kind}={signal_value[:60]}")
 
     existing = get_existing_memories_summary(db.connect())
-    prompt = _build_prompt(command, context, existing, cwd)
+    prompt = _build_prompt(tool_name, signal_kind, signal_value, context, existing, cwd)
 
     # Run from a temp dir with engram-observe- prefix so the consolidator
     # can identify and skip these sessions.
@@ -166,8 +169,13 @@ def _try_save_from_judgment(response_text: str, cwd: str = "") -> None:
     type_ = judgment.get("type", "reference")
     scope = judgment.get("scope", "project")
     triggers = judgment.get("triggers", [])
+    paths = judgment.get("paths", [])
 
     if not name or not body:
+        return
+
+    # Need at least one trigger or path for the memory to fire on anything.
+    if not triggers and not paths:
         return
 
     # Set ENGRAM_PROJECT_CWD so remember.py resolves the correct project slug
@@ -180,22 +188,68 @@ def _try_save_from_judgment(response_text: str, cwd: str = "") -> None:
     for t in triggers:
         if isinstance(t, str) and t.strip():
             argv.extend(["--trigger", t.strip()])
+    for p in paths:
+        if isinstance(p, str) and p.strip():
+            argv.extend(["--path", p.strip()])
     remember_main(argv)
 
 
-def _build_prompt(command: str, context: str, existing: str, cwd: str = "") -> str:
+def _extract_signal(
+    tool_name: str, tool_input: dict
+) -> tuple[str | None, str]:
+    """Extract the observer's signal from a tool call.
+
+    Returns (kind, value) where kind is "command" (Bash) or "file" (Edit/
+    Write/MultiEdit), or (None, "") to skip. Applies per-tool gating.
+    """
+    if tool_name == "Bash":
+        command = tool_input.get("command", "") or ""
+        if not command or len(command) < _MIN_CMD_LENGTH:
+            return None, ""
+        first_token = command.split()[0] if command.split() else ""
+        if first_token in _SKIP_HEADS:
+            return None, ""
+        return "command", command
+
+    if tool_name in _FILE_TOOLS:
+        file_path = tool_input.get("file_path", "") or ""
+        if not file_path:
+            return None, ""
+        # Skip generated/dependency paths.
+        if any(noise in file_path for noise in _PATH_NOISE):
+            return None, ""
+        return "file", file_path
+
+    return None, ""
+
+
+def _build_prompt(
+    tool_name: str,
+    signal_kind: str,
+    signal_value: str,
+    context: str,
+    existing: str,
+    cwd: str = "",
+) -> str:
     cwd_section = f"\n## Project Directory\n\n{cwd}\n" if cwd else ""
+    if signal_kind == "command":
+        call_section = f"## Current Tool Call (Bash)\n\n```\n{signal_value[:500]}\n```"
+    else:  # file
+        call_section = (
+            f"## Current Tool Call ({tool_name})\n\n"
+            f"File: `{signal_value}`\n\n"
+            "If this file's area has knowledge Claude would need "
+            "when working elsewhere on similar files, consider a "
+            "path_glob memory via --path (e.g. `**/tax.py`, "
+            "`**/migrations/*.py`)."
+        )
     return f"""{OBSERVER_PROMPT}
 {cwd_section}
 ## Recent Context
 
 {context}
 
-## Current Tool Call
-
-```
-{command[:500]}
-```
+{call_section}
 
 ## Existing Memories (don't duplicate these)
 

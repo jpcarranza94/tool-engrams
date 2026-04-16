@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
-from toolengrams.observe import _SKIP_HEADS, _MIN_CMD_LENGTH, _try_save_from_judgment
+from toolengrams.observe import (
+    _SKIP_HEADS,
+    _MIN_CMD_LENGTH,
+    _FILE_TOOLS,
+    _extract_signal,
+    _try_save_from_judgment,
+)
 from toolengrams.transcript import is_sidechain_call
 
 
@@ -43,10 +49,10 @@ def test_try_save_skip_judgment(temp_db, capsys):
 
 
 def test_try_save_valid_judgment(temp_db, capsys):
-    """Valid judgment with backticked command should create a memory."""
+    """Valid judgment with explicit trigger should create a memory."""
     _try_save_from_judgment(
         '{"name": "test-mem", "body": "Use `docker build --no-cache` to avoid stale layers.", '
-        '"type": "feedback", "scope": "global"}'
+        '"type": "feedback", "scope": "global", "triggers": ["docker build"]}'
     )
     rows = temp_db.execute("SELECT name, body FROM memories WHERE archived_ts IS NULL").fetchall()
     assert len(rows) == 1
@@ -66,7 +72,7 @@ def test_try_save_handles_markdown_wrapped_json(temp_db, capsys):
     """JSON wrapped in markdown fences should still parse."""
     _try_save_from_judgment(
         '```json\n{"name": "wrapped", "body": "Use `make test` before pushing.", '
-        '"type": "feedback", "scope": "global"}\n```'
+        '"type": "feedback", "scope": "global", "triggers": ["make test"]}\n```'
     )
     rows = temp_db.execute("SELECT name FROM memories WHERE archived_ts IS NULL").fetchall()
     assert len(rows) == 1
@@ -92,6 +98,56 @@ def test_try_save_defaults_to_project_scope(temp_db, capsys):
     assert row is not None
     assert row["scope"] == "project"
     assert row["project_slug"] == "-tmp-test-projects-myapp"
+
+
+# ---------- signal extraction ----------
+
+
+def test_signal_bash_command():
+    kind, value = _extract_signal("Bash", {"command": "git push origin main"})
+    assert kind == "command"
+    assert value == "git push origin main"
+
+
+def test_signal_bash_short_command_skipped():
+    kind, _ = _extract_signal("Bash", {"command": "ls"})
+    assert kind is None
+
+
+def test_signal_bash_trivial_head_skipped():
+    kind, _ = _extract_signal("Bash", {"command": "echo hello world foo bar"})
+    assert kind is None
+
+
+def test_signal_edit_file_tool():
+    kind, value = _extract_signal("Edit", {"file_path": "/repo/src/billing.py"})
+    assert kind == "file"
+    assert value == "/repo/src/billing.py"
+
+
+def test_signal_write_file_tool():
+    kind, value = _extract_signal("Write", {"file_path": "/repo/new.py"})
+    assert kind == "file"
+
+
+def test_signal_multiedit_tool():
+    kind, _ = _extract_signal("MultiEdit", {"file_path": "/repo/a.py"})
+    assert kind == "file"
+
+
+def test_signal_read_tool_not_observed():
+    """Read is too common to trigger the observer."""
+    kind, _ = _extract_signal("Read", {"file_path": "/repo/a.py"})
+    assert kind is None
+
+
+def test_signal_noise_paths_skipped():
+    kind, _ = _extract_signal("Edit", {"file_path": "/repo/node_modules/foo/x.js"})
+    assert kind is None
+    kind, _ = _extract_signal("Edit", {"file_path": "/repo/.venv/lib/x.py"})
+    assert kind is None
+    kind, _ = _extract_signal("Write", {"file_path": "/repo/__pycache__/x.pyc"})
+    assert kind is None
 
 
 # ---------- sidechain detection ----------
@@ -124,6 +180,33 @@ def test_sidechain_detection_agent_type_only():
     """agent_type alone is enough to identify a sidechain."""
     payload = {"tool_name": "Bash", "agent_type": "Explore"}
     assert is_sidechain_call(payload) is True
+
+
+def test_try_save_with_paths(temp_db, capsys):
+    """Judgment with only paths (no triggers) should save a path-bound memory."""
+    _try_save_from_judgment(
+        '{"name": "billing-decimal", "body": "Files in billing/ must use custom Decimal precision.", '
+        '"type": "feedback", "scope": "project", "paths": ["**/billing/*.py"]}',
+        cwd="/tmp/test-projects/myapp",
+    )
+    row = temp_db.execute(
+        "SELECT m.id, t.kind, t.path_pattern FROM memories m "
+        "JOIN triggers t ON t.memory_id = m.id "
+        "WHERE m.name = 'billing-decimal'"
+    ).fetchone()
+    assert row is not None
+    assert row["kind"] == "path_glob"
+    assert row["path_pattern"] == "**/billing/*.py"
+
+
+def test_try_save_no_triggers_no_paths_skipped(temp_db, capsys):
+    """Judgment without triggers or paths must not create a memory."""
+    _try_save_from_judgment(
+        '{"name": "empty", "body": "Use `git status`.", '
+        '"type": "reference", "scope": "global"}'
+    )
+    rows = temp_db.execute("SELECT COUNT(*) AS c FROM memories").fetchone()
+    assert rows["c"] == 0
 
 
 def test_try_save_global_scope_has_no_slug(temp_db, capsys):

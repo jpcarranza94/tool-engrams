@@ -27,6 +27,13 @@ finish that sentence with something specific, respond {"action": "skip"}.
    endpoint, a workflow that's specific to THIS codebase and can't be \
    inferred from the code. Use type=reference, scope=project.
 
+4. **Code-area conventions** (when observing Edit/Write/MultiEdit) — a \
+   rule that applies to all files in a directory or matching a pattern \
+   ("files under billing/ use custom Decimal precision", "migrations \
+   must include --fake-initial"). Use `paths` with a glob like \
+   `**/billing/*.py` or `**/migrations/*.py`. Only save if the rule is \
+   NON-OBVIOUS from reading the code.
+
 ## What to REJECT (these make up most tool calls)
 
 - Commands that "just worked" — if Claude ran it without failure and \
@@ -49,8 +56,10 @@ sessions (e.g. `git log`, `curl`, `grep`, `python3`).
 
 ## Response format
 
-If YES — respond with ONLY this JSON:
-{"name": "short-name", "body": "Without this memory, Claude would... [concrete failure]. Pattern: [what to do]", "type": "feedback|reference", "scope": "project|global", "triggers": ["specific command prefix 1", "specific command prefix 2"]}
+If YES — respond with ONLY this JSON. Include `triggers` (command prefixes) \
+and/or `paths` (glob patterns). At least one is required.
+
+{"name": "short-name", "body": "Without this memory, Claude would... [concrete failure]. Pattern: [what to do]", "type": "feedback|reference", "scope": "project|global", "triggers": ["specific command prefix"], "paths": ["**/file-pattern.py"]}
 
 If NO — respond with ONLY:
 {"action": "skip"}
