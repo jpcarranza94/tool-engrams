@@ -137,7 +137,7 @@ echo ""
 
 # 5. Optional: install nightly consolidation schedule.
 echo "5. Nightly consolidation schedule"
-echo "   The consolidation agent reviews your day's sessions at 6 PM."
+echo "   The consolidation agent reviews yesterday's sessions at 8 AM."
 OS="$(uname -s)"
 case "$OS" in
     Darwin)
@@ -160,7 +160,7 @@ case "$OS" in
         ;;
 esac
 if [ "$OS" != "unsupported" ]; then
-    read -p "   Install the 6 PM daily schedule? [y/N] " -n 1 -r
+    read -p "   Install the 8 AM daily schedule? [y/N] " -n 1 -r
     echo ""
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         engram consolidate --install-schedule

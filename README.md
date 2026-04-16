@@ -59,7 +59,7 @@ Three formation layers work together:
 | Layer | Model | When | Job |
 |---|---|---|---|
 | **Observer** | Haiku | After each nontrivial Bash call (async) | Fast candidate triage — flags patterns worth remembering |
-| **Consolidator** | Opus | Daily at 6 PM | Thorough review — prunes noise, discovers missed patterns |
+| **Consolidator** | Opus | Daily at 8 AM (reviews yesterday) | Thorough review — prunes noise, discovers missed patterns |
 | **Manual** | N/A | User or Claude initiated | Escape hatch via `engram remember` |
 
 ## Neuroscience-inspired reinforcement
@@ -81,7 +81,7 @@ The install script:
 2. Adds hooks to `~/.claude/settings.json`
 3. Symlinks skills (`/engram-remember`, `/engram-forget`, `/engram-recall`)
 4. Initializes the SQLite database
-5. Optionally installs the 6 PM nightly consolidation schedule
+5. Optionally installs the 8 AM daily consolidation schedule (reviews yesterday's sessions)
 
 Memories form automatically as you use Claude Code. You can also run `engram seed` to insert a few example memories to explore the system.
 

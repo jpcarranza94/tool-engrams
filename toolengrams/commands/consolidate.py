@@ -125,7 +125,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--json", action="store_true",
                         help="JSON output.")
     parser.add_argument("--install-schedule", action="store_true",
-                        help="Install macOS launchd plist for nightly 2 AM runs.")
+                        help="Install scheduled daily consolidation (launchd on macOS, cron on Linux, 8 AM).")
     parser.add_argument("--uninstall-schedule", action="store_true",
                         help="Remove the launchd plist.")
     return parser.parse_args(argv)

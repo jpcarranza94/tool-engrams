@@ -4,7 +4,7 @@ Spawned by PostToolUse as a detached background process. Sends a simple
 Haiku prompt with recent context and the current tool call. If Haiku
 thinks it's a candidate worth keeping, saves it via engram remember.
 
-The consolidator (Opus, 6 PM) reviews these candidates with full context
+The consolidator (Opus, 8 AM) reviews these candidates with full context
 and prunes the ones that aren't worth keeping. The observer is fast
 triage, not thorough analysis.
 

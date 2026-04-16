@@ -87,7 +87,7 @@ def _generate_plist() -> str:
     <key>StartCalendarInterval</key>
     <dict>
         <key>Hour</key>
-        <integer>18</integer>
+        <integer>8</integer>
         <key>Minute</key>
         <integer>0</integer>
     </dict>
@@ -140,7 +140,7 @@ def _uninstall_launchd() -> bool:
 def _build_cron_line() -> str:
     engram_bin = _find_engram()
     log_path = LOG_DIR / "consolidate.log"
-    return f"0 18 * * * {engram_bin} consolidate --yesterday --json >> {log_path} 2>&1 {CRON_MARKER}"
+    return f"0 8 * * * {engram_bin} consolidate --yesterday --json >> {log_path} 2>&1 {CRON_MARKER}"
 
 
 def _get_current_crontab() -> str:
@@ -175,7 +175,7 @@ def _install_cron() -> str:
     if proc.returncode != 0:
         raise RuntimeError(f"Failed to install cron job: {proc.stderr}")
 
-    return f"cron: daily at 18:00 ({CRON_MARKER})"
+    return f"cron: daily at 08:00 ({CRON_MARKER})"
 
 
 def _uninstall_cron() -> bool:
