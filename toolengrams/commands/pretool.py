@@ -146,6 +146,13 @@ def _run(payload: dict[str, Any]) -> int:
 
     # Log surfaces for BOTH tracks; associative rows use a distinct hook tag so
     # reinforcement (which targets 'pre_tool_use' only) skips them.
+    #
+    # NOTE: surface_count is bumped ONLY for primary surfaces. Associative
+    # surfaces are context-injection, not "this memory was asked to inform a
+    # tool call" — bumping them here would poison the usefulness metric
+    # (useful_count can only grow via the 'pre_tool_use' reinforcement path,
+    # so every assoc surface without a matching useful bump drives usefulness
+    # toward zero).
     if primary:
         _log_surfaces(conn, session_id, primary, tool_use_id, "pre_tool_use",
                       current_turn, now_ts)
@@ -153,18 +160,20 @@ def _run(payload: dict[str, Any]) -> int:
     if associative:
         _log_surfaces(conn, session_id, associative, tool_use_id,
                       "pre_tool_use_assoc", current_turn, now_ts)
-        _bump_surface_counts(conn, associative, now_ts)
 
-    # Hebbian: record co-activations AFTER logging. Both tracks count as
-    # newly-surfaced for co-fire purposes — they're all live this turn.
-    newly_surfaced_ids = [c.memory_id for c in primary] + [c.memory_id for c in associative]
-    record_co_activations(
-        conn, session_id,
-        newly_surfaced_ids=newly_surfaced_ids,
-        prior_surfaced=prior_surfaces_turn,
-        current_turn=current_turn,
-        now_ts=now_ts,
-    )
+    # Hebbian: record co-activations AFTER logging. Only PRIMARY surfaces count
+    # as fresh observations — associative surfaces are inference from existing
+    # associations, not new evidence. Feeding them back would create a positive
+    # feedback loop: an associate fires because of a prior link, we strengthen
+    # that link, which makes the associate fire more often next time.
+    if primary:
+        record_co_activations(
+            conn, session_id,
+            newly_surfaced_ids=[c.memory_id for c in primary],
+            prior_surfaced=prior_surfaces_turn,
+            current_turn=current_turn,
+            now_ts=now_ts,
+        )
 
     additional_context = format_injection(primary, associative)
 

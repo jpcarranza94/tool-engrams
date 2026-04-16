@@ -12,7 +12,6 @@ from toolengrams.associations import (
     TAU_TURNS,
     get_prior_surfaces_with_turn,
     get_session_turn,
-    lookup_association_boosts,
     record_co_activations,
 )
 
@@ -250,98 +249,3 @@ def test_get_session_turn_reads_counter(temp_db):
     )
     assert get_session_turn(temp_db, "sess1") == 7
 
-
-# ---------- boost lookup ----------
-
-
-def test_boost_lookup_returns_max_strength(temp_db):
-    m1 = _seed(temp_db, "mem1")
-    m2 = _seed(temp_db, "mem2")
-    m3 = _seed(temp_db, "mem3")
-    now_ts = int(time.time())
-
-    # m1↔m2 strong, m1↔m3 weak
-    temp_db.execute(
-        "INSERT INTO memory_associations (memory_a_id, memory_b_id, strength, co_fire_count, last_co_fire_ts, created_ts) "
-        "VALUES (?, ?, 0.8, 5, ?, ?)",
-        (m1, m2, now_ts, now_ts),
-    )
-    temp_db.execute(
-        "INSERT INTO memory_associations (memory_a_id, memory_b_id, strength, co_fire_count, last_co_fire_ts, created_ts) "
-        "VALUES (?, ?, 0.2, 2, ?, ?)",
-        (m1, m3, now_ts, now_ts),
-    )
-
-    # Candidate is m1, prior surfaced are m2 and m3
-    boosts = lookup_association_boosts(
-        temp_db,
-        candidate_ids=[m1],
-        prior_surfaced_ids={m2, m3},
-        now_ts=now_ts,
-    )
-
-    # Should use max (m1↔m2 = 0.8), not sum
-    assert m1 in boosts
-    expected = ASSOC_BOOST * 0.8  # 0.3 * 0.8 = 0.24
-    assert abs(boosts[m1] - expected) < 0.01
-
-
-def test_boost_decays_with_time(temp_db):
-    m1 = _seed(temp_db, "mem1")
-    m2 = _seed(temp_db, "mem2")
-    now_ts = int(time.time())
-    old_ts = now_ts - int(ASSOC_HALF_LIFE_DAYS * 86400)  # one half-life ago
-
-    temp_db.execute(
-        "INSERT INTO memory_associations (memory_a_id, memory_b_id, strength, co_fire_count, last_co_fire_ts, created_ts) "
-        "VALUES (?, ?, 0.8, 5, ?, ?)",
-        (m1, m2, old_ts, old_ts),
-    )
-
-    boosts = lookup_association_boosts(
-        temp_db,
-        candidate_ids=[m1],
-        prior_surfaced_ids={m2},
-        now_ts=now_ts,
-    )
-
-    # After one half-life, effective = 0.8 * 0.5 = 0.4
-    expected = ASSOC_BOOST * 0.4  # 0.3 * 0.4 = 0.12
-    assert m1 in boosts
-    assert abs(boosts[m1] - expected) < 0.02
-
-
-def test_no_prior_surfaces_no_boosts(temp_db):
-    m1 = _seed(temp_db, "mem1")
-    boosts = lookup_association_boosts(
-        temp_db,
-        candidate_ids=[m1],
-        prior_surfaced_ids=set(),
-        now_ts=int(time.time()),
-    )
-    assert boosts == {}
-
-
-def test_symmetric_lookup_works(temp_db):
-    """Association stored as (1,2) should be found when candidate=2, prior=1."""
-    m1 = _seed(temp_db, "mem1")
-    m2 = _seed(temp_db, "mem2")
-    now_ts = int(time.time())
-
-    # Stored with canonical ordering (m1 < m2)
-    temp_db.execute(
-        "INSERT INTO memory_associations (memory_a_id, memory_b_id, strength, co_fire_count, last_co_fire_ts, created_ts) "
-        "VALUES (?, ?, 0.6, 3, ?, ?)",
-        (m1, m2, now_ts, now_ts),
-    )
-
-    # Look up with m2 as candidate and m1 as prior (reversed)
-    boosts = lookup_association_boosts(
-        temp_db,
-        candidate_ids=[m2],
-        prior_surfaced_ids={m1},
-        now_ts=now_ts,
-    )
-    assert m2 in boosts
-    expected = ASSOC_BOOST * 0.6
-    assert abs(boosts[m2] - expected) < 0.01

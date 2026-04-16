@@ -7,9 +7,7 @@ Operations:
   1. record_co_activations() — called after _log_surfaces in pretool.
   2. retrieve_associates_of() — pretool's associative-track retrieval; walks
      outward from prior session surfaces and returns linked memory ids + boosts.
-  3. lookup_association_boosts() — for a given candidate set, returns max
-     effective boost against prior surfaces (kept for completeness + tests).
-  4. Bounded Hebbian growth + read-time decay (no background jobs).
+  3. Bounded Hebbian growth + read-time decay (no background jobs).
 
 Signal distance is measured in *conversational turns* (tool calls), not
 wall-clock seconds. A 5-minute gap might be 20 rapid tool calls of dense work
@@ -103,57 +101,6 @@ def record_co_activations(
             pairs_updated += 1
 
     return pairs_updated
-
-
-def lookup_association_boosts(
-    conn: sqlite3.Connection,
-    candidate_ids: list[int],
-    prior_surfaced_ids: set[int],
-    now_ts: int,
-) -> dict[int, float]:
-    """For each candidate, find its max effective association strength
-    with any previously-surfaced memory.
-
-    Returns {memory_id: boost_factor} where boost = ASSOC_BOOST * max_strength.
-    Missing entries mean no boost (0.0).
-    """
-    if not candidate_ids or not prior_surfaced_ids:
-        return {}
-
-    # Build a single query using UNION for symmetric lookup.
-    placeholders_c = ",".join("?" * len(candidate_ids))
-    placeholders_p = ",".join("?" * len(prior_surfaced_ids))
-    prior_list = list(prior_surfaced_ids)
-
-    rows = conn.execute(
-        f"""
-        SELECT memory_a_id AS cand, memory_b_id AS prior_id, strength, last_co_fire_ts
-        FROM memory_associations
-        WHERE memory_a_id IN ({placeholders_c}) AND memory_b_id IN ({placeholders_p})
-        UNION ALL
-        SELECT memory_b_id AS cand, memory_a_id AS prior_id, strength, last_co_fire_ts
-        FROM memory_associations
-        WHERE memory_b_id IN ({placeholders_c}) AND memory_a_id IN ({placeholders_p})
-        """,
-        (*candidate_ids, *prior_list, *candidate_ids, *prior_list),
-    ).fetchall()
-
-    # For each candidate, take the max effective (decayed) strength.
-    boosts: dict[int, float] = {}
-    for row in rows:
-        cand_id = row["cand"]
-        raw_strength = row["strength"]
-        last_ts = row["last_co_fire_ts"]
-
-        effective = _decayed_strength(raw_strength, last_ts, now_ts)
-        if effective < 0.01:
-            continue
-
-        boost = ASSOC_BOOST * effective
-        if cand_id not in boosts or boost > boosts[cand_id]:
-            boosts[cand_id] = boost
-
-    return boosts
 
 
 def retrieve_associates_of(
