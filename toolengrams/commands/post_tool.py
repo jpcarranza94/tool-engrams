@@ -1,27 +1,19 @@
-"""PostToolUse hook command — success reinforcement + async observer.
+"""PostToolUse hook command — success reinforcement.
 
-Two jobs:
-  1. (Sync) Bump useful_count for memories that were surfaced on this tool call.
-  2. (Async) Spawn a background observer that reads recent context and decides
-     if there's a new tool-usage pattern worth remembering.
+Bumps useful_count for memories that were surfaced on this tool call and
+increments the per-session turn counter.
 
-Output: {} (no injection — both jobs are silent).
+Output: {} (no injection).
 """
 
 from __future__ import annotations
 
 import json
-import os
-import subprocess
 import sys
 import time
-from pathlib import Path
 from typing import Any
 
 from .. import db
-
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-PYTHON_BIN = sys.executable
 
 
 def main() -> int:
@@ -83,28 +75,8 @@ def _run(payload: dict[str, Any]) -> int:
     finally:
         conn.close()
 
-    # Async observer: spawn background process to analyze this tool call.
-    _spawn_observer(payload)
-
     _emit({})
     return 0
-
-
-def _spawn_observer(payload: dict[str, Any]) -> None:
-    """Fire-and-forget: spawn engram observe as a background process."""
-    try:
-        payload_json = json.dumps(payload)
-        env = os.environ.copy()
-        env["PYTHONPATH"] = str(REPO_ROOT)
-        subprocess.Popen(
-            [PYTHON_BIN, "-m", "toolengrams", "observe", payload_json],
-            env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,  # fully detach from parent
-        )
-    except Exception:
-        pass  # observer is best-effort — never block the hook
 
 
 def _detect_error(payload: dict[str, Any]) -> bool:

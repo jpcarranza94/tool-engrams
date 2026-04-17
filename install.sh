@@ -99,6 +99,20 @@ if not any("engram post-tool" in str(h) for h in hooks.get("PostToolUse", [])):
 else:
     print("  PostToolUse hook already present")
 
+# UserPromptSubmit — watcher liveness check
+if not any("engram user-prompt" in str(h) for h in hooks.get("UserPromptSubmit", [])):
+    hooks.setdefault("UserPromptSubmit", []).append({
+        "matcher": "",
+        "hooks": [{
+            "type": "command",
+            "command": "engram user-prompt",
+            "timeout": 2000,
+        }]
+    })
+    print("  Added UserPromptSubmit hook")
+else:
+    print("  UserPromptSubmit hook already present")
+
 # Permission for engram CLI.
 perms = settings.setdefault("permissions", {}).setdefault("allow", [])
 if "Bash(engram *)" not in perms:

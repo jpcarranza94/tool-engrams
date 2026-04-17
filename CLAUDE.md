@@ -8,10 +8,10 @@ ToolEngrams is a tool-bound memory system for Claude Code. Memories bind to comm
 
 - `toolengrams/` — core package
   - `commands/` — CLI handlers (one per subcommand: pretool, post_tool, remember, forget, etc.)
-  - `prompts/` — all prompt text in one place (session_start, pretool, observer, consolidation)
+  - `prompts/` — all prompt text in one place (session_start, pretool, watcher, consolidation)
   - `consolidation/` — nightly agent (collect sessions, spawn Opus review, launchd schedule)
   - `migrations/` — SQL migration files (auto-discovered by db.py)
-  - `observe.py` — async background observer (spawned by post_tool, not a user command)
+  - `watcher.py` — persistent parallel Haiku session (spawned by session_start, not a user command)
   - `triggers.py` — trigger persistence (shared by remember, dedup)
   - `formation.py` — pure trigger extraction from memory body text (no DB writes)
 - `skills/` — Claude Code skill files (symlinked to ~/.claude/skills/)
@@ -21,8 +21,8 @@ ToolEngrams is a tool-bound memory system for Claude Code. Memories bind to comm
 ## How it works
 
 1. **PreToolUse hook** (`pretool.py`) — fires before every whitelisted tool call. Queries SQLite for memories whose trigger prefix matches the command. Feedback memories deny (block) the call; reference memories allow with context.
-2. **PostToolUse hook** (`post_tool.py`) — bumps useful_count on success, spawns async observer.
-3. **Observer** (`observe.py`) — background Haiku agent that triages whether a tool call is worth remembering.
+2. **PostToolUse hook** (`post_tool.py`) — bumps useful_count on success.
+3. **Watcher** (`watcher.py`) — persistent parallel Haiku session that wakes every 5 min, reads the JSONL transcript delta, and forms memories from multi-call patterns. Spawned by SessionStart, respawned by UserPromptSubmit if dead.
 4. **Consolidation** (`consolidation/agent.py`) — nightly Opus agent that reviews the day's sessions.
 
 ## Running tests

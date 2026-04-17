@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import subprocess
 import tempfile
 import time
 import webbrowser
@@ -13,7 +12,7 @@ from pathlib import Path
 
 from .. import db
 
-LOG_PATH = Path.home() / ".claude" / "tool-engrams" / "observer.log"
+LOG_PATH = Path.home() / ".claude" / "tool-engrams" / "watcher.log"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -29,21 +28,17 @@ def main(argv: list[str] | None = None) -> int:
         conn.close()
 
 
-def _count_observer_processes() -> int:
-    """Count running engram observe processes."""
+def _count_watcher_sessions(conn: sqlite3.Connection) -> int:
+    """Count active watcher sessions from the DB."""
     try:
-        result = subprocess.run(
-            ["pgrep", "-f", "toolengrams.*observe"],
-            capture_output=True, text=True, timeout=5,
-        )
-        return len(result.stdout.strip().splitlines()) if result.stdout.strip() else 0
+        return conn.execute("SELECT COUNT(*) FROM watcher_state").fetchone()[0]
     except Exception:
         return 0
 
 
-def _read_observer_stats() -> dict:
-    """Parse observer.log for recent activity stats."""
-    stats = {"total": 0, "today": 0, "last_entry": "—"}
+def _read_watcher_stats() -> dict:
+    """Parse watcher.log for recent activity stats."""
+    stats = {"total": 0, "today": 0, "last_entry": "---"}
     try:
         if not LOG_PATH.exists():
             return stats
@@ -103,8 +98,8 @@ def _build_html(conn: sqlite3.Connection) -> str:
     archived = [m for m in memories if m["archived_ts"] is not None]
     total_surfaces = sum(m["surface_count"] for m in active)
     total_useful = sum(m["useful_count"] for m in active)
-    observer_procs = _count_observer_processes()
-    observer_stats = _read_observer_stats()
+    watcher_sessions = _count_watcher_sessions(conn)
+    watcher_stats = _read_watcher_stats()
 
     now_ts = int(time.time())
 
@@ -209,9 +204,9 @@ def _build_html(conn: sqlite3.Connection) -> str:
             <td class="num">{c['memories_archived'] or 0}</td>
         </tr>""")
 
-    # Observer status indicator.
-    obs_color = "#7ee787" if observer_procs > 0 else "#8b949e"
-    obs_label = f"{observer_procs} running" if observer_procs > 0 else "idle"
+    # Watcher status indicator.
+    obs_color = "#7ee787" if watcher_sessions > 0 else "#8b949e"
+    obs_label = f"{watcher_sessions} active" if watcher_sessions > 0 else "idle"
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -281,8 +276,8 @@ td {{ padding: 10px 12px; border-top: 1px solid #21262d; vertical-align: top; fo
     <div class="stat"><div class="val">{len(associations)}</div><div class="label">Associations</div></div>
     <div class="stat">
         <div class="val"><span class="obs-dot" style="background:{obs_color}"></span>{obs_label}</div>
-        <div class="label">Observer</div>
-        <div class="sub">{observer_stats['today']} calls today / {observer_stats['total']} total</div>
+        <div class="label">Watcher</div>
+        <div class="sub">{watcher_stats['today']} events today / {watcher_stats['total']} total</div>
     </div>
 </div>
 
