@@ -49,9 +49,9 @@ def test_try_save_skip_judgment(temp_db, capsys):
 
 
 def test_try_save_valid_judgment(temp_db, capsys):
-    """Valid judgment with explicit trigger should create a memory."""
+    """Valid judgment with action=save and explicit trigger should create a memory."""
     _try_save_from_judgment(
-        '{"name": "test-mem", "body": "Use `docker build --no-cache` to avoid stale layers.", '
+        '{"action": "save", "name": "test-mem", "body": "Use `docker build --no-cache` to avoid stale layers.", '
         '"type": "feedback", "scope": "global", "triggers": ["docker build"]}'
     )
     rows = temp_db.execute("SELECT name, body FROM memories WHERE archived_ts IS NULL").fetchall()
@@ -59,23 +59,29 @@ def test_try_save_valid_judgment(temp_db, capsys):
     assert rows[0]["name"] == "test-mem"
 
 
-def test_try_save_rejects_no_backticks(temp_db, capsys):
-    """Judgment without backticked commands should be rejected."""
+def test_try_save_rejects_no_triggers_or_paths(temp_db, capsys):
+    """Judgment with action=save but no triggers or paths should be rejected."""
     _try_save_from_judgment(
-        '{"name": "bad", "body": "No backticks here.", "type": "reference", "scope": "global"}'
+        '{"action": "save", "name": "bad", "body": "No triggers.", "type": "reference", "scope": "global"}'
     )
     rows = temp_db.execute("SELECT COUNT(*) AS c FROM memories").fetchone()
     assert rows["c"] == 0
 
 
-def test_try_save_handles_markdown_wrapped_json(temp_db, capsys):
-    """JSON wrapped in markdown fences should still parse."""
+def test_try_save_requires_action_save(temp_db, capsys):
+    """Judgment with action != 'save' should not create a memory."""
     _try_save_from_judgment(
-        '```json\n{"name": "wrapped", "body": "Use `make test` before pushing.", '
-        '"type": "feedback", "scope": "global", "triggers": ["make test"]}\n```'
+        '{"action": "skip"}'
     )
-    rows = temp_db.execute("SELECT name FROM memories WHERE archived_ts IS NULL").fetchall()
-    assert len(rows) == 1
+    rows = temp_db.execute("SELECT COUNT(*) AS c FROM memories").fetchone()
+    assert rows["c"] == 0
+
+    # Even with full fields, action must be "save"
+    _try_save_from_judgment(
+        '{"action": "skip", "name": "nope", "body": "Use `git`.", "triggers": ["git"]}'
+    )
+    rows = temp_db.execute("SELECT COUNT(*) AS c FROM memories").fetchone()
+    assert rows["c"] == 0
 
 
 def test_try_save_handles_garbage(temp_db, capsys):
@@ -88,7 +94,7 @@ def test_try_save_handles_garbage(temp_db, capsys):
 def test_try_save_defaults_to_project_scope(temp_db, capsys):
     """Judgment without explicit scope should default to project."""
     _try_save_from_judgment(
-        '{"name": "scoped-mem", "body": "Use `make deploy` in this repo.", '
+        '{"action": "save", "name": "scoped-mem", "body": "Use `make deploy` in this repo.", '
         '"type": "reference", "triggers": ["make deploy"]}',
         cwd="/tmp/test-projects/myapp",
     )
@@ -185,7 +191,7 @@ def test_sidechain_detection_agent_type_only():
 def test_try_save_with_paths(temp_db, capsys):
     """Judgment with only paths (no triggers) should save a path-bound memory."""
     _try_save_from_judgment(
-        '{"name": "billing-decimal", "body": "Files in billing/ must use custom Decimal precision.", '
+        '{"action": "save", "name": "billing-decimal", "body": "Files in billing/ must use custom Decimal precision.", '
         '"type": "feedback", "scope": "project", "paths": ["**/billing/*.py"]}',
         cwd="/tmp/test-projects/myapp",
     )
@@ -202,7 +208,7 @@ def test_try_save_with_paths(temp_db, capsys):
 def test_try_save_no_triggers_no_paths_skipped(temp_db, capsys):
     """Judgment without triggers or paths must not create a memory."""
     _try_save_from_judgment(
-        '{"name": "empty", "body": "Use `git status`.", '
+        '{"action": "save", "name": "empty", "body": "Use `git status`.", '
         '"type": "reference", "scope": "global"}'
     )
     rows = temp_db.execute("SELECT COUNT(*) AS c FROM memories").fetchone()
@@ -212,7 +218,7 @@ def test_try_save_no_triggers_no_paths_skipped(temp_db, capsys):
 def test_try_save_global_scope_has_no_slug(temp_db, capsys):
     """Explicit scope=global should not bind to a project."""
     _try_save_from_judgment(
-        '{"name": "global-mem", "body": "Use `git push --force-with-lease`.", '
+        '{"action": "save", "name": "global-mem", "body": "Use `git push --force-with-lease`.", '
         '"type": "feedback", "scope": "global", "triggers": ["git push --force"]}',
         cwd="/tmp/test-projects/myapp",
     )

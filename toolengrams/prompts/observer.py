@@ -54,15 +54,17 @@ triggers (`git push --force`, `jira sprint add`, `docker compose up`).
 Never use triggers that are so generic they'd fire on the majority of \
 sessions (e.g. `git log`, `curl`, `grep`, `python3`).
 
-## Response format
+## Response format (output is JSON-schema-constrained)
 
-If YES — respond with ONLY this JSON. Include `triggers` (command prefixes) \
-and/or `paths` (glob patterns). At least one is required.
+Your response MUST be a JSON object with an "action" field.
 
-{"name": "short-name", "body": "Without this memory, Claude would... [concrete failure]. Pattern: [what to do]", "type": "feedback|reference", "scope": "project|global", "triggers": ["specific command prefix"], "paths": ["**/file-pattern.py"]}
+If SKIP (most cases): `{"action": "skip"}`
 
-If NO — respond with ONLY:
-{"action": "skip"}
+If SAVE: include all fields:
+`{"action": "save", "name": "short-name", "body": "Without this memory, Claude would... [concrete failure]. Pattern: [what to do]", "type": "feedback", "scope": "project", "triggers": ["specific command prefix"], "paths": ["**/file-pattern.py"]}`
+
+Include `triggers` (command prefixes) and/or `paths` (glob patterns). \
+At least one is required for a save.
 
 ## Other rules
 

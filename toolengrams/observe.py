@@ -32,6 +32,38 @@ CLAUDE_BIN = shutil.which("claude")
 REPO_ROOT = Path(__file__).resolve().parent.parent
 LOG_PATH = Path.home() / ".claude" / "tool-engrams" / "observer.log"
 
+# JSON schema for constrained decoding. The observer must return either a
+# "skip" object or a "save" object with memory details. --json-schema
+# guarantees the output matches at the token level — no parsing fallbacks.
+OBSERVER_SCHEMA = json.dumps({
+    "type": "object",
+    "properties": {
+        "action": {
+            "type": "string",
+            "enum": ["skip", "save"],
+        },
+        "name": {"type": "string"},
+        "body": {"type": "string"},
+        "type": {
+            "type": "string",
+            "enum": ["feedback", "reference"],
+        },
+        "scope": {
+            "type": "string",
+            "enum": ["project", "global"],
+        },
+        "triggers": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
+        "paths": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
+    },
+    "required": ["action"],
+})
+
 _SKIP_HEADS = {
     "ls", "echo", "cat", "head", "tail", "wc", "pwd", "which", "true",
     "false", "cd", "mkdir", "touch", "rm", "cp", "mv", "chmod",
@@ -121,7 +153,13 @@ def _observe(payload: dict) -> int:
 
     try:
         proc = subprocess.run(
-            [CLAUDE_BIN, "-p", "--model", "haiku", "--output-format", "json", prompt],
+            [
+                CLAUDE_BIN, "-p",
+                "--model", "haiku",
+                "--output-format", "json",
+                "--json-schema", OBSERVER_SCHEMA,
+                prompt,
+            ],
             cwd=work_dir,
             env=env,
             capture_output=True,
@@ -144,24 +182,18 @@ def _observe(payload: dict) -> int:
 
 
 def _try_save_from_judgment(response_text: str, cwd: str = "") -> None:
-    """Parse Haiku's JSON response and save if it's a candidate."""
-    try:
-        clean = response_text.strip()
-        if clean.startswith("```"):
-            lines = clean.splitlines()
-            clean = "\n".join(l for l in lines if not l.startswith("```")).strip()
-        judgment = json.loads(clean)
-    except json.JSONDecodeError:
-        start = response_text.find("{")
-        end = response_text.rfind("}") + 1
-        if start < 0 or end <= start:
-            return
-        try:
-            judgment = json.loads(response_text[start:end])
-        except json.JSONDecodeError:
-            return
+    """Parse the observer's JSON response and save if it's a candidate.
 
-    if judgment.get("action") == "skip":
+    With --json-schema, the response is guaranteed to be valid JSON matching
+    OBSERVER_SCHEMA. The try/except is kept as a safety net for edge cases
+    (timeouts, empty responses, CLI version mismatch).
+    """
+    try:
+        judgment = json.loads(response_text.strip())
+    except (json.JSONDecodeError, ValueError):
+        return
+
+    if judgment.get("action") != "save":
         return
 
     name = judgment.get("name", "")
