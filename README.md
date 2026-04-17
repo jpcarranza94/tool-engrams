@@ -6,7 +6,7 @@ Tool-bound automatic memory for Claude Code. Memories are tied to specific tool-
 
 When Claude is about to run a command (e.g., `git push --force`, `psql -h replica -c`, `docker compose up`), ToolEngrams checks if there's a memory bound to that command prefix. If the memory is a correction (`feedback` type), the call is **blocked** until Claude reads the memory and retries with corrected arguments. If it's informational (`reference` type), the memory is injected as context alongside the call.
 
-Memories form automatically. A background observer watches tool calls and flags patterns worth remembering. A nightly consolidation agent reviews the day's sessions, prunes noise, and discovers patterns that were missed.
+Memories form automatically. A persistent background watcher session reviews your conversation every 5 minutes and identifies patterns worth remembering. A nightly consolidation agent reviews the full day, prunes noise, and discovers patterns that were missed.
 
 ## How memories surface
 
@@ -30,7 +30,7 @@ Memories form automatically. A background observer watches tool calls and flags 
 
 8. **PostToolUse reinforces the outcome.** If the tool call succeeded after a memory surfaced, `useful_count` is incremented — strengthening the memory for future sessions.
 
-9. **The async observer watches for new patterns.** PostToolUse also spawns a background Haiku agent that reviews recent context and decides if there's a new tool-usage pattern worth remembering.
+9. **The watcher reviews the session periodically.** A persistent background Haiku session (spawned at SessionStart) wakes every 5 minutes, reads the JSONL transcript delta, and evaluates the full conversation context for memory-worthy patterns — errors, corrections, trial-and-error discoveries.
 
 ## How memories form
 
@@ -58,15 +58,16 @@ Three formation layers work together:
 
 | Layer | Model | When | Job |
 |---|---|---|---|
-| **Observer** | Haiku | After each nontrivial Bash call (async) | Fast candidate triage — flags patterns worth remembering |
-| **Consolidator** | Opus | Daily at 8 AM (reviews yesterday) | Thorough review — prunes noise, discovers missed patterns |
+| **Watcher** | Haiku | Every 5 min (persistent session) | Reviews conversation delta — catches errors, corrections, multi-call patterns |
+| **Consolidator** | Opus | Daily at 8 AM (reviews yesterday) | Thorough review — prunes noise, discovers missed patterns, deduplicates |
 | **Manual** | N/A | User or Claude initiated | Escape hatch via `engram remember` |
 
 ## Neuroscience-inspired reinforcement
 
-- **Hebbian learning** — memories that surface near each other in a session strengthen their association. Next time one fires, the other gets a score boost ("neurons that fire together wire together").
+- **Hebbian learning** — memories that surface near each other in a session (measured in conversational turns, not wall-clock time) strengthen their association. Associated memories surface as a separate "Related memories" track without competing for primary recall slots.
 - **Usefulness scoring** — memories that surface before successful tool calls get reinforced. Memories that surface without helping decay over time.
 - **Sleep consolidation** — a nightly Opus agent replays the day's sessions, evaluates memory quality, discovers missed patterns, and prunes noise. Like how sleep consolidates daily experiences into long-term memory.
+- **Persistent watcher** — like the hippocampus encoding traces throughout the day, a background Haiku session watches the conversation and forms memories from multi-call patterns (errors → corrections → discoveries) that a per-call observer would miss.
 
 ## Install
 
@@ -124,7 +125,7 @@ engram remember "<body>"    Manually create a memory (use --trigger, --type, --p
 engram forget "<name>"      Soft-demote a memory
 engram pin "<name>"         Pin/unpin a memory
 engram dashboard            Open HTML dashboard in browser
-engram monitor              Resource usage and observer activity
+engram monitor              Resource usage and watcher activity
 engram status               Memory health JSON
 engram consolidate          Run nightly consolidation now
 engram consolidate --force  Re-run even if already ran today
@@ -136,7 +137,7 @@ engram seed                 Insert example memories
 ```
 ~/.claude/tool-engrams/
   db.sqlite          SQLite database (memories, triggers, associations, surfaces)
-  observer.log       Observer activity log
+  watcher.log        Watcher activity log
   consolidate.log    Consolidation output
 
 ~/.claude/settings.json    Hook configuration (added by install.sh)
@@ -148,17 +149,20 @@ engram seed                 Insert example memories
 - **memories** — content, type (feedback/reference), scope (global/project), reinforcement counters
 - **triggers** — command prefix (`Bash: git push --force`) or path glob (`**/*.py`) bindings
 - **memory_associations** — Hebbian co-activation strength between memory pairs
-- **session_surfaces** — which memories surfaced when (for dedup + reinforcement)
-- **consolidation_runs** — nightly run log
+- **session_surfaces** — which memories surfaced when (dedup + reinforcement + turn position)
+- **session_turns** — per-session tool-call counter (for turn-based Hebbian distance)
+- **watcher_state** — active watcher sessions (PID, transcript path, cursor position)
+- **consolidation_runs** — nightly run log with quality metrics
 
-### Scoring formula
+### Scoring formula (primary track)
 
 ```
 usefulness = (useful_count + 1) / (surface_count + 2)         # Laplace-smoothed
 recency    = exp(-days_since_last_surface / half_life)         # 30d feedback, 60d reference
 final      = structural_match × (0.5 + usefulness) × (0.5 + 0.5 × recency)
-           × (1 + association_boost)                           # Hebbian boost, max 30%
 ```
+
+Hebbian associations run on a **separate track** — they surface as "Related memories" without competing for primary recall slots or influencing the deny decision.
 
 ## Testing
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import tempfile
 import time
@@ -28,12 +29,31 @@ def main(argv: list[str] | None = None) -> int:
         conn.close()
 
 
-def _count_watcher_sessions(conn: sqlite3.Connection) -> int:
-    """Count active watcher sessions from the DB."""
+def _count_watcher_sessions(conn: sqlite3.Connection) -> tuple[int, int]:
+    """Count watcher sessions: (total in DB, actually alive).
+
+    Checks each watcher PID to distinguish between stale DB rows
+    (session ended but watcher_state not cleaned up) and truly
+    active watchers.
+    """
     try:
-        return conn.execute("SELECT COUNT(*) FROM watcher_state").fetchone()[0]
+        rows = conn.execute(
+            "SELECT watcher_pid FROM watcher_state"
+        ).fetchall()
     except Exception:
-        return 0
+        return 0, 0
+
+    total = len(rows)
+    alive = 0
+    for row in rows:
+        pid = row["watcher_pid"]
+        if pid:
+            try:
+                os.kill(pid, 0)
+                alive += 1
+            except OSError:
+                pass
+    return total, alive
 
 
 def _read_watcher_stats() -> dict:
@@ -98,7 +118,7 @@ def _build_html(conn: sqlite3.Connection) -> str:
     archived = [m for m in memories if m["archived_ts"] is not None]
     total_surfaces = sum(m["surface_count"] for m in active)
     total_useful = sum(m["useful_count"] for m in active)
-    watcher_sessions = _count_watcher_sessions(conn)
+    watcher_total, watcher_alive = _count_watcher_sessions(conn)
     watcher_stats = _read_watcher_stats()
 
     now_ts = int(time.time())
@@ -205,8 +225,8 @@ def _build_html(conn: sqlite3.Connection) -> str:
         </tr>""")
 
     # Watcher status indicator.
-    obs_color = "#7ee787" if watcher_sessions > 0 else "#8b949e"
-    obs_label = f"{watcher_sessions} active" if watcher_sessions > 0 else "idle"
+    obs_color = "#7ee787" if watcher_alive > 0 else "#8b949e"
+    obs_label = f"{watcher_alive} active" if watcher_alive > 0 else "idle"
 
     return f"""<!DOCTYPE html>
 <html lang="en">
