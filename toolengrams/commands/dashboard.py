@@ -87,7 +87,8 @@ def _build_html(conn: sqlite3.Connection) -> str:
 
     consolidations = conn.execute(
         "SELECT run_date, sessions_scanned, memories_archived, memories_discovered, "
-        "memories_strengthened, memories_weakened "
+        "memories_strengthened, memories_weakened, "
+        "quality_score, surfaces_helpful, surfaces_noise, episodes_evaluated "
         "FROM consolidation_runs ORDER BY started_ts DESC LIMIT 10"
     ).fetchall()
 
@@ -193,12 +194,19 @@ def _build_html(conn: sqlite3.Connection) -> str:
     # Consolidation rows.
     consol_rows = []
     for c in consolidations:
+        qs = c['quality_score']
+        qs_display = f"{qs:.0%}" if qs is not None else "—"
+        qs_class = "good" if qs and qs >= 0.6 else "ok" if qs and qs >= 0.3 else "low" if qs is not None else ""
         consol_rows.append(f"""
         <tr>
             <td>{c['run_date']}</td>
             <td class="num">{c['sessions_scanned']}</td>
-            <td class="num">{c['memories_archived']}</td>
-            <td class="num">{c['memories_discovered']}</td>
+            <td class="num">{c['episodes_evaluated'] or 0}</td>
+            <td class="num">{c['surfaces_helpful'] or 0}</td>
+            <td class="num">{c['surfaces_noise'] or 0}</td>
+            <td class="num"><span class="usefulness {qs_class}">{qs_display}</span></td>
+            <td class="num">{c['memories_discovered'] or 0}</td>
+            <td class="num">{c['memories_archived'] or 0}</td>
         </tr>""")
 
     # Observer status indicator.
@@ -309,8 +317,8 @@ td {{ padding: 10px 12px; border-top: 1px solid #21262d; vertical-align: top; fo
 
 <div class="tab-panel" id="consolidation">
 <table>
-<tr><th>Date</th><th>Sessions</th><th>Archived</th><th>Discovered</th></tr>
-{"".join(consol_rows) or '<tr><td colspan="4" class="empty">No consolidation runs</td></tr>'}
+<tr><th>Date</th><th>Sessions</th><th>Evaluated</th><th>Helpful</th><th>Noise</th><th>Quality</th><th>Created</th><th>Pruned</th></tr>
+{"".join(consol_rows) or '<tr><td colspan="8" class="empty">No consolidation runs</td></tr>'}
 </table>
 </div>
 

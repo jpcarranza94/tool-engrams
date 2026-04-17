@@ -56,10 +56,10 @@ def test_v2_to_v3_adds_turn_at_surface_column(tmp_path):
     conn.execute("PRAGMA user_version = 2")
     conn.close()
 
-    # Reopen — should migrate to v3.
+    # Reopen — should migrate to latest.
     conn = db.connect(path)
     ver = conn.execute("PRAGMA user_version").fetchone()[0]
-    assert ver == 3
+    assert ver == db.SCHEMA_VERSION
 
     # session_turns exists and is empty.
     row = conn.execute("SELECT COUNT(*) AS n FROM session_turns").fetchone()

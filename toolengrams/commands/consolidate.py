@@ -85,15 +85,29 @@ def main(argv: list[str] | None = None) -> int:
         if result.error:
             print(f"engram consolidate: agent error: {result.error}", file=sys.stderr)
 
+        # Parse structured metrics from the report (JSON block at the end).
+        metrics = _extract_metrics(result.report or "")
+
         # Log the run.
         now_ts = int(time.time())
         conn.execute(
             "INSERT OR REPLACE INTO consolidation_runs "
             "(run_date, started_ts, completed_ts, sessions_scanned, "
             "episodes_evaluated, memories_strengthened, memories_weakened, "
-            "memories_archived, memories_discovered, report) "
-            "VALUES (?, ?, ?, ?, 0, 0, 0, 0, 0, ?)",
-            (target.isoformat(), now_ts, now_ts, len(sessions), result.report),
+            "memories_archived, memories_discovered, report, "
+            "quality_score, surfaces_helpful, surfaces_noise) "
+            "VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                target.isoformat(), now_ts, now_ts, len(sessions),
+                metrics.get("surfaces_evaluated", 0),
+                metrics.get("memories_pruned", 0),
+                metrics.get("memories_created", 0),
+                metrics.get("memories_created", 0),
+                result.report,
+                metrics.get("quality_score"),
+                metrics.get("surfaces_helpful", 0),
+                metrics.get("surfaces_noise", 0),
+            ),
         )
 
         if args.json:
@@ -129,6 +143,35 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--uninstall-schedule", action="store_true",
                         help="Remove the launchd plist.")
     return parser.parse_args(argv)
+
+
+def _extract_metrics(report: str) -> dict:
+    """Parse the structured JSON metrics block from the consolidation report.
+
+    The agent is instructed to end its report with a ```json block
+    containing a "metrics" key. We try to extract it; if parsing fails
+    we return an empty dict (graceful degradation — the report text
+    is still stored either way).
+    """
+    try:
+        # Find the last JSON block in the report.
+        last_brace = report.rfind("}")
+        if last_brace < 0:
+            return {}
+        # Walk backwards to find the matching opening brace.
+        depth = 0
+        for i in range(last_brace, -1, -1):
+            if report[i] == "}":
+                depth += 1
+            elif report[i] == "{":
+                depth -= 1
+            if depth == 0:
+                candidate = report[i:last_brace + 1]
+                parsed = json.loads(candidate)
+                return parsed.get("metrics", parsed)
+    except (json.JSONDecodeError, ValueError):
+        pass
+    return {}
 
 
 def _resolve_date(args: argparse.Namespace) -> date:

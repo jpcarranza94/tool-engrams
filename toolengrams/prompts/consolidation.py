@@ -77,9 +77,31 @@ What does NOT qualify:
 
 ### 5. Write a consolidation report
 
-Your final response should include:
+Your final response MUST end with a structured metrics block in exactly this \
+format (the system parses it):
+
+```json
+{{
+  "metrics": {{
+    "sessions_reviewed": <int>,
+    "surfaces_evaluated": <int>,
+    "surfaces_helpful": <int>,
+    "surfaces_noise": <int>,
+    "surfaces_neutral": <int>,
+    "memories_created": <int>,
+    "memories_pruned": <int>,
+    "total_active_after": <int>,
+    "quality_score": <float 0.0-1.0>
+  }}
+}}
+```
+
+Where `quality_score` = surfaces_helpful / max(surfaces_evaluated, 1). \
+This is the key metric we track across days to measure system health.
+
+Before the JSON block, include a human-readable report with:
 - Sessions reviewed and what kind of work happened
-- Memory surfacing evaluations (helpful/noise/neutral) with counts
+- Memory surfacing evaluations (helpful/noise/neutral) with specifics
 - Memories pruned and why
 - New memories created and why (with the "Without this memory..." justification)
 - Observations about the memory system's performance
