@@ -343,10 +343,16 @@ def _format_delta(lines: list[str]) -> str:
 
 
 def _claude_p_new(message: str, schema: str) -> str:
-    """Start a new Haiku session. Returns stdout."""
+    """Start a new Haiku session. Returns stdout.
+
+    Uses --bare to skip hooks — prevents the watcher's Haiku session
+    from triggering SessionStart which would spawn another watcher
+    (recursive fork bomb).
+    """
     proc = subprocess.run(
         [
             CLAUDE_BIN, "-p",
+            "--bare",
             "--model", "haiku",
             "--output-format", "json",
             "--json-schema", schema,
@@ -360,10 +366,14 @@ def _claude_p_new(message: str, schema: str) -> str:
 
 
 def _claude_p_resume(session_id: str, message: str, schema: str) -> str:
-    """Resume an existing Haiku session. Returns stdout."""
+    """Resume an existing Haiku session. Returns stdout.
+
+    Uses --bare to skip hooks (see _claude_p_new docstring).
+    """
     proc = subprocess.run(
         [
             CLAUDE_BIN, "-p",
+            "--bare",
             "--model", "haiku",
             "--output-format", "json",
             "--json-schema", schema,
