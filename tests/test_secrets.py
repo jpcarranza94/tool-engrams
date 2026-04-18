@@ -6,8 +6,8 @@ import json
 
 import pytest
 
-from toolengrams.secrets import scan_for_secrets
-from toolengrams.commands import remember
+from toolengrams.cli import remember
+from toolengrams.formation import scan_for_secrets
 
 
 # ---------- scan_for_secrets ----------

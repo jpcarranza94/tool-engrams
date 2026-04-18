@@ -6,8 +6,8 @@ from toolengrams.formation import (
     FormationCandidate,
     consolidate_vocabulary,
     extract_candidates,
+    insert_candidate_triggers,
 )
-from toolengrams.triggers import insert_candidate_triggers
 
 
 def _heads(candidates: list[FormationCandidate], tool: str) -> set[tuple[str, ...]]:

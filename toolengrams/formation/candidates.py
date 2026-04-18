@@ -23,7 +23,7 @@ import sqlite3
 from dataclasses import dataclass, field
 from typing import Literal
 
-from .extract import _SUBCOMMAND_TOOLS, _tokenize_bash
+from ..retrieval.extract import _SUBCOMMAND_TOOLS, _tokenize_bash
 
 CandidateKind = Literal["tool_head", "path_glob"]
 

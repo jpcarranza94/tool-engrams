@@ -7,7 +7,7 @@ import time
 
 import pytest
 
-from toolengrams.commands import forget
+from toolengrams.cli import forget
 
 
 def _seed(conn, name: str = "test memory", body: str = "test body", **kwargs):

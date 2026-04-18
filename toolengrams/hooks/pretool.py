@@ -44,22 +44,24 @@ import sys
 from typing import Any
 
 from .. import db
-from ..associations import (
-    get_prior_surfaces_with_turn,
-    get_session_turn,
-    record_co_activations,
-    retrieve_associates_of,
-)
-from ..extract import extract_hints
 from ..models import Candidate
 from ..prompts.pretool import format_injection
-from ..utils import slugify_cwd
-from ..rank import (
+from ..reinforcement.counters import bump_surface_counts
+from ..retrieval.associations import record_co_activations, retrieve_associates_of
+from ..retrieval.extract import extract_hints
+from ..retrieval.rank import (
     compute_cluster_stats,
     filter_candidates,
     now,
     retrieve_candidates,
 )
+from ..retrieval.session_state import (
+    get_already_surfaced,
+    get_prior_surfaces_with_turn,
+    get_session_turn,
+    log_surfaces,
+)
+from ..utils import slugify_cwd
 
 
 # Tool whitelist — only these carry user-facing PreToolUse bindings.
@@ -121,7 +123,7 @@ def _run(payload: dict[str, Any]) -> int:
 
     # --- Primary phase: structural match → filter → top-K ---
     cluster_stats = compute_cluster_stats(conn, project_slug, now_ts)
-    surfaced_ids = _already_surfaced_this_session(conn, session_id)
+    surfaced_ids = get_already_surfaced(conn, session_id)
     primary = filter_candidates(candidates, cluster_stats, surfaced_ids)
     primary_ids = {c.memory_id for c in primary}
 
@@ -154,12 +156,13 @@ def _run(payload: dict[str, Any]) -> int:
     # so every assoc surface without a matching useful bump drives usefulness
     # toward zero).
     if primary:
-        _log_surfaces(conn, session_id, primary, tool_use_id, "pre_tool_use",
-                      current_turn, now_ts)
-        _bump_surface_counts(conn, primary, now_ts)
+        primary_memory_ids = [c.memory_id for c in primary]
+        log_surfaces(conn, session_id, primary_memory_ids, tool_use_id,
+                     "pre_tool_use", current_turn, now_ts)
+        bump_surface_counts(conn, primary_memory_ids, now_ts)
     if associative:
-        _log_surfaces(conn, session_id, associative, tool_use_id,
-                      "pre_tool_use_assoc", current_turn, now_ts)
+        log_surfaces(conn, session_id, [c.memory_id for c in associative],
+                     tool_use_id, "pre_tool_use_assoc", current_turn, now_ts)
 
     # Hebbian: record co-activations AFTER logging. Only PRIMARY surfaces count
     # as fresh observations — associative surfaces are inference from existing
@@ -233,50 +236,6 @@ def _hydrate_associates(
             association_boost=boost,
         ))
     return result
-
-
-def _already_surfaced_this_session(conn, session_id: str) -> set[int]:
-    if not session_id:
-        return set()
-    rows = conn.execute(
-        "SELECT DISTINCT memory_id FROM session_surfaces WHERE session_id = ?",
-        (session_id,),
-    ).fetchall()
-    return {r["memory_id"] for r in rows}
-
-
-def _log_surfaces(
-    conn,
-    session_id: str,
-    candidates: list[Candidate],
-    tool_use_id: str | None,
-    hook: str,
-    turn_at_surface: int,
-    now_ts: int,
-) -> None:
-    if not session_id:
-        return
-    rows = [
-        (session_id, c.memory_id, now_ts, hook, tool_use_id, turn_at_surface)
-        for c in candidates
-    ]
-    conn.executemany(
-        "INSERT OR IGNORE INTO session_surfaces "
-        "(session_id, memory_id, surfaced_ts, hook, tool_use_id, turn_at_surface) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        rows,
-    )
-
-
-def _bump_surface_counts(conn, candidates: list[Candidate], now_ts: int) -> None:
-    ids = [c.memory_id for c in candidates]
-    placeholders = ",".join("?" * len(ids))
-    conn.execute(
-        f"UPDATE memories SET surface_count = surface_count + 1, "
-        f"last_surfaced_ts = ? WHERE id IN ({placeholders})",
-        (now_ts, *ids),
-    )
-
 
 
 def _emit(obj: dict[str, Any]) -> None:

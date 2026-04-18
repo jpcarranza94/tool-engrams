@@ -7,7 +7,8 @@ import json
 import sys
 import time
 
-from toolengrams.commands import pretool, seed
+from toolengrams.cli import seed
+from toolengrams.hooks import pretool
 
 
 def _run_pretool(payload: dict, monkeypatch) -> dict:

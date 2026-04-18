@@ -14,6 +14,11 @@ import time
 from typing import Any
 
 from .. import db
+from ..reinforcement.counters import bump_useful_counts
+from ..retrieval.session_state import (
+    get_tool_call_surfaces,
+    increment_session_turn,
+)
 
 
 def main() -> int:
@@ -44,34 +49,19 @@ def _run(payload: dict[str, Any]) -> int:
     now_ts = int(time.time())
     conn = db.connect()
     try:
-        # Reinforcement: only on success. Filter to hook = 'pre_tool_use' so
-        # associative-track surfaces (hook = 'pre_tool_use_assoc') don't count —
-        # their tool call wasn't aimed at them.
+        # Reinforcement: only on success. Target PRIMARY surfaces (hook =
+        # 'pre_tool_use'); associative-track surfaces (hook = 'pre_tool_use_assoc')
+        # don't count — their tool call wasn't aimed at them.
         if not is_error:
-            rows = conn.execute(
-                "SELECT memory_id FROM session_surfaces "
-                "WHERE session_id = ? AND tool_use_id = ? AND hook = 'pre_tool_use'",
-                (session_id, tool_use_id),
-            ).fetchall()
-            if rows:
-                memory_ids = [r["memory_id"] for r in rows]
-                placeholders = ",".join("?" * len(memory_ids))
-                conn.execute(
-                    f"UPDATE memories SET useful_count = useful_count + 1 "
-                    f"WHERE id IN ({placeholders})",
-                    memory_ids,
-                )
+            memory_ids = get_tool_call_surfaces(
+                conn, session_id, tool_use_id, "pre_tool_use",
+            )
+            bump_useful_counts(conn, memory_ids)
 
         # Always increment the per-session turn counter (tracks conversational
         # distance for Hebbian co-activation). Runs regardless of error state —
         # every tool call is a turn.
-        conn.execute(
-            "INSERT INTO session_turns (session_id, turn_count, updated_ts) "
-            "VALUES (?, 1, ?) "
-            "ON CONFLICT(session_id) DO UPDATE SET "
-            "turn_count = turn_count + 1, updated_ts = ?",
-            (session_id, now_ts, now_ts),
-        )
+        increment_session_turn(conn, session_id, now_ts)
     finally:
         conn.close()
 

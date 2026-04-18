@@ -1,23 +1,19 @@
-"""Reinforcement scoring, per-cluster Laplace-smoothed threshold, candidate retrieval."""
+"""Candidate retrieval + per-cluster Laplace-smoothed filter.
+
+Scoring formulas live in reinforcement/scoring.py — this module is only
+about selecting candidates from the store and gating them by cluster quality.
+"""
 
 from __future__ import annotations
 
 import fnmatch
-import math
 import sqlite3
 import time
 from dataclasses import dataclass
 
+from ..models import Candidate, ClusterStats
+from ..reinforcement.scoring import final_score
 from .extract import ExtractedTriggerHint, join_head
-from .models import Candidate, ClusterStats, MemoryType
-
-# Reinforcement constants — how quickly unused memories decay.
-# feedback memories decay faster (30 days) because stale corrections are harmful.
-# reference memories are more evergreen (60 days).
-HALF_LIFE_DAYS: dict[MemoryType, float] = {
-    "feedback": 30.0,
-    "reference": 60.0,
-}
 
 # Laplace threshold constants — control which candidates pass the quality gate.
 #
@@ -44,44 +40,6 @@ class FilterConfig:
     cluster_factor: float = CLUSTER_FACTOR
     absolute_floor: float = ABSOLUTE_FLOOR
     top_k: int = TOP_K
-
-
-# ---------- scoring ----------
-
-
-def usefulness(useful_count: int, surface_count: int) -> float:
-    """Laplace-smoothed usefulness ratio. Always in (0, 1]."""
-    return (useful_count + 1.0) / (surface_count + 2.0)
-
-
-def recency(last_surfaced_ts: int, half_life_days: float, now_ts: int) -> float:
-    """Exponential decay on last surface time. Returns 1.0 if never surfaced (fresh)."""
-    if last_surfaced_ts == 0:
-        return 1.0
-    if half_life_days <= 0:
-        return 1.0
-    delta_days = max(0.0, (now_ts - last_surfaced_ts) / 86400.0)
-    return math.exp(-delta_days / half_life_days)
-
-
-def final_score(
-    candidate: Candidate,
-    now_ts: int,
-) -> float:
-    """Combine structural match with reinforcement-weighted modifiers.
-
-    Hebbian associations are no longer multiplied into this score — they run
-    on a separate track (see pretool.py associative phase). Keeping primary
-    scoring purely structural × reinforcement × recency × pinning prevents a
-    distant-but-associated memory from outranking a directly-matched one.
-    """
-    u = usefulness(candidate.useful_count, candidate.surface_count)
-    half_life = HALF_LIFE_DAYS.get(candidate.type, HALF_LIFE_DAYS["reference"])
-    r = recency(candidate.last_surfaced_ts, half_life, now_ts)
-    score = candidate.structural_match * (0.5 + u) * (0.5 + 0.5 * r)
-    if candidate.pinned:
-        score *= 1.5
-    return score
 
 
 # ---------- candidate retrieval ----------

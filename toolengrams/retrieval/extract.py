@@ -19,7 +19,7 @@ import re
 import shlex
 from typing import Any
 
-from .models import ExtractedTriggerHint
+from ..models import ExtractedTriggerHint
 
 # Known CLI first tokens we care about for head extraction.
 # Anything not in this list still gets a single-token head, but the second-token

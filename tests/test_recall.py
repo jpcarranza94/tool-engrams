@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import time
 
-from toolengrams.commands import recall
+from toolengrams.cli import recall
 
 
 def _seed(conn, name: str, body: str = "body", **kwargs):

@@ -9,7 +9,7 @@ from __future__ import annotations
 import sqlite3
 from typing import Any, Iterable
 
-from .formation import FormationCandidate
+from .candidates import FormationCandidate
 
 
 def insert_candidate_triggers(

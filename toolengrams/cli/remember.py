@@ -21,14 +21,16 @@ import time
 from typing import Any
 
 from .. import db
-from ..dedup import find_overlapping_memory, update_existing_memory
-from ..secrets import scan_for_secrets
 from ..formation import (
     FormationCandidate,
     consolidate_vocabulary,
     extract_candidates,
+    extras_to_candidates,
+    find_overlapping_memory,
+    insert_candidate_triggers,
+    scan_for_secrets,
+    update_existing_memory,
 )
-from ..triggers import extras_to_candidates, insert_candidate_triggers
 from ..utils import slugify_cwd
 
 VALID_TYPES = {"feedback", "reference"}

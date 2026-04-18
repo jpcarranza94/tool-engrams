@@ -43,13 +43,13 @@ def test_collect_ignores_other_dates(tmp_path):
 
 
 def test_consolidate_dry_run(temp_db, monkeypatch, capsys):
-    from toolengrams.commands import consolidate
+    from toolengrams.cli import consolidate
     rc = consolidate.main(["--dry-run", "--json"])
     assert rc == 0
 
 
 def test_consolidate_idempotent(temp_db, monkeypatch, capsys):
-    from toolengrams.commands import consolidate
+    from toolengrams.cli import consolidate
     # Simulate a previous run by inserting directly.
     temp_db.execute(
         "INSERT INTO consolidation_runs (run_date, started_ts, completed_ts, sessions_scanned, report) "

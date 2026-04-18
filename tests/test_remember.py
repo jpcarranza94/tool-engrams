@@ -7,7 +7,7 @@ import json
 
 import pytest
 
-from toolengrams.commands import remember
+from toolengrams.cli import remember
 
 
 def _run(argv: list[str], monkeypatch, stdin: str | None = None, capsys=None) -> dict:

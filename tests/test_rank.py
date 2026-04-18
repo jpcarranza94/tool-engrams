@@ -5,13 +5,11 @@ from __future__ import annotations
 import math
 
 from toolengrams.models import Candidate, ClusterStats
-from toolengrams.rank import (
+from toolengrams.reinforcement.scoring import final_score, recency, usefulness
+from toolengrams.retrieval.rank import (
     FilterConfig,
     filter_candidates,
-    final_score,
-    recency,
     smoothed_threshold,
-    usefulness,
 )
 
 NOW = 1_780_000_000  # fixed "now" for deterministic recency math

@@ -12,19 +12,21 @@ import sys
 from typing import Callable
 
 from . import watcher
-from .commands import (
+from .cli import (
     consolidate,
     dashboard,
     forget,
     monitor,
     pin,
-    post_tool,
-    pretool,
     recall,
     remember,
     seed,
-    session_start,
     status,
+)
+from .hooks import (
+    post_tool,
+    pretool,
+    session_start,
     user_prompt,
 )
 

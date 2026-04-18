@@ -5,14 +5,16 @@ from __future__ import annotations
 import math
 import time
 
-from toolengrams.associations import (
+from toolengrams.retrieval.associations import (
     ALPHA,
     ASSOC_BOOST,
     ASSOC_HALF_LIFE_DAYS,
     TAU_TURNS,
+    record_co_activations,
+)
+from toolengrams.retrieval.session_state import (
     get_prior_surfaces_with_turn,
     get_session_turn,
-    record_co_activations,
 )
 
 

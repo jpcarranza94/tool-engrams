@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import time
 
-from toolengrams.commands import pin
+from toolengrams.cli import pin
 
 
 def _seed(conn, name: str = "test memory", pinned: int = 0):

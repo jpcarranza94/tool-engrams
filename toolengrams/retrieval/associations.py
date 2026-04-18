@@ -161,38 +161,6 @@ def retrieve_associates_of(
     return sorted(best.items(), key=lambda x: -x[1])
 
 
-def get_prior_surfaces_with_turn(
-    conn: sqlite3.Connection,
-    session_id: str,
-) -> dict[int, int]:
-    """Get {memory_id: max(turn_at_surface)} for all surfaces in this session.
-
-    Used to compute co-activation signal strength based on turn distance.
-    Rows with NULL turn_at_surface (pre-v3 migration) surface as -1 so
-    record_co_activations can cheaply detect and skip them.
-    """
-    if not session_id:
-        return {}
-    rows = conn.execute(
-        "SELECT memory_id, MAX(turn_at_surface) AS turn "
-        "FROM session_surfaces WHERE session_id = ? "
-        "GROUP BY memory_id",
-        (session_id,),
-    ).fetchall()
-    return {r["memory_id"]: (r["turn"] if r["turn"] is not None else -1) for r in rows}
-
-
-def get_session_turn(conn: sqlite3.Connection, session_id: str) -> int:
-    """Current turn counter for this session, or 0 if not yet seen."""
-    if not session_id:
-        return 0
-    row = conn.execute(
-        "SELECT turn_count FROM session_turns WHERE session_id = ?",
-        (session_id,),
-    ).fetchone()
-    return row["turn_count"] if row else 0
-
-
 # ---------- internals ----------
 
 

@@ -12,8 +12,8 @@ import re
 import sqlite3
 from typing import Any
 
-from . import db
-from .formation import FormationCandidate
+from .. import db
+from .candidates import FormationCandidate
 from .triggers import extras_to_candidates, insert_candidate_triggers
 
 # If an existing memory shares this many triggers with the new one,

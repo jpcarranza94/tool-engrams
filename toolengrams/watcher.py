@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 
 from . import db
-from .commands.remember import main as remember_main
+from .cli.remember import main as remember_main
 from .prompts.watcher import WATCHER_INITIAL_PROMPT, WATCHER_SUBSEQUENT_HEADER
 from .subprocess_utils import parse_claude_json_output
 from .utils import slugify_cwd

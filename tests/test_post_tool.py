@@ -6,7 +6,7 @@ import io
 import json
 import time
 
-from toolengrams.commands import post_tool
+from toolengrams.hooks import post_tool
 
 
 def _seed_memory(conn, name: str = "test memory") -> int:

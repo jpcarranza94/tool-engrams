@@ -18,6 +18,7 @@ import time
 
 from .. import db
 from ..queries import find_memory, fts_quote
+from ..reinforcement.counters import archive, restore, soft_demote
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -59,18 +60,10 @@ def _forget_one(conn, name: str, hard_delete: bool) -> int:
         return 1
 
     if hard_delete:
-        conn.execute(
-            "UPDATE memories SET archived_ts = ? WHERE id = ?",
-            (int(time.time()), row["id"]),
-        )
+        archive(conn, row["id"])
         action = "archived"
     else:
-        conn.execute(
-            "UPDATE memories SET useful_count = 0, "
-            "surface_count = surface_count + 5, last_surfaced_ts = 0 "
-            "WHERE id = ?",
-            (row["id"],),
-        )
+        soft_demote(conn, row["id"])
         action = "soft_demoted"
 
     print(json.dumps({
@@ -97,14 +90,9 @@ def _forget_topic(conn, keyword: str, hard_delete: bool) -> int:
     affected = []
     for r in rows:
         if hard_delete:
-            conn.execute("UPDATE memories SET archived_ts = ? WHERE id = ?", (now_ts, r["id"]))
+            archive(conn, r["id"], now_ts)
         else:
-            conn.execute(
-                "UPDATE memories SET useful_count = 0, "
-                "surface_count = surface_count + 5, last_surfaced_ts = 0 "
-                "WHERE id = ?",
-                (r["id"],),
-            )
+            soft_demote(conn, r["id"])
         affected.append({"memory_id": r["id"], "name": r["name"]})
 
     print(json.dumps({
@@ -122,12 +110,7 @@ def _restore(conn, name: str) -> int:
         print(json.dumps({"error": "not_found", "query": name}))
         return 1
 
-    conn.execute(
-        "UPDATE memories SET archived_ts = NULL, "
-        "useful_count = 0, surface_count = 0, last_surfaced_ts = 0 "
-        "WHERE id = ?",
-        (row["id"],),
-    )
+    restore(conn, row["id"])
     print(json.dumps({
         "action": "restored",
         "memory_id": row["id"],

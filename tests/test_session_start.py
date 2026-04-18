@@ -8,7 +8,7 @@ import sys
 from unittest.mock import patch
 
 from toolengrams import db
-from toolengrams.commands import session_start
+from toolengrams.hooks import session_start
 
 
 def _run(payload: dict, monkeypatch) -> dict:

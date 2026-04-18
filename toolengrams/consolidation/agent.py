@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..prompts.consolidation import build_consolidation_prompt
+from ..reinforcement.scoring import usefulness
 from ..subprocess_utils import parse_claude_json_output, write_agent_settings
 from .collect import SessionFile
 
@@ -41,11 +42,11 @@ def _get_memory_summary(db_path: Path) -> str:
 
     lines = [f"Active memories ({len(memories)}):"]
     for m in memories:
-        usefulness = (m["useful_count"] + 1.0) / (m["surface_count"] + 2.0)
+        u = usefulness(m["useful_count"], m["surface_count"])
         lines.append(
             f"  [{m['id']}] \"{m['name']}\" type={m['type']} "
             f"surfaces={m['surface_count']} useful={m['useful_count']} "
-            f"usefulness={usefulness:.2f}"
+            f"usefulness={u:.2f}"
         )
         lines.append(f"       body: {m['body'][:150]}")
 

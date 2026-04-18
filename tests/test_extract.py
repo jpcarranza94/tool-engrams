@@ -6,7 +6,7 @@ tools in the PreToolUse whitelist.
 
 from __future__ import annotations
 
-from toolengrams.extract import extract_hints
+from toolengrams.retrieval.extract import extract_hints
 
 
 def test_bash_single_head():
