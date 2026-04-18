@@ -56,6 +56,11 @@ def main() -> int:
         return 0
 
 
+# Temp dir prefixes that indicate non-user sessions (consolidation agent,
+# old observer, experiments). Don't spawn watchers for these.
+_SKIP_CWD_PREFIXES = ("engram-consolidate-", "engram-observe-", "engram-experiment-")
+
+
 def _maybe_spawn_watcher(payload: dict) -> None:
     """Spawn watcher on startup; check existing on resume; skip clear/compact."""
     source = payload.get("source", "")
@@ -63,6 +68,11 @@ def _maybe_spawn_watcher(payload: dict) -> None:
     cwd = payload.get("cwd", "")
 
     if not session_id or not cwd:
+        return
+
+    # Skip non-user sessions (consolidation agent, old observer, etc.)
+    cwd_basename = cwd.rstrip("/").rsplit("/", 1)[-1] if "/" in cwd else cwd
+    if any(cwd_basename.startswith(prefix) for prefix in _SKIP_CWD_PREFIXES):
         return
 
     if source == "startup":
