@@ -19,6 +19,7 @@ from .cli import (
     migrate_v1_to_v2,
     monitor,
     pin,
+    rebuild_triggers,
     recall,
     remember,
     seed,
@@ -46,6 +47,7 @@ _SELF_PARSING = {
     "watcher": watcher.main,
     "monitor": monitor.main,
     "migrate-v1-to-v2": migrate_v1_to_v2.main,
+    "rebuild-triggers": rebuild_triggers.main,
 }
 
 
@@ -77,6 +79,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("watcher", help="Persistent parallel Haiku watcher (background)", add_help=False)
     sub.add_parser("monitor", help="Resource usage and watcher activity", add_help=False)
     sub.add_parser("migrate-v1-to-v2", help="One-shot migration from v1 (design-v8) to v2 (design-v9)", add_help=False)
+    sub.add_parser("rebuild-triggers", help="Re-extract triggers from memory bodies (post-migration repair)", add_help=False)
 
     sub.add_parser("export", help="Dump memories to markdown (stub)")
 
