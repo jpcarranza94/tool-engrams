@@ -1,73 +1,70 @@
 # ToolEngrams
 
-Tool-bound automatic memory for Claude Code. Memories are tied to specific tool-call patterns, surface automatically when Claude is about to act, and strengthen with use — like biological engrams.
+**Tool-bound memory for Claude Code.** Agent-facing tools become self-documenting through interaction: Claude fails a call, the system remembers why, and next session (or next month) arrives with that knowledge in hand.
 
-## What it does
+> **Status:** alpha. Breaking changes between versions. No stable users to protect. See `docs/design-v9.md` for the current design.
 
-When Claude is about to run a command (e.g., `git push --force`, `psql -h replica -c`, `docker compose up`), ToolEngrams checks if there's a memory bound to that command prefix. If the memory is a correction (`feedback` type), the call is **blocked** until Claude reads the memory and retries with corrected arguments. If it's informational (`reference` type), the memory is injected as context alongside the call.
+## The problem
 
-Memories form automatically. A persistent background watcher session reviews your conversation every 5 minutes and identifies patterns worth remembering. A nightly consolidation agent reviews the full day, prunes noise, and discovers patterns that were missed.
+Claude Code is great at well-known CLIs. It's not great at:
 
-## How memories surface
+- **Custom CLIs** not in training data (your company's internal tools, bespoke wrappers)
+- **Project-specific conventions** bound to commands ("this repo's test command needs REUSE_DB=1", "deploy requires cd into frontend/ first")
+- **Subtle semantic gotchas** in databases, APIs, and frameworks (the wrong column name, the surprising flag, the workaround only the tribe knows)
 
-1. **Claude decides to call a tool** — e.g., `git push --force origin main`.
+For all of these, the useful information is bound to a specific tool-call pattern. Generic RAG / conversational memory doesn't help — the agent needs the fact *right when it's about to act*.
 
-2. **Claude Code fires the PreToolUse hook** before executing the tool, piping the tool call details to `engram pretool` via stdin.
+## How it works
 
-3. **The hook extracts the full command** for matching. `git push --force origin main` becomes the matchable string that stored triggers are checked against.
+Two hooks, one trigger mechanism.
 
-4. **SQLite is queried for matching memories.** Two kinds of triggers:
-   - **Command prefix** (`tool_head`): `"git push --force"` matches `git push --force origin main` because it's a prefix. But `"git push"` is a different trigger on a different memory — only exact prefix matches fire.
-   - **File path glob** (`path_glob`): `**/*.py` matches when Claude Reads/Edits/Writes any Python file.
+### The canonical flow (a `hint` memory)
 
-5. **Matched memories are scored and filtered.** Usefulness (how often it helped), recency (when it last surfaced), and Hebbian association boosts (co-activation with other memories) determine which memories surface. Top 3 win. Session dedup ensures each memory surfaces only once per session.
+1. Claude runs `ergdb -c "SELECT name FROM core_statustype"` and it fails (`column "name" does not exist`).
+2. Claude Code fires **PostToolUseFailure** → ToolEngrams looks up memories bound to `ergdb -c` → injects the stored correction as `additionalContext`.
+3. Claude reads "the column is `label`, not `name`", retries, succeeds.
+4. Next session, same failure pattern, same correction surfaces instantly — no rediscovery.
 
-6. **The hook responds — deny or allow.**
-   - `feedback` memories with a command prefix trigger → **deny**. The tool call is blocked. Claude sees the memory as the reason, understands the correction, and retries with the right arguments.
-   - `reference` memories or path glob triggers → **allow** with `additionalContext`. The tool runs normally but Claude sees the memory alongside the result.
+Memories bound this way are **kind: hint**. They surface *only* on real tool failures (Claude Code's `PostToolUseFailure` event, which already discriminates structural failures from semantic non-zero exits like `grep` no-match). No noise on every call.
 
-7. **Claude acts on the memory.** If denied, it retries — e.g., `git push --force-with-lease origin main`. If allowed, the memory informs the current and future tool calls in the session.
+### The rare flow (a `block` memory)
 
-8. **PostToolUse reinforces the outcome.** If the tool call succeeded after a memory surfaced, `useful_count` is incremented — strengthening the memory for future sessions.
-
-9. **The watcher reviews the session periodically.** A persistent background Haiku session (spawned at SessionStart) wakes every 5 minutes, reads the JSONL transcript delta, and evaluates the full conversation context for memory-worthy patterns — errors, corrections, trial-and-error discoveries.
-
-## How memories form
-
-Memories are created with explicit command prefix triggers — Claude (or the observer, or the consolidation agent) decides exactly which commands a memory should fire on:
+For the narrow class where a failure mode is expensive or invisible — destructive ops, silently-wrong outputs — you can author a **kind: block** memory. It fires on **PreToolUse**, Claude's call gets denied, the stored context lands in Claude's next turn, Claude retries with the correction. The user never sees the deny; it's an in-loop correction.
 
 ```bash
-# Correction: blocks git push --force, Claude must retry with --force-with-lease
-engram remember "Use --force-with-lease instead of --force to avoid overwriting" \
+engram remember "Use --force-with-lease; --force overwrites co-workers' pushed commits." \
+  --kind block --scope global \
   --trigger "git push --force" \
-  --trigger "git push -f" \
-  --type feedback
-
-# Informational: context when using psql -h replica (doesn't block)
-engram remember "psql -h replica connects to a read-only replica. SELECT only." \
-  --trigger "psql -h replica" \
-  --type reference
-
-# File-based: fires when editing Python test files
-engram remember "Use pytest.raises as context manager, never decorator form" \
-  --path "**/test_*.py" \
-  --type feedback
+  --trigger "git push -f"
 ```
 
-Three formation layers work together:
+Expect most users to author zero of these. Hints are the default.
+
+### Triggers: subsequence match on tokens
+
+A trigger is a list of required tokens in order. The tool call matches if all trigger tokens appear in the tokenized call, in the same order — **gaps allowed**.
+
+```
+trigger:   ["ergeon", "order", "reassign"]
+matches:   ergeon order 12345 reassign
+matches:   ergeon --env staging order abc reassign --reason X
+no match:  ergeon reassign order    (wrong order)
+no match:  ergeon customer reassign (missing "order")
+```
+
+This handles the positional-ID-between-verbs case that simple prefix matching can't (`gh pr 123 comment`, `kubectl get pod-abc123 describe`, `jira sprint 5 add`).
+
+### Memory formation
+
+Memories are created three ways:
 
 | Layer | Model | When | Job |
 |---|---|---|---|
-| **Watcher** | Haiku | Every 5 min (persistent session) | Reviews conversation delta — catches errors, corrections, multi-call patterns |
-| **Consolidator** | Opus | Daily at 8 AM (reviews yesterday) | Thorough review — prunes noise, discovers missed patterns, deduplicates |
-| **Manual** | N/A | User or Claude initiated | Escape hatch via `engram remember` |
+| **Watcher** | Haiku (background) | Every 5 min | Reviews the conversation delta; catches failed calls + corrections Claude made in the moment |
+| **Consolidation** | Opus (nightly) | Daily | Reviews yesterday's full sessions; prunes noise, discovers patterns the watcher missed, dedupes |
+| **Manual** | — | User or Claude initiated | `engram remember` |
 
-## Neuroscience-inspired reinforcement
-
-- **Hebbian learning** — memories that surface near each other in a session (measured in conversational turns, not wall-clock time) strengthen their association. Associated memories surface as a separate "Related memories" track without competing for primary recall slots.
-- **Usefulness scoring** — memories that surface before successful tool calls get reinforced. Memories that surface without helping decay over time.
-- **Sleep consolidation** — a nightly Opus agent replays the day's sessions, evaluates memory quality, discovers missed patterns, and prunes noise. Like how sleep consolidates daily experiences into long-term memory.
-- **Persistent watcher** — like the hippocampus encoding traces throughout the day, a background Haiku session watches the conversation and forms memories from multi-call patterns (errors → corrections → discoveries) that a per-call observer would miss.
+The watcher and consolidation prompts are user-overridable — see "Configurable prompts" below.
 
 ## Install
 
@@ -77,113 +74,105 @@ cd tool-engrams
 ./install.sh
 ```
 
-The install script:
-1. Installs the `toolengrams` Python package (editable mode)
-2. Adds hooks to `~/.claude/settings.json`
-3. Symlinks skills (`/engram-remember`, `/engram-forget`, `/engram-recall`)
-4. Initializes the SQLite database
-5. Optionally installs the 8 AM daily consolidation schedule (reviews yesterday's sessions)
+The installer:
 
-Memories form automatically as you use Claude Code. You can also run `engram seed` to insert a few example memories to explore the system.
+1. Installs `toolengrams` (pip editable)
+2. Adds the two hooks (`PreToolUse`, `PostToolUseFailure`) + watcher spawn (`SessionStart`, `UserPromptSubmit`) to `~/.claude/settings.json`
+3. Symlinks skills (`/engram-remember`, `/engram-forget`, `/engram-recall`) into `~/.claude/skills/`
+4. Initializes the SQLite DB at `~/.claude/tool-engrams/db.sqlite`
+5. Optionally schedules the nightly consolidation agent
 
 ### Requirements
 
-- Python 3.10+
-- Claude Code >= 2.1.59
-
-### Manual install
-
-If you prefer to set things up yourself:
-
-```bash
-# Install the package.
-uv pip install --system -e .   # or: pip install -e .
-
-# Verify.
-engram status
-
-# Add hooks to settings.json (see install.sh for the JSON structure).
-# Symlink skills.
-ln -sf "$(pwd)/skills/engram-remember" ~/.claude/skills/engram-remember
-ln -sf "$(pwd)/skills/engram-forget" ~/.claude/skills/engram-forget
-ln -sf "$(pwd)/skills/engram-recall" ~/.claude/skills/engram-recall
-
-# Optional: seed example memories to explore the system.
-# engram seed
-
-# Optional: install nightly consolidation.
-engram consolidate --install-schedule
-```
+- Python 3.10+ (stdlib + sqlite3, no deps on the hot path)
+- Claude Code ≥ 2.1.117 (needs the `PostToolUseFailure` hook event)
 
 ## CLI
 
 ```
-engram recall [query]       Browse and search memories
-engram recall --id N        Full detail on one memory
-engram recall --stats       Summary counts
-engram remember "<body>"    Manually create a memory (use --trigger, --type, --path)
-engram forget "<name>"      Soft-demote a memory
-engram pin "<name>"         Pin/unpin a memory
-engram dashboard            Open HTML dashboard in browser
-engram monitor              Resource usage and watcher activity
-engram status               Memory health JSON
-engram consolidate          Run nightly consolidation now
-engram consolidate --force  Re-run even if already ran today
-engram seed                 Insert example memories
+engram recall [query]             # Browse and search memories
+engram recall --id N              # Full detail on one memory
+engram recall --stats             # Summary counts by kind/scope
+engram remember "<body>" \
+  --kind <block|hint> \
+  --scope <global|project> \
+  --trigger "<token sequence>"    # Author a memory (--path for file-glob bindings)
+engram forget "<name>"            # Soft-demote or archive a memory
+engram pin "<name>"               # Pin/unpin a memory (ignored by reinforcement decay)
+engram status                     # Memory health JSON
+engram dashboard                  # Open HTML dashboard in browser
+engram monitor                    # Watcher process health + recent activity
+engram consolidate                # Run the nightly agent now
+engram seed                       # Insert example memories for smoke-testing
+engram migrate-v1-to-v2           # One-shot DB migration for pre-v2 installs
 ```
 
 ## Architecture
 
 ```
 ~/.claude/tool-engrams/
-  db.sqlite          SQLite database (memories, triggers, associations, surfaces)
-  watcher.log        Watcher activity log
-  consolidate.log    Consolidation output
+  db.sqlite                       SQLite (memories, triggers, session state)
+  watcher.log                     Watcher activity
+  consolidate.log                 Consolidation output
+  prompts/                        Optional per-user prompt overrides (see below)
 
-~/.claude/settings.json    Hook configuration (added by install.sh)
-~/.claude/skills/          Skill symlinks (added by install.sh)
+~/.claude/settings.json           Hook config (written by install.sh)
+~/.claude/skills/                 Skill symlinks
 ```
 
-### Database schema
+### DB shape (v2)
 
-- **memories** — content, type (feedback/reference), scope (global/project), reinforcement counters
-- **triggers** — command prefix (`Bash: git push --force`) or path glob (`**/*.py`) bindings
-- **memory_associations** — Hebbian co-activation strength between memory pairs
-- **session_surfaces** — which memories surfaced when (dedup + reinforcement + turn position)
-- **session_turns** — per-session tool-call counter (for turn-based Hebbian distance)
-- **watcher_state** — active watcher sessions (PID, transcript path, cursor position)
-- **consolidation_runs** — nightly run log with quality metrics
+- **memories** — content, `kind ∈ {block, hint}`, `scope ∈ {global, project}`, reinforcement counters (`surface_count`, `useful_count`, `last_surfaced_ts`, `pinned`, `archived_ts`)
+- **triggers** — `kind ∈ {token_subseq, path_glob}`. `token_subseq` stores `first_token` (indexed) + `tokens_json`. `path_glob` stores an fnmatch pattern.
+- **session_surfaces** — which memories surfaced when, under which hook. Per-session dedup + reinforcement targeting.
+- **session_turns** — per-session tool-call counter.
+- **consolidation_runs** — nightly run log with quality metrics.
+- **watcher_state** — active watcher processes (PID, transcript cursor).
 
-### Scoring formula (primary track)
+### Scoring
 
 ```
-usefulness = (useful_count + 1) / (surface_count + 2)         # Laplace-smoothed
-recency    = exp(-days_since_last_surface / half_life)         # 30d feedback, 60d reference
+usefulness = (useful_count + 1) / (surface_count + 2)   # Laplace-smoothed
+recency    = exp(-days_since_last_surface / half_life)   # block: 30d, hint: 60d
 final      = structural_match × (0.5 + usefulness) × (0.5 + 0.5 × recency)
+             × (1.5 if pinned)
 ```
 
-Hebbian associations run on a **separate track** — they surface as "Related memories" without competing for primary recall slots or influencing the deny decision.
+Blocks skip the per-cluster Laplace quality gate (they're rare and user-authored — always surface). Hints share a cluster threshold to filter noise.
+
+## Configurable prompts
+
+The watcher and consolidation agents use markdown-file prompts you can override without forking.
+
+**Lookup order** (first match wins):
+
+1. `$ENGRAM_WATCHER_PROMPT_PATH` or `$ENGRAM_CONSOLIDATION_PROMPT_PATH` — explicit file path
+2. `~/.claude/tool-engrams/prompts/watcher.md` or `~/.claude/tool-engrams/prompts/consolidation.md` — per-user override
+3. Packaged defaults at `toolengrams/prompts/defaults/*.md`
+
+Variable interpolation uses `str.format` — the consolidation prompt expects `{target_date}`, `{session_list}`, `{memory_summary}`.
+
+## What v2 explicitly doesn't do
+
+- **Semantic error detection on exit 0** (query returns empty when it shouldn't). Needs LLM in the hot path; out of scope.
+- **Conversational RAG-style memory.** Different problem; use mem0 or similar.
+- **Destructive-command blocking as the pitch.** Claude Code's permission rules are the right tool for that. Blocks exist as a narrow option, not the headline.
+- **Hebbian co-activation.** Removed in v2 — recall itself needs to be reliable first before a secondary ranking signal is worth maintaining.
+- **MCP server / non-Claude-Code harnesses.** Maybe later.
 
 ## Testing
 
 ```bash
-# Unit tests (fast, 133 tests)
-pytest
-
-# E2E tests (spawns real claude -p sessions, opt-in)
-pytest tests/e2e/ -m e2e
+pytest                          # Unit tests (fast, ~200 tests)
+pytest tests/e2e/ -m e2e        # E2E tests (spawns real `claude -p` sessions, opt-in)
 ```
 
 ## Uninstall
 
 ```bash
-# Remove hooks from settings.json (manually edit or re-run without the hook entries).
-# Remove skills.
+# Remove hooks from ~/.claude/settings.json (manually or re-run install.sh flags)
 rm ~/.claude/skills/engram-{remember,forget,recall}
-# Remove the consolidation schedule.
 engram consolidate --uninstall-schedule
-# Remove the database.
 rm -rf ~/.claude/tool-engrams/
-# Uninstall the package.
 pip uninstall toolengrams
 ```
