@@ -90,7 +90,7 @@ def test_remember_rejects_body_with_api_key(temp_db, monkeypatch, capsys):
     rc = remember.main([
         "Use `curl -H 'Authorization: Bearer sk-proj-abc123def456'` to call the API",
         "--trigger", "curl",
-        "--type", "reference",
+        "--kind", "hint",
     ])
     assert rc == 1
     out = json.loads(capsys.readouterr().out)
@@ -101,7 +101,7 @@ def test_remember_rejects_connection_string(temp_db, monkeypatch, capsys):
     rc = remember.main([
         "Connect with `psql postgresql://admin:password123@db.prod.com:5432/app`",
         "--trigger", "psql",
-        "--type", "reference",
+        "--kind", "hint",
     ])
     assert rc == 1
     out = json.loads(capsys.readouterr().out)
@@ -113,7 +113,7 @@ def test_remember_accepts_clean_body(temp_db, monkeypatch, capsys):
     rc = remember.main([
         "Use `psql -h replica.internal` for read-only queries",
         "--trigger", "psql -h replica",
-        "--type", "reference",
+        "--kind", "hint",
     ])
     assert rc == 0
     out = json.loads(capsys.readouterr().out)
@@ -126,7 +126,7 @@ def test_remember_dry_run_skips_secret_check(temp_db, monkeypatch, capsys):
         "--dry-run",
         "Use `curl` with key sk-proj-abc123def456ghi789",
         "--trigger", "curl",
-        "--type", "reference",
+        "--kind", "hint",
     ])
     assert rc == 0
     out = json.loads(capsys.readouterr().out)

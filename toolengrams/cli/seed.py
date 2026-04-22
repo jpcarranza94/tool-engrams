@@ -18,7 +18,7 @@ SEED_MEMORIES = [
             "INSERT/UPDATE/DELETE; they will fail and the replica is not a safe "
             "place to test writes."
         ),
-        "type": "reference",
+        "kind": "hint",
         "scope": "global",
         "triggers": [
             {"kind": "token_subseq", "tokens": ["psql", "-h"]},
@@ -32,7 +32,7 @@ SEED_MEMORIES = [
             "`git commit -m \"$(cat <<'EOF'\\n...\\nEOF\\n)\"` — avoids shell "
             "escaping pitfalls with quotes, backticks, and dollar signs."
         ),
-        "type": "feedback",
+        "kind": "block",
         "scope": "global",
         "triggers": [
             {"kind": "token_subseq", "tokens": ["git", "commit"]},
@@ -46,7 +46,7 @@ SEED_MEMORIES = [
             "'Connection refused', the usual cause is the VPN not being "
             "connected. Check VPN state before debugging further."
         ),
-        "type": "reference",
+        "kind": "hint",
         "scope": "global",
         "triggers": [
             {"kind": "token_subseq", "tokens": ["ssh", "deploy@production"]},
@@ -68,13 +68,13 @@ def main() -> int:
                 continue
             cur = conn.execute(
                 "INSERT INTO memories "
-                "(name, description, body, type, scope, project_slug, created_ts) "
+                "(name, description, body, kind, scope, project_slug, created_ts) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     m["name"],
                     m["description"],
                     m["body"],
-                    m["type"],
+                    m["kind"],
                     m["scope"],
                     None if m["scope"] == "global" else m.get("project_slug"),
                     now_ts,

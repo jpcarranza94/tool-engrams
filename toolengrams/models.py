@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
-MemoryType = Literal["feedback", "reference"]
+MemoryKind = Literal["block", "hint"]
 MemoryScope = Literal["global", "project"]
 TriggerKind = Literal["token_subseq", "path_glob"]
 HookName = Literal[
@@ -21,7 +21,7 @@ class Memory:
     name: str
     description: str
     body: str
-    type: MemoryType
+    kind: MemoryKind
     scope: MemoryScope
     project_slug: str | None
     created_ts: int
@@ -55,7 +55,7 @@ class Candidate:
     useful_count: int
     last_surfaced_ts: int
     pinned: bool
-    type: MemoryType
+    kind: MemoryKind
     scope: MemoryScope
     structural_match: float = 1.0
     final_score: float = 0.0

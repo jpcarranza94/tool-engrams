@@ -222,7 +222,7 @@ def test_parse_response_create():
         "memories": [{
             "name": "test-mem",
             "body": "Without this memory, Claude would fail.",
-            "type": "feedback",
+            "kind": "block",
             "scope": "project",
             "triggers": ["test cmd"],
             "paths": [],
@@ -253,7 +253,7 @@ def test_save_memory_sets_cwd(temp_db, capsys):
         {
             "name": "test-save",
             "body": "Without this memory, Claude would use `docker build` wrong.",
-            "type": "reference",
+            "kind": "hint",
             "scope": "project",
             "triggers": ["docker build"],
             "paths": [],
@@ -273,7 +273,7 @@ def test_save_memory_skips_no_triggers(temp_db, capsys):
         {
             "name": "no-triggers",
             "body": "Without this memory...",
-            "type": "reference",
+            "kind": "hint",
             "scope": "project",
             "triggers": [],
             "paths": [],
@@ -291,7 +291,7 @@ def test_save_memory_skips_no_name(temp_db, capsys):
         {
             "name": "",
             "body": "Without this memory...",
-            "type": "reference",
+            "kind": "hint",
             "scope": "project",
             "triggers": ["test cmd"],
             "paths": [],

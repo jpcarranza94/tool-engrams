@@ -11,7 +11,7 @@ from toolengrams.cli import recall
 def _seed(conn, name: str, body: str = "body", **kwargs):
     defaults = {
         "description": "",
-        "type": "reference",
+        "kind": "hint",
         "scope": "global",
         "project_slug": None,
         "created_ts": int(time.time()),
@@ -20,9 +20,9 @@ def _seed(conn, name: str, body: str = "body", **kwargs):
     defaults.update(kwargs)
     cur = conn.execute(
         "INSERT INTO memories "
-        "(name, description, body, type, scope, project_slug, created_ts, pinned) "
+        "(name, description, body, kind, scope, project_slug, created_ts, pinned) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (name, defaults["description"], body, defaults["type"],
+        (name, defaults["description"], body, defaults["kind"],
          defaults["scope"], defaults["project_slug"],
          defaults["created_ts"], defaults["pinned"]),
     )
@@ -114,14 +114,14 @@ def test_detail_not_found(temp_db, capsys):
 
 
 def test_stats(temp_db, capsys):
-    _seed(temp_db, "ref1", type="reference")
-    _seed(temp_db, "fb1", type="feedback")
+    _seed(temp_db, "hint1", kind="hint")
+    _seed(temp_db, "block1", kind="block")
     _seed(temp_db, "pinned1", pinned=1)
     rc, payload = _run(["--stats"], capsys)
     assert rc == 0
     assert payload["total"] == 3
     assert payload["active"] == 3
     assert payload["pinned"] == 1
-    assert payload["by_type"]["reference"] == 2  # ref1 + pinned1 (default type)
-    assert payload["by_type"]["feedback"] == 1
+    assert payload["by_kind"]["hint"] == 2  # hint1 + pinned1 (default kind)
+    assert payload["by_kind"]["block"] == 1
     assert payload["triggers_by_kind"]["token_subseq"] == 3

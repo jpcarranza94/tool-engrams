@@ -86,11 +86,11 @@ Only two, each dead simple:
 - If none → emit `{}` (noop).
 - **Does not fire `hint` memories.** Ever.
 
-**PostToolUse hook:**
-- Only runs retrieval if `is_error` is true (exit code != 0, error marker detected, etc — see §5).
-- On error: look up `hint` memories whose triggers match the failed call.
-- Inject matching memories as `additionalContext` on PostToolUse output.
-- On success: does nothing retrieval-wise (only reinforcement bookkeeping, see §6).
+**PostToolUseFailure hook:**
+- Fires on tool-call failure (Claude Code already distinguishes real failures from semantically-OK non-zero exits — see §5).
+- Looks up `hint` memories whose triggers match the failed call.
+- Injects matching memories as `additionalContext` on PostToolUseFailure output.
+- `PostToolUse` (the success event) only does reinforcement bookkeeping (see §6), no retrieval.
 
 That's it. No SessionStart pinned-memory surfacing in v2 (we can add it back if dogfooding shows value). No UserPromptSubmit retrieval. No Hebbian associative surfacing. Just the two hooks above.
 
@@ -139,18 +139,27 @@ CREATE INDEX idx_triggers_first_token ON triggers (first_token);
 
 ## 5. Error detection
 
-PostToolUse fires retrieval only on error. We need a reliable definition.
+Claude Code does this for us. There's a dedicated **`PostToolUseFailure`** hook event that fires *only* on real tool failures. Empirically verified 2026-04-21:
 
-**Primary signal: exit code.** For Bash, Claude Code passes the tool result; we check for `<error>` wrapper tag or `Exit code` prefix (already implemented in v1's `_detect_error`).
+| Scenario                                     | PostToolUse | PostToolUseFailure |
+|----------------------------------------------|-------------|--------------------|
+| `echo hello` (exit 0)                        | ✅          | ❌                 |
+| `false` (exit 1, real failure)               | ❌          | ✅                 |
+| `grep NOMATCH file` (exit 1, Claude treats as success — `returnCodeInterpretation: "No matches found"`) | ✅ | ❌ |
+| PreToolUse `deny`                             | ❌          | ❌                 |
 
-**Secondary signals** (for tools without clean exit codes):
-- `tool_response` string contains error markers: `ERROR:`, `Traceback (most recent call`, `fatal:`, `Usage:` — language-specific but well-known.
-- `is_error` field on the PostToolUse payload (set by Claude Code for some tools).
+Mutually exclusive — exactly one fires per non-denied call. Claude Code already discriminates semantically-meaningful non-zero exits (grep no-match) from real failures, so we don't have to. `PostToolUseFailure` cannot `block` — only inject `additionalContext` — which is exactly what hints need.
 
-Keep the detection list short and well-documented. Users can override via a config hook (see §7).
+**PostToolUseFailure payload shape (Bash):**
+- `error`: string, e.g. `"Exit code 1"`
+- `is_interrupt`: boolean — user interrupted vs tool failed
+- `tool_input`, `tool_use_id`, `session_id`, `cwd`, `hook_event_name`, `tool_name`
+- No `tool_response` (the tool failed — nothing returned)
+
+**For non-Bash tools (Read/Edit/Write/Grep/Glob/WebFetch/NotebookEdit):** docs don't specify the error payload shape. Empirical verification needed before step 3 ships — but Bash covers the headline use case.
 
 **What we explicitly don't try:**
-- Semantic error detection on exit 0 (query returns empty when it shouldn't, API returns wrong shape). Not solvable without LLM in hook, outside scope.
+- Semantic error detection on exit 0 (query returns empty when it shouldn't, API returns wrong shape). Claude Code doesn't flag these as failures, and we don't try to either. Out of scope.
 
 ## 6. Reinforcement
 
@@ -217,7 +226,7 @@ Ordered smallest-to-largest, so we can ship-and-measure between each step.
 
 1. **Schema migration + trigger rewrite.** New DB shape, subsequence matching. No behavior change yet because hooks still call the old code paths — but internal data model is v2.
 2. **Rename types → kinds, rewrite pretool.** `feedback`/`reference` → `block`/`hint`. `hooks/pretool.py` becomes block-only.
-3. **Post-failure hint injection.** `hooks/post_tool.py` runs retrieval on error, injects matching hints as `additionalContext`.
+3. **Post-failure hint injection.** Register a new `PostToolUseFailure` hook (`hooks/post_tool_failure.py` or similar), run retrieval for `hint`-kind memories whose triggers match the failed call, inject as `additionalContext`.
 4. **Configurable prompts.** Lookup-order config for watcher/consolidation prompts.
 5. **Watcher prompt rewrite.** New default prompt that treats CLI-grammar corrections as the primary signal, understands the `block`/`hint` distinction, generates subsequence triggers.
 6. **Migration script.** Best-effort v1 → v2 converter.
@@ -227,8 +236,8 @@ Steps 1–3 are the core behavior change. 4–6 are ergonomics. 7 is positioning
 
 ## 11. Open questions
 
-1. **Does a PreToolUse deny fire PostToolUse?** Open empirical question. If Claude Code runs PostToolUse with `is_error=true` after a PreToolUse deny, every blocked call would *also* trigger hint retrieval on the retry — double-firing context. Must verify before shipping step 2 of §10: run a tiny harness test, observe whether PostToolUse payload arrives with a non-zero exit after a denied call, and if so, filter those out in `hooks/post_tool.py` (checking for a deny marker in the tool_response, or a new field if Claude Code provides one).
-2. **Should `block` memories also surface on PostToolUse on failure?** Separate from (1): if a block fired pre and the retry still fails, is the same body useful again in PostToolUse? Probably yes but edge case, defer.
+1. ~~**Does a PreToolUse deny fire PostToolUse?**~~ **Resolved 2026-04-21.** Empirically: a PreToolUse `deny` fires *neither* PostToolUse nor PostToolUseFailure. No double-fire risk. Also discovered Claude Code has a separate `PostToolUseFailure` event for real failures — simplifies §5 and §10 step 3 (no need to sniff exit codes ourselves).
+2. **Should `block` memories also surface on PostToolUseFailure?** If a block fired pre and the retry still fails, is the same body useful again? Probably yes but edge case, defer.
 3. **Naming: `block` / `hint`, or something else?** `guard` / `tip`? `deny` / `recall`? Bikeshed-worthy. Keeping `block` / `hint` in the doc as placeholder.
 4. **First-token bucket for path triggers?** Currently we fetch all path triggers and fnmatch. Fine at low volume; revisit if path-memory corpus grows.
 5. **Session-start surfacing of pinned memories.** Killed in the spec above, but might come back as a narrow feature if dogfooding shows lead-in value.

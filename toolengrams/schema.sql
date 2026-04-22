@@ -1,5 +1,6 @@
 -- ToolEngrams schema (current v2). See docs/design-v9.md for full design.
--- Incremental reshape for existing DBs lives in migrations/v*.sql.
+-- This is a complete v_latest snapshot — fresh DBs apply this ONLY, not the
+-- v*.sql migrations (those are for upgrading existing DBs).
 
 PRAGMA journal_mode = WAL;
 PRAGMA synchronous = NORMAL;
@@ -10,7 +11,7 @@ CREATE TABLE IF NOT EXISTS memories (
     name             TEXT NOT NULL,
     description      TEXT,
     body             TEXT NOT NULL,
-    type             TEXT NOT NULL CHECK (type IN ('feedback','reference')),
+    kind             TEXT NOT NULL CHECK (kind IN ('block','hint')),
     scope            TEXT NOT NULL CHECK (scope IN ('global','project')) DEFAULT 'project',
     project_slug     TEXT,
     created_ts       INTEGER NOT NULL,
@@ -41,16 +42,60 @@ CREATE INDEX IF NOT EXISTS idx_triggers_memory
     ON triggers(memory_id);
 
 CREATE TABLE IF NOT EXISTS session_surfaces (
-    session_id   TEXT NOT NULL,
-    memory_id    INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
-    surfaced_ts  INTEGER NOT NULL,
-    hook         TEXT NOT NULL,
-    tool_use_id  TEXT,
+    session_id       TEXT NOT NULL,
+    memory_id        INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+    surfaced_ts      INTEGER NOT NULL,
+    hook             TEXT NOT NULL,
+    tool_use_id      TEXT,
+    turn_at_surface  INTEGER,
     PRIMARY KEY (session_id, memory_id, surfaced_ts)
 );
 
 CREATE INDEX IF NOT EXISTS idx_session_surfaces_recent
     ON session_surfaces(session_id, surfaced_ts DESC);
+
+CREATE INDEX IF NOT EXISTS idx_session_surfaces_ts
+    ON session_surfaces(surfaced_ts);
+
+CREATE INDEX IF NOT EXISTS idx_session_surfaces_turn
+    ON session_surfaces(session_id, turn_at_surface);
+
+-- Per-session tool-call counter.
+CREATE TABLE IF NOT EXISTS session_turns (
+    session_id TEXT PRIMARY KEY,
+    turn_count INTEGER NOT NULL DEFAULT 0,
+    updated_ts INTEGER NOT NULL
+);
+
+-- Nightly consolidation run log — idempotency guard + health metrics.
+CREATE TABLE IF NOT EXISTS consolidation_runs (
+    id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_date               TEXT NOT NULL UNIQUE,       -- 'YYYY-MM-DD'
+    started_ts             INTEGER NOT NULL,
+    completed_ts           INTEGER,
+    sessions_scanned       INTEGER NOT NULL DEFAULT 0,
+    episodes_evaluated     INTEGER NOT NULL DEFAULT 0,
+    memories_strengthened  INTEGER NOT NULL DEFAULT 0,
+    memories_weakened      INTEGER NOT NULL DEFAULT 0,
+    memories_archived      INTEGER NOT NULL DEFAULT 0,
+    memories_discovered    INTEGER NOT NULL DEFAULT 0,
+    quality_score          REAL,
+    surfaces_helpful       INTEGER NOT NULL DEFAULT 0,
+    surfaces_noise         INTEGER NOT NULL DEFAULT 0,
+    report                 TEXT
+);
+
+-- Watcher process state (one row per live work session).
+CREATE TABLE IF NOT EXISTS watcher_state (
+    work_session_id    TEXT PRIMARY KEY,
+    watcher_session_id TEXT,
+    watcher_pid        INTEGER,
+    transcript_path    TEXT,
+    last_line_read     INTEGER NOT NULL DEFAULT 0,
+    last_checked_ts    INTEGER NOT NULL,
+    cwd                TEXT,
+    created_ts         INTEGER NOT NULL
+);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
     name, description, body,

@@ -11,8 +11,8 @@ from toolengrams.cli import pin
 def _seed(conn, name: str = "test memory", pinned: int = 0):
     cur = conn.execute(
         "INSERT INTO memories "
-        "(name, description, body, type, scope, project_slug, created_ts, pinned) "
-        "VALUES (?, '', 'body', 'reference', 'global', NULL, ?, ?)",
+        "(name, description, body, kind, scope, project_slug, created_ts, pinned) "
+        "VALUES (?, '', 'body', 'hint', 'global', NULL, ?, ?)",
         (name, int(time.time()), pinned),
     )
     return cur.lastrowid

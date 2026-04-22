@@ -23,7 +23,7 @@ def _candidate(
     useful_count: int = 0,
     last_surfaced_ts: int = 0,
     pinned: bool = False,
-    type_: str = "reference",
+    kind: str = "hint",
     matched_tokens: tuple[str, ...] = ("git",),
     matched_path: str | None = None,
 ) -> Candidate:
@@ -37,7 +37,7 @@ def _candidate(
         useful_count=useful_count,
         last_surfaced_ts=last_surfaced_ts,
         pinned=pinned,
-        type=type_,
+        kind=kind,
         scope="project",
         structural_match=1.0,
     )
@@ -174,7 +174,7 @@ def test_filter_session_dedup():
     cfg = FilterConfig()
     c = _candidate(memory_id=42)
     c.final_score = final_score(c, NOW)
-    kept = filter_candidates([c], cluster_stats={42 and 42: None}, surfaced_ids={42}, cfg=cfg)
+    kept = filter_candidates([c], cluster_stats={}, surfaced_ids={42}, cfg=cfg)
     assert kept == []
 
 

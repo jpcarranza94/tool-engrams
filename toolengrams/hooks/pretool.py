@@ -1,37 +1,32 @@
-"""PreToolUse hook command.
+"""PreToolUse hook — block-only.
 
-Reads a Claude Code PreToolUse payload from stdin, retrieves tool-bound memories
-via subsequence matching on the call's tokens (plus path-glob on any paths),
-ranks and filters them, logs the surface event, and emits an additionalContext
-injection on stdout.
+v2 (design-v9 §3.1): only `block`-kind memories surface in PreToolUse. Every
+match produces `permissionDecision: deny` + the memory body as
+`additionalContext`. Hint-kind memories live on a separate track wired into
+PostToolUseFailure (step 3).
 
-Note: this is still the v1-behavior pretool (feedback → deny, reference →
-context). v2 step 2 rewrites it to block-only and moves hint injection to
-PostToolUse. For step 1 we only update the data layer and matcher.
+A deny here doesn't "fail the call for the user" — it fails the call *for
+Claude* and prompts a retry with the injected context in scope. See §1a.
 
-Contract (input JSON on stdin):
+Contract (input):
     {
       "session_id": "...",
-      "transcript_path": "...",
       "cwd": "/home/user/projects/myapp",
       "hook_event_name": "PreToolUse",
       "tool_name": "Bash",
-      "tool_input": {"command": "psql -h replica.internal -c 'SELECT 1'"},
+      "tool_input": {"command": "git push --force origin main"},
       "tool_use_id": "..."
     }
 
-Contract (output JSON on stdout):
-    {
-      "hookSpecificOutput": {
+Contract (output):
+    {"hookSpecificOutput": {
         "hookEventName": "PreToolUse",
         "additionalContext": "...",
-        "permissionDecision": "allow"
-      }
-    }
+        "permissionDecision": "deny"
+    }}
 
-Empty output (no matching memories) is `{}` — the harness treats this as a no-op.
-Fails open: any exception logs to stderr and exits 0 with empty output so the
-recall layer never blocks a tool call.
+Empty output (`{}`) on no match. Fails open: any exception logs to stderr
+and exits 0 with empty output so the hook never blocks a tool call.
 """
 
 from __future__ import annotations
@@ -44,12 +39,7 @@ from .. import db
 from ..prompts.pretool import format_injection
 from ..reinforcement.counters import bump_surface_counts
 from ..retrieval.extract import extract_hints
-from ..retrieval.rank import (
-    compute_cluster_stats,
-    filter_candidates,
-    now,
-    retrieve_candidates,
-)
+from ..retrieval.rank import now, retrieve_candidates
 from ..retrieval.session_state import (
     get_already_surfaced,
     get_session_turn,
@@ -58,7 +48,6 @@ from ..retrieval.session_state import (
 from ..utils import slugify_cwd
 
 
-# Tool whitelist — only these carry user-facing PreToolUse bindings.
 WHITELIST = {"Bash", "Read", "Edit", "Write", "MultiEdit", "Grep", "Glob", "WebFetch", "NotebookEdit"}
 
 
@@ -98,38 +87,35 @@ def _run(payload: dict[str, Any]) -> int:
     conn = db.connect()
     now_ts = now()
 
-    candidates = retrieve_candidates(conn, hint, project_slug, now_ts)
+    # Blocks only. Hints don't surface at PreToolUse — they go out on failure.
+    candidates = retrieve_candidates(conn, hint, project_slug, now_ts, kind="block")
     if not candidates:
         _emit({})
         return 0
 
-    cluster_stats = compute_cluster_stats(conn, project_slug, now_ts)
+    # Session dedup — the same block already surfaced this session doesn't re-fire.
     surfaced_ids = get_already_surfaced(conn, session_id)
-    primary = filter_candidates(candidates, cluster_stats, surfaced_ids)
-
-    if not primary:
+    fresh = [c for c in candidates if c.memory_id not in surfaced_ids]
+    if not fresh:
         _emit({})
         return 0
 
+    # Sort: longer triggers (more specific) win, then higher final_score.
+    fresh.sort(key=lambda c: (-len(c.matched_tokens), -c.final_score))
+
+    memory_ids = [c.memory_id for c in fresh]
     current_turn = get_session_turn(conn, session_id)
-    primary_ids = [c.memory_id for c in primary]
-    log_surfaces(conn, session_id, primary_ids, tool_use_id,
+    log_surfaces(conn, session_id, memory_ids, tool_use_id,
                  "pre_tool_use", current_turn, now_ts)
-    bump_surface_counts(conn, primary_ids, now_ts)
+    bump_surface_counts(conn, memory_ids, now_ts)
 
-    additional_context = format_injection(primary)
-
-    should_deny = any(c.type == "feedback" for c in primary)
-
-    _emit(
-        {
-            "hookSpecificOutput": {
-                "hookEventName": "PreToolUse",
-                "additionalContext": additional_context,
-                "permissionDecision": "deny" if should_deny else "allow",
-            }
+    _emit({
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "additionalContext": format_injection(fresh),
+            "permissionDecision": "deny",
         }
-    )
+    })
     return 0
 
 

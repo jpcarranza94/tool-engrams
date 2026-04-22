@@ -30,7 +30,7 @@ def test_positional_text_inserts_memory(temp_db, monkeypatch, capsys):
     payload = _run(["some body about `git status`"], monkeypatch, capsys=capsys)
     assert payload["action"] == "inserted"
     assert payload["memory"]["id"] is not None
-    rows = _rows(temp_db, "SELECT name, body, type, scope FROM memories")
+    rows = _rows(temp_db, "SELECT name, body, kind, scope FROM memories")
     assert len(rows) == 1
     assert "git status" in rows[0]["body"]
 
@@ -141,7 +141,7 @@ def test_dry_run_does_not_insert(temp_db, monkeypatch, capsys):
     assert rows[0]["c"] == 0
 
 
-# ---------- scope / type ----------
+# ---------- scope / kind ----------
 
 
 def test_scope_global_stores_null_project_slug(temp_db, monkeypatch, capsys):
@@ -171,8 +171,8 @@ def test_scope_project_with_override(temp_db, monkeypatch, capsys):
     assert payload["memory"]["project_slug"] == "custom-slug"
 
 
-def test_invalid_type_returns_2(temp_db, monkeypatch, capsys):
-    rc = remember.main(["--type", "bogus", "body"])
+def test_invalid_kind_returns_2(temp_db, monkeypatch, capsys):
+    rc = remember.main(["--kind", "bogus", "body"])
     assert rc == 2
 
 

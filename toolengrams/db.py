@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 SCHEMA_PATH = Path(__file__).parent / "schema.sql"
 MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 
@@ -40,9 +40,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if current >= latest:
         return
     if current == 0:
+        # Fresh DB: schema.sql is a complete v_latest snapshot — no migrations.
         conn.executescript(SCHEMA_PATH.read_text())
-        # Fresh DB — also apply all migrations so tables are complete.
-        _apply_migrations(conn, from_version=2, to_version=latest)
         conn.execute(f"PRAGMA user_version = {latest}")
         return
     # Incremental migrations for existing DBs.
