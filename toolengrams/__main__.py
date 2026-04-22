@@ -25,6 +25,7 @@ from .cli import (
 )
 from .hooks import (
     post_tool,
+    post_tool_failure,
     pretool,
     session_start,
     user_prompt,
@@ -59,6 +60,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("pretool", help="PreToolUse hook handler (reads JSON on stdin)")
     sub.add_parser("session-start", help="SessionStart hook handler (reads JSON on stdin)")
     sub.add_parser("post-tool", help="PostToolUse hook handler — success reinforcement (reads JSON on stdin)")
+    sub.add_parser("post-tool-failure", help="PostToolUseFailure hook handler — hint injection on tool failure (reads JSON on stdin)")
     sub.add_parser("user-prompt", help="UserPromptSubmit hook handler — watcher liveness check (reads JSON on stdin)")
     sub.add_parser("seed", help="Insert example memories for smoke testing")
 
@@ -81,6 +83,7 @@ def main(argv: list[str] | None = None) -> int:
         "pretool": pretool.main,
         "session-start": session_start.main,
         "post-tool": post_tool.main,
+        "post-tool-failure": post_tool_failure.main,
         "user-prompt": user_prompt.main,
         "seed": seed.main,
         "export": _stub_unimpl("export"),
