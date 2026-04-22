@@ -33,9 +33,9 @@ from ..formation import (
 )
 from ..utils import slugify_cwd
 
-VALID_TYPES = {"feedback", "reference"}
+VALID_KINDS = {"block", "hint"}
 VALID_SCOPES = {"global", "project"}
-DEFAULT_TYPE = "reference"
+DEFAULT_KIND = "hint"
 DEFAULT_SCOPE = "project"
 
 _NAME_MAX = 80
@@ -88,7 +88,7 @@ def main(argv: list[str] | None = None) -> int:
 
         common = dict(
             name=name, description=description, body=body,
-            type_=args.type, scope=args.scope, project_slug=project_slug,
+            kind=args.kind, scope=args.scope, project_slug=project_slug,
             pinned=args.pinned, candidates=candidates,
             extra_triggers=extra_triggers,
         )
@@ -105,7 +105,7 @@ def main(argv: list[str] | None = None) -> int:
             memory_id = update_existing_memory(
                 conn=conn, existing_id=existing["id"],
                 name=name, description=description, body=body,
-                type_=args.type, pinned=args.pinned,
+                kind=args.kind, pinned=args.pinned,
                 candidates=candidates, extra_triggers=extra_triggers,
             )
             action = "updated"
@@ -136,8 +136,8 @@ def _validate_and_parse(
         print("engram remember: body is empty (pass text as arg, -, or pipe stdin)", file=sys.stderr)
         return 2, "", "", ""
 
-    if args.type not in VALID_TYPES:
-        print(f"engram remember: --type must be one of {sorted(VALID_TYPES)}", file=sys.stderr)
+    if args.kind not in VALID_KINDS:
+        print(f"engram remember: --kind must be one of {sorted(VALID_KINDS)}", file=sys.stderr)
         return 2, "", "", ""
     if args.scope not in VALID_SCOPES:
         print(f"engram remember: --scope must be one of {sorted(VALID_SCOPES)}", file=sys.stderr)
@@ -181,8 +181,10 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
                         help="Memory body. Use '-' or omit to read from stdin.")
     parser.add_argument("--name", default=None, help="Short human-readable name.")
     parser.add_argument("--description", default=None, help="One-line description.")
-    parser.add_argument("--type", default=DEFAULT_TYPE,
-                        help=f"user|feedback|project|reference (default {DEFAULT_TYPE})")
+    parser.add_argument("--kind", default=DEFAULT_KIND,
+                        help=(f"block|hint (default {DEFAULT_KIND}). "
+                              "block: PreToolUse denies + injects context. "
+                              "hint: PostToolUseFailure injects context on error."))
     parser.add_argument("--scope", default=DEFAULT_SCOPE,
                         help=f"global|project (default {DEFAULT_SCOPE})")
     parser.add_argument("--project-slug", default=None,
@@ -297,7 +299,7 @@ def _insert(
     name: str,
     description: str,
     body: str,
-    type_: str,
+    kind: str,
     scope: str,
     project_slug: str | None,
     pinned: bool,
@@ -308,9 +310,9 @@ def _insert(
     with db.transaction(conn):
         cur = conn.execute(
             "INSERT INTO memories "
-            "(name, description, body, type, scope, project_slug, created_ts, pinned) "
+            "(name, description, body, kind, scope, project_slug, created_ts, pinned) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (name, description, body, type_, scope, project_slug, now_ts, 1 if pinned else 0),
+            (name, description, body, kind, scope, project_slug, now_ts, 1 if pinned else 0),
         )
         memory_id = int(cur.lastrowid)
         insert_candidate_triggers(conn, memory_id, candidates)
@@ -328,7 +330,7 @@ def _build_payload(
     name: str,
     description: str,
     body: str,
-    type_: str,
+    kind: str,
     scope: str,
     project_slug: str | None,
     pinned: bool,
@@ -343,7 +345,7 @@ def _build_payload(
             "id": memory_id,
             "name": name,
             "description": description,
-            "type": type_,
+            "kind": kind,
             "scope": scope,
             "project_slug": project_slug,
             "pinned": pinned,

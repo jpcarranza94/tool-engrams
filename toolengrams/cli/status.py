@@ -25,9 +25,9 @@ def main(argv: list[str] | None = None) -> int:
 
         # Trigger counts.
         trigger_stats = conn.execute(
-            "SELECT kind, COUNT(*) AS count FROM triggers t "
+            "SELECT t.kind AS kind, COUNT(*) AS count FROM triggers t "
             "JOIN memories m ON t.memory_id = m.id WHERE m.archived_ts IS NULL "
-            "GROUP BY kind"
+            "GROUP BY t.kind"
         ).fetchall()
 
         # Last consolidation run.

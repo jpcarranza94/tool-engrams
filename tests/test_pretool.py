@@ -1,4 +1,9 @@
-"""End-to-end PreToolUse handler test against a temp SQLite."""
+"""End-to-end PreToolUse handler test against a temp SQLite.
+
+v2 (design-v9 §3.3): PreToolUse only surfaces `block`-kind memories and
+always denies. `hint`-kind memories live on the PostToolUseFailure track
+(step 3).
+"""
 
 from __future__ import annotations
 
@@ -22,13 +27,17 @@ def _run_pretool(payload: dict, monkeypatch) -> dict:
 
 
 def _seed_token_memory(conn, name: str, body: str, tokens: list[str], *,
-                       type_: str = "reference") -> int:
-    """Helper: insert a memory + token_subseq trigger."""
+                       kind: str = "block") -> int:
+    """Helper: insert a memory + token_subseq trigger.
+
+    Defaults to kind=block since this is the pretool test; hint memories
+    don't surface in pretool.
+    """
     now_ts = int(time.time())
     cur = conn.execute(
-        "INSERT INTO memories (name, description, body, type, scope, project_slug, created_ts) "
+        "INSERT INTO memories (name, description, body, kind, scope, project_slug, created_ts) "
         "VALUES (?, '', ?, ?, 'global', NULL, ?)",
-        (name, body, type_, now_ts),
+        (name, body, kind, now_ts),
     )
     mid = cur.lastrowid
     conn.execute(
@@ -39,7 +48,8 @@ def _seed_token_memory(conn, name: str, body: str, tokens: list[str], *,
     return mid
 
 
-def test_pretool_hits_seeded_memory(temp_db, monkeypatch):
+def test_pretool_hint_memory_does_not_surface(temp_db, monkeypatch):
+    """Seed's psql replica memory is kind=hint → should NOT surface in pretool."""
     seed.main()
 
     payload = {
@@ -51,16 +61,11 @@ def test_pretool_hits_seeded_memory(temp_db, monkeypatch):
         "tool_use_id": "tu-1",
     }
     result = _run_pretool(payload, monkeypatch)
-
-    hso = result.get("hookSpecificOutput")
-    assert hso is not None
-    assert hso["hookEventName"] == "PreToolUse"
-    # Seeded psql replica memory is type=reference → allow (not deny).
-    assert hso["permissionDecision"] == "allow"
-    assert "replica" in hso["additionalContext"].lower()
+    assert result == {}
 
 
-def test_pretool_git_commit_surfaces_commit_memory(temp_db, monkeypatch):
+def test_pretool_block_memory_denies_and_injects_context(temp_db, monkeypatch):
+    """Seed's git-commit memory is kind=block → denies + injects body."""
     seed.main()
 
     payload = {
@@ -73,8 +78,9 @@ def test_pretool_git_commit_surfaces_commit_memory(temp_db, monkeypatch):
     }
     result = _run_pretool(payload, monkeypatch)
 
-    ctx = result["hookSpecificOutput"]["additionalContext"]
-    assert "HEREDOC" in ctx
+    hso = result["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert "HEREDOC" in hso["additionalContext"]
 
 
 def test_pretool_subseq_match_skips_positional_arg(temp_db, monkeypatch):
@@ -93,27 +99,30 @@ def test_pretool_subseq_match_skips_positional_arg(temp_db, monkeypatch):
         "tool_use_id": "tu-subseq",
     }
     result = _run_pretool(payload, monkeypatch)
-    ctx = result["hookSpecificOutput"]["additionalContext"]
-    assert "Reassign body" in ctx
+    hso = result["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert "Reassign body" in hso["additionalContext"]
 
 
 def test_pretool_session_dedup_skips_second_time(temp_db, monkeypatch):
-    seed.main()
+    """Same block surfaced twice in one session only fires once."""
+    _seed_token_memory(
+        temp_db, "rule", "Body of the rule", ["git", "commit"]
+    )
 
     payload = {
         "session_id": "sess-dedup",
-        "cwd": "/tmp/test-projects/myapp",
+        "cwd": "/tmp/any",
         "hook_event_name": "PreToolUse",
         "tool_name": "Bash",
-        "tool_input": {"command": "psql -h replica.internal -c 'SELECT 1'"},
+        "tool_input": {"command": "git commit -m 'first'"},
         "tool_use_id": "tu-a",
     }
     first = _run_pretool(payload, monkeypatch)
-    assert "hookSpecificOutput" in first
+    assert first["hookSpecificOutput"]["permissionDecision"] == "deny"
 
     payload["tool_use_id"] = "tu-b"
     second = _run_pretool(payload, monkeypatch)
-    # Same session + same memory = already surfaced, no re-injection.
     assert second == {}
 
 
@@ -156,12 +165,12 @@ def test_pretool_invalid_json_fails_open(temp_db, monkeypatch, capsys):
     assert buf.getvalue().strip() == "{}"
 
 
-def test_pretool_path_glob_match_on_file_tool(temp_db, monkeypatch):
-    """path_glob triggers fire when Read/Edit/Write targets a matching path."""
+def test_pretool_path_glob_block_on_file_tool(temp_db, monkeypatch):
+    """path_glob block triggers fire when a file tool targets a matching path."""
     now_ts = int(time.time())
     cur = temp_db.execute(
-        "INSERT INTO memories (name, description, body, type, scope, project_slug, created_ts) "
-        "VALUES ('py rule', '', 'Python file rule', 'feedback', 'global', NULL, ?)",
+        "INSERT INTO memories (name, description, body, kind, scope, project_slug, created_ts) "
+        "VALUES ('py rule', '', 'Python file rule', 'block', 'global', NULL, ?)",
         (now_ts,),
     )
     mid = cur.lastrowid
@@ -180,15 +189,41 @@ def test_pretool_path_glob_match_on_file_tool(temp_db, monkeypatch):
         "tool_use_id": "tu-path",
     }
     result = _run_pretool(payload, monkeypatch)
-    ctx = result["hookSpecificOutput"]["additionalContext"]
-    assert "Python file rule" in ctx
+    hso = result["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert "Python file rule" in hso["additionalContext"]
 
 
-def test_pretool_feedback_memory_denies(temp_db, monkeypatch):
-    """feedback-type token_subseq match → permissionDecision: deny."""
+def test_pretool_path_glob_hint_does_not_fire(temp_db, monkeypatch):
+    """A hint-kind path_glob memory must NOT surface in pretool."""
+    now_ts = int(time.time())
+    cur = temp_db.execute(
+        "INSERT INTO memories (name, description, body, kind, scope, project_slug, created_ts) "
+        "VALUES ('py hint', '', 'Python hint body', 'hint', 'global', NULL, ?)",
+        (now_ts,),
+    )
+    mid = cur.lastrowid
+    temp_db.execute(
+        "INSERT INTO triggers (memory_id, kind, path_pattern) "
+        "VALUES (?, 'path_glob', '**/*.py')",
+        (mid,),
+    )
+
+    payload = {
+        "session_id": "sess-hint",
+        "cwd": "/tmp/any",
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Read",
+        "tool_input": {"file_path": "/tmp/any/main.py"},
+        "tool_use_id": "tu-hint",
+    }
+    result = _run_pretool(payload, monkeypatch)
+    assert result == {}
+
+
+def test_pretool_block_token_memory_denies(temp_db, monkeypatch):
     _seed_token_memory(
-        temp_db, "git force rule", "Avoid force push", ["git", "push", "--force"],
-        type_="feedback",
+        temp_db, "git force rule", "Avoid force push", ["git", "push", "--force"]
     )
     payload = {
         "session_id": "sess-deny",

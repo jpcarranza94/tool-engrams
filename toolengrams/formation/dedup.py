@@ -101,18 +101,18 @@ def update_existing_memory(
     name: str,
     description: str,
     body: str,
-    type_: str,
+    kind: str,
     pinned: bool,
     candidates: list[FormationCandidate],
     extra_triggers: list[dict[str, Any]],
 ) -> int:
-    """Replace body/name/type on an existing memory, merge triggers."""
+    """Replace body/name/kind on an existing memory, merge triggers."""
     now_ts = int(time.time())
     with db.transaction(conn):
         conn.execute(
-            "UPDATE memories SET name = ?, description = ?, body = ?, type = ?, "
+            "UPDATE memories SET name = ?, description = ?, body = ?, kind = ?, "
             "pinned = ?, created_ts = ? WHERE id = ?",
-            (name, description, body, type_, 1 if pinned else 0, now_ts, existing_id),
+            (name, description, body, kind, 1 if pinned else 0, now_ts, existing_id),
         )
         conn.execute("DELETE FROM triggers WHERE memory_id = ?", (existing_id,))
         insert_candidate_triggers(conn, existing_id, candidates)

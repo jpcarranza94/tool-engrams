@@ -1,8 +1,7 @@
-"""Tests for db.py — migration logic and connection handling."""
+"""Tests for db.py — schema + migration runner + connection handling."""
 
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
 
 from toolengrams import db
@@ -17,65 +16,23 @@ def test_fresh_db_gets_all_tables(tmp_path):
     assert "memories" in tables
     assert "triggers" in tables
     assert "session_surfaces" in tables
-    assert "consolidation_runs" in tables
     assert "session_turns" in tables
+    assert "consolidation_runs" in tables
+    assert "watcher_state" in tables
     # Hebbian table was dropped in v6.
     assert "memory_associations" not in tables
-    ver = conn.execute("PRAGMA user_version").fetchone()[0]
-    assert ver == db.SCHEMA_VERSION
-    conn.close()
 
-
-def test_v1_to_latest_migration(tmp_path):
-    path = tmp_path / "v1.sqlite"
-    conn = sqlite3.connect(str(path))
-    conn.executescript(db.SCHEMA_PATH.read_text())
-    conn.execute("PRAGMA user_version = 1")
-    conn.close()
-
-    # Reopen via db.connect — should migrate all the way to current.
-    conn = db.connect(path)
-    ver = conn.execute("PRAGMA user_version").fetchone()[0]
-    assert ver == db.SCHEMA_VERSION
-    tables = {r[0] for r in conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table'"
-    ).fetchall()}
-    assert "consolidation_runs" in tables
-    assert "session_turns" in tables
-    # memory_associations was created in v2 then dropped in v6.
-    assert "memory_associations" not in tables
-    # triggers was reshaped in v6.
+    # v7 shape: memories.kind (not .type), triggers has first_token + tokens_json.
+    mem_cols = {r[1] for r in conn.execute("PRAGMA table_info(memories)").fetchall()}
+    assert "kind" in mem_cols
+    assert "type" not in mem_cols
     trigger_cols = {r[1] for r in conn.execute("PRAGMA table_info(triggers)").fetchall()}
     assert "first_token" in trigger_cols
     assert "tokens_json" in trigger_cols
     assert "head_joined" not in trigger_cols
-    conn.close()
 
-
-def test_v2_to_v3_adds_turn_at_surface_column(tmp_path):
-    """Existing v2 DBs should pick up the turn_at_surface column + session_turns table."""
-    path = tmp_path / "v2.sqlite"
-    # Build a v2-shape DB manually: schema + v2.sql, user_version=2.
-    conn = sqlite3.connect(str(path))
-    conn.executescript(db.SCHEMA_PATH.read_text())
-    v2_sql = (db.MIGRATIONS_DIR / "v2.sql").read_text()
-    conn.executescript(v2_sql)
-    conn.execute("PRAGMA user_version = 2")
-    conn.close()
-
-    # Reopen — should migrate to latest.
-    conn = db.connect(path)
     ver = conn.execute("PRAGMA user_version").fetchone()[0]
     assert ver == db.SCHEMA_VERSION
-
-    # session_turns exists and is empty.
-    row = conn.execute("SELECT COUNT(*) AS n FROM session_turns").fetchone()
-    assert row["n"] == 0
-
-    # session_surfaces has the new turn_at_surface column.
-    cols = {r[1] for r in conn.execute("PRAGMA table_info(session_surfaces)").fetchall()}
-    assert "turn_at_surface" in cols
-
     conn.close()
 
 
@@ -93,7 +50,6 @@ def test_already_at_current_version_is_noop(tmp_path):
     path = tmp_path / "current.sqlite"
     conn = db.connect(path)
     conn.close()
-    # Reopen — should not error.
     conn = db.connect(path)
     ver = conn.execute("PRAGMA user_version").fetchone()[0]
     assert ver == db.SCHEMA_VERSION

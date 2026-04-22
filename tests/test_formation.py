@@ -121,8 +121,8 @@ def test_consolidation_counts_existing_memories(temp_db):
     # Seed an existing memory with a (git, status) trigger so the candidate
     # we're about to extract matches.
     temp_db.execute(
-        "INSERT INTO memories (name, body, type, scope, project_slug, created_ts) "
-        "VALUES ('seed', 'body', 'reference', 'global', NULL, 1)"
+        "INSERT INTO memories (name, body, kind, scope, project_slug, created_ts) "
+        "VALUES ('seed', 'body', 'hint', 'global', NULL, 1)"
     )
     mid = temp_db.execute("SELECT last_insert_rowid()").fetchone()[0]
     temp_db.execute(
@@ -141,8 +141,8 @@ def test_consolidation_counts_existing_memories(temp_db):
 
 def test_consolidation_path_glob(temp_db):
     temp_db.execute(
-        "INSERT INTO memories (name, body, type, scope, project_slug, created_ts) "
-        "VALUES ('seed', 'body', 'reference', 'global', NULL, 1)"
+        "INSERT INTO memories (name, body, kind, scope, project_slug, created_ts) "
+        "VALUES ('seed', 'body', 'hint', 'global', NULL, 1)"
     )
     mid = temp_db.execute("SELECT last_insert_rowid()").fetchone()[0]
     temp_db.execute(
@@ -164,8 +164,8 @@ def test_consolidation_path_glob(temp_db):
 
 def test_insert_candidate_triggers_writes_rows(temp_db):
     temp_db.execute(
-        "INSERT INTO memories (name, body, type, scope, project_slug, created_ts) "
-        "VALUES ('m', 'body', 'reference', 'global', NULL, 1)"
+        "INSERT INTO memories (name, body, kind, scope, project_slug, created_ts) "
+        "VALUES ('m', 'body', 'hint', 'global', NULL, 1)"
     )
     mid = temp_db.execute("SELECT last_insert_rowid()").fetchone()[0]
 

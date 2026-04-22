@@ -42,7 +42,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 def _list_all(conn, limit: int) -> int:
     rows = conn.execute(
-        "SELECT m.id, m.name, m.type, m.scope, m.project_slug, "
+        "SELECT m.id, m.name, m.kind, m.scope, m.project_slug, "
         "m.surface_count, m.useful_count, m.pinned, m.created_ts, m.archived_ts "
         "FROM memories m WHERE m.archived_ts IS NULL "
         "ORDER BY m.created_ts DESC LIMIT ?",
@@ -58,7 +58,7 @@ def _search(conn, query: str, limit: int) -> int:
         return _list_all(conn, limit)
 
     rows = conn.execute(
-        "SELECT m.id, m.name, m.type, m.scope, m.project_slug, "
+        "SELECT m.id, m.name, m.kind, m.scope, m.project_slug, "
         "m.surface_count, m.useful_count, m.pinned, m.created_ts, m.archived_ts "
         "FROM memories m JOIN memories_fts f ON m.id = f.rowid "
         "WHERE memories_fts MATCH ? AND m.archived_ts IS NULL "
@@ -71,7 +71,7 @@ def _search(conn, query: str, limit: int) -> int:
 
 def _show_detail(conn, memory_id: int) -> int:
     row = conn.execute(
-        "SELECT id, name, description, body, type, scope, project_slug, "
+        "SELECT id, name, description, body, kind, scope, project_slug, "
         "surface_count, useful_count, pinned, created_ts, last_surfaced_ts, archived_ts "
         "FROM memories WHERE id = ?",
         (memory_id,),
@@ -101,9 +101,9 @@ def _show_detail(conn, memory_id: int) -> int:
 
 
 def _show_stats(conn) -> int:
-    type_counts = conn.execute(
-        "SELECT type, COUNT(*) as count FROM memories "
-        "WHERE archived_ts IS NULL GROUP BY type"
+    kind_counts = conn.execute(
+        "SELECT kind, COUNT(*) as count FROM memories "
+        "WHERE archived_ts IS NULL GROUP BY kind"
     ).fetchall()
     scope_counts = conn.execute(
         "SELECT scope, COUNT(*) as count FROM memories "
@@ -116,9 +116,9 @@ def _show_stats(conn) -> int:
         "FROM memories"
     ).fetchone()
     trigger_counts = conn.execute(
-        "SELECT kind, COUNT(*) as count FROM triggers "
+        "SELECT triggers.kind AS kind, COUNT(*) as count FROM triggers "
         "JOIN memories m ON triggers.memory_id = m.id "
-        "WHERE m.archived_ts IS NULL GROUP BY kind"
+        "WHERE m.archived_ts IS NULL GROUP BY triggers.kind"
     ).fetchall()
 
     print(json.dumps({
@@ -126,7 +126,7 @@ def _show_stats(conn) -> int:
         "active": total["total"] - (total["archived"] or 0),
         "pinned": total["pinned"] or 0,
         "archived": total["archived"] or 0,
-        "by_type": {r["type"]: r["count"] for r in type_counts},
+        "by_kind": {r["kind"]: r["count"] for r in kind_counts},
         "by_scope": {r["scope"]: r["count"] for r in scope_counts},
         "triggers_by_kind": {r["kind"]: r["count"] for r in trigger_counts},
     }))
@@ -137,7 +137,7 @@ def _row_summary(row) -> dict:
     return {
         "id": row["id"],
         "name": row["name"],
-        "type": row["type"],
+        "kind": row["kind"],
         "scope": row["scope"],
         "surface_count": row["surface_count"],
         "useful_count": row["useful_count"],

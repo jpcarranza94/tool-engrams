@@ -85,7 +85,7 @@ def _read_watcher_stats() -> dict:
 
 def _build_html(conn: sqlite3.Connection) -> str:
     memories = conn.execute(
-        "SELECT id, name, body, type, scope, project_slug, "
+        "SELECT id, name, body, kind, scope, project_slug, "
         "surface_count, useful_count, pinned, created_ts, last_surfaced_ts, archived_ts "
         "FROM memories ORDER BY archived_ts IS NOT NULL, id DESC"
     ).fetchall()
@@ -164,7 +164,7 @@ def _build_html(conn: sqlite3.Connection) -> str:
                 <div class="body">{m['body'][:200]}</div>
                 <div class="triggers">{trig_html}</div>
             </td>
-            <td><span class="tag {m['type']}">{m['type']}</span></td>
+            <td><span class="tag {m['kind']}">{m['kind']}</span></td>
             <td>{scope_tag}</td>
             <td class="num">{m['surface_count']}{_bar(m['surface_count'], max_surfaces)}</td>
             <td class="num">{m['useful_count']}</td>
@@ -180,7 +180,7 @@ def _build_html(conn: sqlite3.Connection) -> str:
         <tr class="archived-row">
             <td class="id">{m['id']}</td>
             <td><div class="name">{m['name']}</div></td>
-            <td>{m['type']}</td>
+            <td>{m['kind']}</td>
             <td class="num">{m['surface_count']}</td>
             <td class="num">{m['useful_count']}</td>
             <td class="ts">{_ts(m['archived_ts'])}</td>
@@ -256,8 +256,8 @@ td {{ padding: 10px 12px; border-top: 1px solid #21262d; vertical-align: top; fo
 .tag.head {{ background: #1f3a5f; color: #58a6ff; }}
 .tag.path {{ background: #2a1f3f; color: #bc8cff; }}
 .tag.none {{ background: #3d1f1f; color: #f85149; }}
-.tag.feedback {{ background: #2a3f1f; color: #7ee787; }}
-.tag.reference {{ background: #1f3a5f; color: #58a6ff; }}
+.tag.block {{ background: #3d1f1f; color: #f85149; }}
+.tag.hint {{ background: #1f3a5f; color: #58a6ff; }}
 .tag.scope-global {{ background: #1a2733; color: #58a6ff; }}
 .tag.scope-project {{ background: #2a1f3f; color: #bc8cff; }}
 .num {{ text-align: right; font-variant-numeric: tabular-nums; }}

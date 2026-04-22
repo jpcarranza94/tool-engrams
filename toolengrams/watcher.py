@@ -49,12 +49,12 @@ WATCHER_SCHEMA = json.dumps({
                 "properties": {
                     "name": {"type": "string"},
                     "body": {"type": "string"},
-                    "type": {"type": "string", "enum": ["feedback", "reference"]},
+                    "kind": {"type": "string", "enum": ["block", "hint"]},
                     "scope": {"type": "string", "enum": ["project", "global"]},
                     "triggers": {"type": "array", "items": {"type": "string"}},
                     "paths": {"type": "array", "items": {"type": "string"}},
                 },
-                "required": ["name", "body", "type", "scope"],
+                "required": ["name", "body", "kind", "scope"],
             },
         },
     },
@@ -413,11 +413,19 @@ def _parse_response(stdout: str) -> dict | None:
         return None
 
 
+def _legacy_type_to_kind(type_value: str | None) -> str:
+    if type_value == "feedback":
+        return "block"
+    return "hint"
+
+
 def _save_memory(mem: dict, cwd: str) -> None:
     """Save a memory by calling engram remember."""
     name = mem.get("name", "")
     body = mem.get("body", "")
-    type_ = mem.get("type", "reference")
+    # Accept both new schema field ("kind") and legacy ("type") from older
+    # watcher sessions mid-transition; map legacy values to new ones.
+    kind = mem.get("kind") or _legacy_type_to_kind(mem.get("type"))
     scope = mem.get("scope", "project")
     triggers = mem.get("triggers", [])
     paths = mem.get("paths", [])
@@ -427,11 +435,10 @@ def _save_memory(mem: dict, cwd: str) -> None:
     if not triggers and not paths:
         return
 
-    # Set ENGRAM_PROJECT_CWD so remember resolves the correct project slug.
     if cwd:
         os.environ["ENGRAM_PROJECT_CWD"] = cwd
 
-    argv = [body, "--type", type_, "--scope", scope, "--name", name]
+    argv = [body, "--kind", kind, "--scope", scope, "--name", name]
     for t in triggers:
         if isinstance(t, str) and t.strip():
             argv.extend(["--trigger", t.strip()])

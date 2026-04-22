@@ -57,20 +57,26 @@ def retrieve_candidates(
     hint: ExtractedTriggerHint,
     project_slug: str | None,
     now_ts: int,
+    kind: str | None = None,
 ) -> list[Candidate]:
-    """Return all memories whose triggers match this tool call.
+    """Return memories whose triggers match this tool call.
 
     Scope filter: (scope='global') OR (scope='project' AND project_slug=?).
     Archived memories excluded.
+
+    If `kind` is provided ('block' or 'hint'), only memories of that kind are
+    returned — lets pretool ask for blocks, PostToolUseFailure ask for hints.
     """
     candidates: dict[int, Candidate] = {}
+    kind_sql = " AND m.kind = ?" if kind else ""
+    kind_args = (kind,) if kind else ()
 
     # --- token_subseq matches ---
     if hint.tokens:
         first = hint.tokens[0]
-        sql = """
+        sql = f"""
             SELECT
-                m.id, m.name, m.body, m.type, m.scope,
+                m.id, m.name, m.body, m.kind, m.scope,
                 m.surface_count, m.useful_count, m.last_surfaced_ts, m.pinned,
                 t.tokens_json
             FROM triggers t
@@ -79,8 +85,9 @@ def retrieve_candidates(
               AND t.first_token = ?
               AND m.archived_ts IS NULL
               AND (m.scope = 'global' OR m.project_slug = ?)
+              {kind_sql}
         """
-        rows = conn.execute(sql, (first, project_slug)).fetchall()
+        rows = conn.execute(sql, (first, project_slug, *kind_args)).fetchall()
         call = tuple(hint.tokens)
         for row in rows:
             stored = _load_tokens(row["tokens_json"])
@@ -91,9 +98,9 @@ def retrieve_candidates(
 
     # --- path_glob matches ---
     if hint.paths:
-        sql = """
+        sql = f"""
             SELECT
-                m.id, m.name, m.body, m.type, m.scope,
+                m.id, m.name, m.body, m.kind, m.scope,
                 m.surface_count, m.useful_count, m.last_surfaced_ts, m.pinned,
                 t.path_pattern
             FROM triggers t
@@ -101,8 +108,9 @@ def retrieve_candidates(
             WHERE t.kind = 'path_glob'
               AND m.archived_ts IS NULL
               AND (m.scope = 'global' OR m.project_slug = ?)
+              {kind_sql}
         """
-        rows = conn.execute(sql, (project_slug,)).fetchall()
+        rows = conn.execute(sql, (project_slug, *kind_args)).fetchall()
         for row in rows:
             if _any_path_matches(row["path_pattern"], hint.paths):
                 _merge_path_candidate(candidates, row)
@@ -160,7 +168,7 @@ def _merge_token_candidate(
             useful_count=row["useful_count"],
             last_surfaced_ts=row["last_surfaced_ts"],
             pinned=bool(row["pinned"]),
-            type=row["type"],
+            kind=row["kind"],
             scope=row["scope"],
         )
 
@@ -178,7 +186,7 @@ def _merge_path_candidate(store: dict[int, Candidate], row: sqlite3.Row) -> None
         useful_count=row["useful_count"],
         last_surfaced_ts=row["last_surfaced_ts"],
         pinned=bool(row["pinned"]),
-        type=row["type"],
+        kind=row["kind"],
         scope=row["scope"],
     )
 
@@ -200,7 +208,8 @@ def compute_cluster_stats(
     sql = """
         SELECT
             t.kind, t.first_token,
-            m.type, m.surface_count, m.useful_count, m.last_surfaced_ts, m.pinned
+            m.kind AS memory_kind, m.surface_count, m.useful_count,
+            m.last_surfaced_ts, m.pinned
         FROM triggers t
         JOIN memories m ON m.id = t.memory_id
         WHERE m.archived_ts IS NULL
@@ -220,7 +229,7 @@ def compute_cluster_stats(
             useful_count=row["useful_count"],
             last_surfaced_ts=row["last_surfaced_ts"],
             pinned=bool(row["pinned"]),
-            type=row["type"],
+            kind=row["memory_kind"],
             scope="project",
         )
         score = final_score(c, now_ts)

@@ -8,14 +8,14 @@ from __future__ import annotations
 
 import math
 
-from ..models import Candidate, MemoryType
+from ..models import Candidate, MemoryKind
 
 # How quickly unused memories decay.
-# feedback decays faster (30d) because stale corrections are harmful;
-# reference memories are more evergreen (60d).
-HALF_LIFE_DAYS: dict[MemoryType, float] = {
-    "feedback": 30.0,
-    "reference": 60.0,
+# block decays faster (30d) because stale corrections are harmful;
+# hint memories are more evergreen (60d).
+HALF_LIFE_DAYS: dict[MemoryKind, float] = {
+    "block": 30.0,
+    "hint": 60.0,
 }
 
 
@@ -37,7 +37,7 @@ def recency(last_surfaced_ts: int, half_life_days: float, now_ts: int) -> float:
 def final_score(candidate: Candidate, now_ts: int) -> float:
     """Combine structural match with reinforcement-weighted modifiers."""
     u = usefulness(candidate.useful_count, candidate.surface_count)
-    half_life = HALF_LIFE_DAYS.get(candidate.type, HALF_LIFE_DAYS["reference"])
+    half_life = HALF_LIFE_DAYS.get(candidate.kind, HALF_LIFE_DAYS["hint"])
     r = recency(candidate.last_surfaced_ts, half_life, now_ts)
     score = candidate.structural_match * (0.5 + u) * (0.5 + 0.5 * r)
     if candidate.pinned:

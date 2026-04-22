@@ -13,7 +13,7 @@ from toolengrams.cli import forget
 def _seed(conn, name: str = "test memory", body: str = "test body", **kwargs):
     defaults = {
         "description": "",
-        "type": "reference",
+        "kind": "hint",
         "scope": "global",
         "project_slug": None,
         "created_ts": int(time.time()),
@@ -23,9 +23,9 @@ def _seed(conn, name: str = "test memory", body: str = "test body", **kwargs):
     defaults.update(kwargs)
     cur = conn.execute(
         "INSERT INTO memories "
-        "(name, description, body, type, scope, project_slug, created_ts, surface_count, useful_count) "
+        "(name, description, body, kind, scope, project_slug, created_ts, surface_count, useful_count) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (name, defaults["description"], body, defaults["type"], defaults["scope"],
+        (name, defaults["description"], body, defaults["kind"], defaults["scope"],
          defaults["project_slug"], defaults["created_ts"],
          defaults["surface_count"], defaults["useful_count"]),
     )

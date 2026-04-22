@@ -12,8 +12,8 @@ from toolengrams.hooks import post_tool
 def _seed_memory(conn, name: str = "test memory") -> int:
     cur = conn.execute(
         "INSERT INTO memories "
-        "(name, description, body, type, scope, project_slug, created_ts, surface_count, useful_count) "
-        "VALUES (?, '', 'body', 'reference', 'global', NULL, ?, 3, 0)",
+        "(name, description, body, kind, scope, project_slug, created_ts, surface_count, useful_count) "
+        "VALUES (?, '', 'body', 'hint', 'global', NULL, ?, 3, 0)",
         (name, int(time.time())),
     )
     return cur.lastrowid
