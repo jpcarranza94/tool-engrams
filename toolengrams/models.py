@@ -66,25 +66,6 @@ class Candidate:
 
 
 @dataclass(slots=True)
-class ClusterStats:
-    """Aggregate stats over a first_token bucket. Used by the Laplace threshold.
-
-    Path-glob triggers share the '' (empty-string) bucket since they have no
-    first_token.
-    """
-
-    first_token: str
-    n_memories: int
-    sum_final_score: float
-
-    @property
-    def mean_final_score(self) -> float:
-        if self.n_memories == 0:
-            return 0.0
-        return self.sum_final_score / self.n_memories
-
-
-@dataclass(slots=True)
 class SessionSurface:
     session_id: str
     memory_id: int
