@@ -82,8 +82,8 @@ def test_session_start_spawns_watcher_on_startup(temp_db, monkeypatch):
     assert row["watcher_pid"] == 12345
 
 
-def test_session_start_skips_watcher_on_clear(monkeypatch):
-    """SessionStart with source=clear should not spawn a watcher."""
+def test_session_start_spawns_watcher_on_clear(monkeypatch):
+    """SessionStart with source=clear should spawn a watcher (session continues)."""
     spawned = []
 
     def mock_spawn(session_id, transcript_path, cwd):
@@ -95,4 +95,4 @@ def test_session_start_skips_watcher_on_clear(monkeypatch):
             monkeypatch,
         )
 
-    assert len(spawned) == 0
+    assert len(spawned) == 1

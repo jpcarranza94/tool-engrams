@@ -45,7 +45,10 @@ def main() -> int:
 
 
 def _ensure_watcher_alive(session_id: str, cwd: str) -> None:
-    """If watcher died, respawn it."""
+    """If watcher is dead or was never started, spawn it."""
+    if not cwd:
+        return
+
     conn = db.connect()
     try:
         row = conn.execute(
@@ -53,12 +56,10 @@ def _ensure_watcher_alive(session_id: str, cwd: str) -> None:
             "WHERE work_session_id = ?",
             (session_id,),
         ).fetchone()
-        if row is None:
-            return  # no watcher started (session predates watcher feature)
-        if row["watcher_pid"] and _is_pid_alive(row["watcher_pid"]):
+        if row is not None and row["watcher_pid"] and _is_pid_alive(row["watcher_pid"]):
             return  # watcher is fine
-        # Watcher died -- respawn.
-        transcript_path = row["transcript_path"] or derive_transcript_path(session_id, cwd)
+        # Watcher either never existed or died — spawn one.
+        transcript_path = (row["transcript_path"] if row else None) or derive_transcript_path(session_id, cwd)
         spawn_watcher(session_id, transcript_path, cwd)
     finally:
         conn.close()

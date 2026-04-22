@@ -75,7 +75,8 @@ def _maybe_spawn_watcher(payload: dict) -> None:
     if any(cwd_basename.startswith(prefix) for prefix in _SKIP_CWD_PREFIXES):
         return
 
-    if source == "startup":
+    if source in ("startup", "compact", "clear"):
+        # New session, compaction, or clear — always ensure a watcher is running.
         transcript_path = derive_transcript_path(session_id, cwd)
         spawn_watcher(session_id, transcript_path, cwd)
     elif source == "resume":
@@ -87,12 +88,11 @@ def _maybe_spawn_watcher(payload: dict) -> None:
                 (session_id,),
             ).fetchone()
             if row is None:
-                # No watcher -- spawn one.
+                # No watcher — spawn one.
                 transcript_path = derive_transcript_path(session_id, cwd)
                 spawn_watcher(session_id, transcript_path, cwd)
         finally:
             conn.close()
-    # clear / compact: do nothing
 
 
 def _emit(obj: dict) -> None:
