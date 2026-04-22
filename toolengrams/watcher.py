@@ -22,7 +22,7 @@ from pathlib import Path
 
 from . import db
 from .cli.remember import main as remember_main
-from .prompts.watcher import WATCHER_INITIAL_PROMPT, WATCHER_SUBSEQUENT_HEADER
+from .prompts.watcher import WATCHER_SUBSEQUENT_HEADER, build_watcher_prompt
 from .subprocess_utils import parse_claude_json_output
 from .utils import slugify_cwd
 
@@ -193,7 +193,7 @@ def derive_transcript_path(session_id: str, cwd: str) -> str:
 
 
 def _build_initial_prompt(cwd: str) -> str:
-    return f"{WATCHER_INITIAL_PROMPT}\n\nProject: {cwd}\n\n--- Session activity ---\n\n"
+    return f"{build_watcher_prompt()}\n\nProject: {cwd}\n\n--- Session activity ---\n\n"
 
 
 def _is_session_alive(transcript_path: str, timeout_minutes: int = SESSION_TIMEOUT) -> bool:

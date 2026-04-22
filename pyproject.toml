@@ -22,6 +22,9 @@ engram = "toolengrams.__main__:main"
 where = ["."]
 include = ["toolengrams*"]
 
+[tool.setuptools.package-data]
+"toolengrams" = ["schema.sql", "migrations/*.sql", "prompts/defaults/*.md"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
