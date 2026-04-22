@@ -3,10 +3,8 @@
 Two tables, one concern: tracking what happened in a single Claude Code session.
 
   - session_surfaces: which memories surfaced, when, under which hook, at which turn.
-    Read by pretool (dedup, Hebbian priors), post_tool (reinforcement targets),
-    and associations (co-fire signal).
-  - session_turns: monotonic tool-call counter per session. Drives turn-distance
-    math in Hebbian co-activation.
+    Read by pretool (dedup) and post_tool (reinforcement targets).
+  - session_turns: monotonic tool-call counter per session.
 """
 
 from __future__ import annotations
@@ -50,27 +48,6 @@ def log_surfaces(
     )
 
 
-def get_prior_surfaces_with_turn(
-    conn: sqlite3.Connection,
-    session_id: str,
-) -> dict[int, int]:
-    """{memory_id: max(turn_at_surface)} for all surfaces in this session.
-
-    Used to compute Hebbian co-activation signal based on turn distance.
-    Rows with NULL turn_at_surface (pre-v3 data) surface as -1 so callers
-    can cheaply detect and skip them.
-    """
-    if not session_id:
-        return {}
-    rows = conn.execute(
-        "SELECT memory_id, MAX(turn_at_surface) AS turn "
-        "FROM session_surfaces WHERE session_id = ? "
-        "GROUP BY memory_id",
-        (session_id,),
-    ).fetchall()
-    return {r["memory_id"]: (r["turn"] if r["turn"] is not None else -1) for r in rows}
-
-
 def get_session_turn(conn: sqlite3.Connection, session_id: str) -> int:
     """Current turn counter for this session, or 0 if not yet seen."""
     if not session_id:
@@ -103,11 +80,7 @@ def get_tool_call_surfaces(
     tool_use_id: str,
     hook: str,
 ) -> list[int]:
-    """Memory IDs surfaced by a specific tool_use_id under a specific hook.
-
-    Post_tool uses this to target reinforcement at PRIMARY surfaces only
-    (hook='pre_tool_use'), skipping associative-track surfaces.
-    """
+    """Memory IDs surfaced by a specific tool_use_id under a specific hook."""
     rows = conn.execute(
         "SELECT memory_id FROM session_surfaces "
         "WHERE session_id = ? AND tool_use_id = ? AND hook = ?",

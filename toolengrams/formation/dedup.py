@@ -8,8 +8,10 @@ instead of creating a duplicate.
 
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
+import time
 from typing import Any
 
 from .. import db
@@ -17,8 +19,7 @@ from .candidates import FormationCandidate
 from .triggers import extras_to_candidates, insert_candidate_triggers
 
 # If an existing memory shares this many triggers with the new one,
-# update instead of insert. Set to 1 because we suppress head-1 for
-# subcommand tools.
+# update instead of insert.
 DEDUP_TRIGGER_THRESHOLD = 1
 
 
@@ -39,19 +40,19 @@ def find_overlapping_memory(
     """
     norm_name = normalize_name(name)
 
-    new_heads = set()
-    new_globs = set()
+    new_tokens: set[str] = set()   # serialized tokens_json strings
+    new_globs: set[str] = set()
     for c in candidates:
-        if c.kind == "tool_head" and c.head:
-            new_heads.add((c.tool_name or "", " ".join(c.head)))
+        if c.kind == "token_subseq" and c.tokens:
+            new_tokens.add(json.dumps(list(c.tokens)))
         elif c.kind == "path_glob" and c.path_pattern:
             new_globs.add(c.path_pattern)
 
-    if not new_heads and not new_globs:
+    if not new_tokens and not new_globs:
         return None
 
     rows = conn.execute(
-        "SELECT m.id, m.name, t.kind, t.tool_name, t.head_joined, t.path_pattern "
+        "SELECT m.id, m.name, t.kind, t.tokens_json, t.path_pattern "
         "FROM memories m JOIN triggers t ON t.memory_id = m.id "
         "WHERE m.archived_ts IS NULL "
         "AND (m.scope = 'global' OR m.project_slug = ?)",
@@ -64,11 +65,11 @@ def find_overlapping_memory(
         if mid not in scores:
             scores[mid] = {"id": mid, "name": row["name"], "overlap": 0, "reason": []}
 
-        if row["kind"] == "tool_head":
-            key = (row["tool_name"] or "", row["head_joined"] or "")
-            if key in new_heads:
+        if row["kind"] == "token_subseq":
+            key = row["tokens_json"] or ""
+            if key and key in new_tokens:
                 scores[mid]["overlap"] += 1
-                scores[mid]["reason"].append(f"tool_head:{key[1]}")
+                scores[mid]["reason"].append(f"token_subseq:{key}")
         elif row["kind"] == "path_glob":
             if row["path_pattern"] in new_globs:
                 scores[mid]["overlap"] += 1
@@ -106,7 +107,6 @@ def update_existing_memory(
     extra_triggers: list[dict[str, Any]],
 ) -> int:
     """Replace body/name/type on an existing memory, merge triggers."""
-    import time
     now_ts = int(time.time())
     with db.transaction(conn):
         conn.execute(
@@ -118,5 +118,3 @@ def update_existing_memory(
         insert_candidate_triggers(conn, existing_id, candidates)
         insert_candidate_triggers(conn, existing_id, extras_to_candidates(extra_triggers))
     return existing_id
-
-

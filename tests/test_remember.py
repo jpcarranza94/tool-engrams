@@ -44,7 +44,6 @@ def test_stdin_body_when_text_is_dash(temp_db, monkeypatch, capsys):
 
 def test_empty_body_returns_exit_2(temp_db, monkeypatch, capsys):
     monkeypatch.setattr("sys.stdin", io.StringIO(""))
-    # Simulate non-tty stdin but empty
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
     rc = remember.main([])
     assert rc == 2
@@ -78,14 +77,14 @@ def test_extraction_emits_expected_triggers(temp_db, monkeypatch, capsys):
     body = "Use `git push` and see ~/.claude/settings.json, docs at https://example.com"
     payload = _run([body], monkeypatch, capsys=capsys)
 
-    heads = {
-        (t["tool_name"], tuple(t["head"]))
+    token_triggers = {
+        tuple(t["tokens"])
         for t in payload["extracted_triggers"]
-        if t["kind"] == "tool_head"
+        if t["kind"] == "token_subseq"
     }
-    assert ("Bash", ("git", "push")) in heads
-    assert ("Bash", ("git",)) not in heads  # head-1 suppressed when head-2 exists
-    assert ("WebFetch", ("example.com",)) in heads
+    assert ("git", "push") in token_triggers
+    assert ("git",) not in token_triggers  # single-token suppressed when two-token exists
+    assert ("example.com",) in token_triggers
 
     globs = {
         t["path_pattern"]
@@ -99,31 +98,31 @@ def test_triggers_are_persisted_to_db(temp_db, monkeypatch, capsys):
     _run(["`git push`"], monkeypatch, capsys=capsys)
     rows = _rows(
         temp_db,
-        "SELECT kind, tool_name, head_joined, head_length FROM triggers ORDER BY id",
+        "SELECT kind, first_token, tokens_json FROM triggers WHERE kind = 'token_subseq' ORDER BY id",
     )
-    kinds = [(r["kind"], r["tool_name"], r["head_joined"], r["head_length"]) for r in rows]
-    assert ("tool_head", "Bash", "git push", 2) in kinds
-    assert ("tool_head", "Bash", "git", 1) not in kinds  # suppressed
+    triggers = [(r["kind"], r["first_token"], json.loads(r["tokens_json"])) for r in rows]
+    assert ("token_subseq", "git", ["git", "push"]) in triggers
+    # Single-token (["git"]) is suppressed when the two-token form is extracted.
+    assert not any(t[2] == ["git"] for t in triggers)
 
 
 # ---------- extra triggers ----------
 
 
-def test_extra_trigger_keyword_now_rejected(temp_db, monkeypatch):
-    """keyword triggers were removed in the tool-bound refactor."""
+def test_extra_trigger_keyword_rejected(temp_db, monkeypatch):
+    """keyword triggers are not supported in v2."""
     with pytest.raises(SystemExit):
         remember.main(["--extra-trigger", "keyword:psql", "body text"])
 
 
-def test_extra_trigger_tool_head(temp_db, monkeypatch, capsys):
+def test_extra_trigger_token_subseq(temp_db, monkeypatch, capsys):
     payload = _run(
-        ["--extra-trigger", "tool_head:Bash:git,push", "some `git` body"],
+        ["--extra-trigger", "token_subseq:git,push", "some `git` body"],
         monkeypatch,
         capsys=capsys,
     )
-    assert payload["extra_triggers"][0]["kind"] == "tool_head"
-    # JSON round-trips tuples to lists.
-    assert list(payload["extra_triggers"][0]["head"]) == ["git", "push"]
+    assert payload["extra_triggers"][0]["kind"] == "token_subseq"
+    assert list(payload["extra_triggers"][0]["tokens"]) == ["git", "push"]
 
 
 def test_extra_trigger_malformed_raises(temp_db, monkeypatch):
@@ -195,13 +194,13 @@ def test_dedup_updates_existing_on_trigger_overlap(temp_db, monkeypatch, capsys)
     p2 = _run(["`git push` -- never force push actually"], monkeypatch, capsys=capsys)
     assert p2["action"] == "updated"
     assert p2["memory"]["id"] == mid
-    assert p2["existing_match"]["overlap_count"] >= 1  # (git, push) shared + name match
+    assert p2["existing_match"]["overlap_count"] >= 1
 
     rows = _rows(temp_db, "SELECT COUNT(*) AS c FROM memories WHERE archived_ts IS NULL")
-    assert rows[0]["c"] == 1  # only one memory, not two
+    assert rows[0]["c"] == 1
 
     body = _rows(temp_db, "SELECT body FROM memories WHERE id = ?", mid)
-    assert "never force push" in body[0]["body"]  # body was replaced
+    assert "never force push" in body[0]["body"]
 
 
 def test_dedup_allows_distinct_memories(temp_db, monkeypatch, capsys):
@@ -218,7 +217,6 @@ def test_dedup_same_trigger_different_body_updates(temp_db, monkeypatch, capsys)
     """Same trigger (git push) with different body → should update."""
     _run(["--name", "git push rule", "`git push` -- always to origin"], monkeypatch, capsys=capsys)
     p2 = _run(["--name", "git push updated", "`git push` -- with lease"], monkeypatch, capsys=capsys)
-    # (git, push) overlaps → update
     assert p2["action"] == "updated"
 
     rows = _rows(temp_db, "SELECT COUNT(*) AS c FROM memories WHERE archived_ts IS NULL")
@@ -249,12 +247,10 @@ def test_body_with_only_paths_is_accepted(temp_db, monkeypatch, capsys):
 def test_consolidation_counts_on_update(temp_db, monkeypatch, capsys):
     _run(["`git push` one"], monkeypatch, capsys=capsys)
     payload = _run(["`git push` two"], monkeypatch, capsys=capsys)
-    # Dedup fires (same triggers), action is update
     assert payload["action"] == "updated"
     counts = {
-        (t["tool_name"], tuple(t["head"])): t["existing_memories"]
+        tuple(t["tokens"]): t["existing_memories"]
         for t in payload["extracted_triggers"]
-        if t["kind"] == "tool_head"
+        if t["kind"] == "token_subseq"
     }
-    # Only (git, push) emitted — head-1 suppressed
-    assert counts[("Bash", ("git", "push"))] == 1
+    assert counts[("git", "push")] == 1

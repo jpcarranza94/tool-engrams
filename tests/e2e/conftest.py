@@ -250,15 +250,24 @@ def db_assertions(claude_runner):
 
 
 def _insert_trigger(conn, memory_id: int, trigger: dict) -> None:
+    import json as _json
+
     kind = trigger["kind"]
+    # Back-compat shim: older e2e tests still use tool_head/head shape. Convert
+    # on the fly into v2's token_subseq/tokens shape so the fixtures keep working.
     if kind == "tool_head":
-        head = trigger["head"]
-        head_joined = " ".join(head)
+        kind = "token_subseq"
+        trigger = {"kind": kind, "tokens": list(trigger["head"])}
+
+    if kind == "token_subseq":
+        tokens = list(trigger["tokens"])
+        if not tokens:
+            return
         conn.execute(
             "INSERT INTO triggers "
-            "(memory_id, kind, tool_name, head_joined, head_length) "
-            "VALUES (?, 'tool_head', ?, ?, ?)",
-            (memory_id, trigger["tool_name"], head_joined, len(head)),
+            "(memory_id, kind, first_token, tokens_json) "
+            "VALUES (?, 'token_subseq', ?, ?)",
+            (memory_id, tokens[0], _json.dumps(tokens)),
         )
     elif kind == "path_glob":
         conn.execute(

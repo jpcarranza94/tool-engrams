@@ -27,11 +27,10 @@ def _seed(conn, name: str, body: str = "body", **kwargs):
          defaults["created_ts"], defaults["pinned"]),
     )
     mid = cur.lastrowid
-    # Add a tool_head trigger for testing
     conn.execute(
-        "INSERT INTO triggers (memory_id, kind, tool_name, head_joined, head_length) "
-        "VALUES (?, 'tool_head', 'Bash', 'git', 1)",
-        (mid,),
+        "INSERT INTO triggers (memory_id, kind, first_token, tokens_json) "
+        "VALUES (?, 'token_subseq', 'git', ?)",
+        (mid, json.dumps(["git"])),
     )
     return mid
 
@@ -102,7 +101,7 @@ def test_detail_by_id(temp_db, capsys):
     assert payload["memory"]["name"] == "detail test"
     assert payload["memory"]["body"] == "detailed body here"
     assert len(payload["triggers"]) >= 1
-    assert payload["triggers"][0]["kind"] == "tool_head"
+    assert payload["triggers"][0]["kind"] == "token_subseq"
 
 
 def test_detail_not_found(temp_db, capsys):
@@ -125,4 +124,4 @@ def test_stats(temp_db, capsys):
     assert payload["pinned"] == 1
     assert payload["by_type"]["reference"] == 2  # ref1 + pinned1 (default type)
     assert payload["by_type"]["feedback"] == 1
-    assert payload["triggers_by_kind"]["tool_head"] == 3
+    assert payload["triggers_by_kind"]["token_subseq"] == 3

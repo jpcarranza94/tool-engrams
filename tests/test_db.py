@@ -17,9 +17,10 @@ def test_fresh_db_gets_all_tables(tmp_path):
     assert "memories" in tables
     assert "triggers" in tables
     assert "session_surfaces" in tables
-    assert "memory_associations" in tables
     assert "consolidation_runs" in tables
     assert "session_turns" in tables
+    # Hebbian table was dropped in v6.
+    assert "memory_associations" not in tables
     ver = conn.execute("PRAGMA user_version").fetchone()[0]
     assert ver == db.SCHEMA_VERSION
     conn.close()
@@ -39,9 +40,15 @@ def test_v1_to_latest_migration(tmp_path):
     tables = {r[0] for r in conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table'"
     ).fetchall()}
-    assert "memory_associations" in tables
     assert "consolidation_runs" in tables
     assert "session_turns" in tables
+    # memory_associations was created in v2 then dropped in v6.
+    assert "memory_associations" not in tables
+    # triggers was reshaped in v6.
+    trigger_cols = {r[1] for r in conn.execute("PRAGMA table_info(triggers)").fetchall()}
+    assert "first_token" in trigger_cols
+    assert "tokens_json" in trigger_cols
+    assert "head_joined" not in trigger_cols
     conn.close()
 
 

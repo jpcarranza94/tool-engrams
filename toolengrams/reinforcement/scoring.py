@@ -35,13 +35,7 @@ def recency(last_surfaced_ts: int, half_life_days: float, now_ts: int) -> float:
 
 
 def final_score(candidate: Candidate, now_ts: int) -> float:
-    """Combine structural match with reinforcement-weighted modifiers.
-
-    Hebbian associations are no longer multiplied into this score — they run
-    on a separate track (see hooks/pretool.py associative phase). Keeping
-    primary scoring purely structural × reinforcement × recency × pinning
-    prevents a distant-but-associated memory from outranking a directly-matched one.
-    """
+    """Combine structural match with reinforcement-weighted modifiers."""
     u = usefulness(candidate.useful_count, candidate.surface_count)
     half_life = HALF_LIFE_DAYS.get(candidate.type, HALF_LIFE_DAYS["reference"])
     r = recency(candidate.last_surfaced_ts, half_life, now_ts)

@@ -1,5 +1,5 @@
--- ToolEngrams schema v1
--- Canonical store. See docs/design-v8.md for full design.
+-- ToolEngrams schema (current v2). See docs/design-v9.md for full design.
+-- Incremental reshape for existing DBs lives in migrations/v*.sql.
 
 PRAGMA journal_mode = WAL;
 PRAGMA synchronous = NORMAL;
@@ -27,25 +27,15 @@ CREATE INDEX IF NOT EXISTS idx_memories_scope
 CREATE TABLE IF NOT EXISTS triggers (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     memory_id       INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
-    -- NOTE: CHECK constraint includes legacy kinds (error_contains, keyword) for
-    -- backwards compatibility with existing DBs. Only tool_head and path_glob
-    -- are used. The error_substring and keyword columns are vestigial nulls.
-    kind            TEXT NOT NULL CHECK (kind IN ('tool_head','path_glob','error_contains','keyword')),
-    tool_name       TEXT,
-    head_joined     TEXT,
-    head_length     INTEGER,
-    path_pattern    TEXT,
-    error_substring TEXT,
-    keyword         TEXT
+    kind            TEXT NOT NULL CHECK (kind IN ('token_subseq','path_glob')),
+    first_token     TEXT,     -- lowercased for indexed lookup; null for path_glob
+    tokens_json     TEXT,     -- JSON array of required tokens in order; null for path_glob
+    path_pattern    TEXT      -- fnmatch pattern; null for token_subseq
 );
 
-CREATE INDEX IF NOT EXISTS idx_triggers_tool_head
-    ON triggers(tool_name, head_joined)
-    WHERE kind = 'tool_head';
-
-CREATE INDEX IF NOT EXISTS idx_triggers_error
-    ON triggers(tool_name)
-    WHERE kind = 'error_contains';
+CREATE INDEX IF NOT EXISTS idx_triggers_first_token
+    ON triggers(first_token)
+    WHERE kind = 'token_subseq';
 
 CREATE INDEX IF NOT EXISTS idx_triggers_memory
     ON triggers(memory_id);

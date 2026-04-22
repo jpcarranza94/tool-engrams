@@ -163,8 +163,7 @@ def _resolve_triggers(
     all_triggers = candidates + [
         FormationCandidate(
             kind=t["kind"],
-            tool_name=t.get("tool_name"),
-            head=t.get("head", ()),
+            tokens=tuple(t.get("tokens") or ()),
             path_pattern=t.get("path_pattern"),
             source="extra",
         )
@@ -200,7 +199,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
                         help="Path glob to bind to (repeatable). e.g. --path '**/*.py'")
     parser.add_argument("--extra-trigger", action="append", default=None,
                         metavar="SPEC",
-                        help="(Legacy) tool_head:Bash:git,push | path_glob:**/*.py")
+                        help="token_subseq:git,push | path_glob:**/*.py")
     parser.add_argument("--dry-run", action="store_true",
                         help="Extract and report candidates; do not insert.")
     return parser.parse_args(argv)
@@ -244,8 +243,8 @@ def _parse_explicit_triggers(
 ) -> list[FormationCandidate]:
     """Parse --trigger and --path flags into FormationCandidates.
 
-    --trigger takes a command prefix string like 'git push --force'.
-    The full string is stored as head_joined for prefix matching.
+    --trigger takes a space-separated list of required tokens, e.g.
+    'git push --force'. Stored as a token_subseq trigger matched in order.
     """
     out: list[FormationCandidate] = []
     for prefix in cmd_prefixes:
@@ -254,9 +253,8 @@ def _parse_explicit_triggers(
             continue
         tokens = tuple(prefix.split())
         out.append(FormationCandidate(
-            kind="tool_head",
-            tool_name="Bash",
-            head=tokens,
+            kind="token_subseq",
+            tokens=tokens,
             source="explicit",
         ))
     for glob in path_globs:
@@ -272,17 +270,22 @@ def _parse_explicit_triggers(
 
 
 def _parse_extra_triggers(specs: list[str]) -> list[dict[str, Any]]:
-    """Parse --extra-trigger SPEC strings into dict rows."""
+    """Parse --extra-trigger SPEC strings into dict rows.
+
+    Formats:
+      path_glob:**/*.py
+      token_subseq:git,push
+    """
     out: list[dict[str, Any]] = []
     for spec in specs:
         parts = spec.split(":")
         kind = parts[0]
         if kind == "path_glob" and len(parts) == 2:
             out.append({"kind": "path_glob", "path_pattern": parts[1]})
-        elif kind == "tool_head" and len(parts) == 3:
-            tool_name = parts[1]
-            head = tuple(t for t in parts[2].split(",") if t)
-            out.append({"kind": "tool_head", "tool_name": tool_name, "head": head})
+        elif kind == "token_subseq" and len(parts) == 2:
+            tokens = tuple(t for t in parts[1].split(",") if t)
+            if tokens:
+                out.append({"kind": "token_subseq", "tokens": tokens})
         else:
             raise SystemExit(f"engram remember: malformed --extra-trigger {spec!r}")
     return out
@@ -362,8 +365,7 @@ def _build_payload(
 def _candidate_to_dict(c: FormationCandidate) -> dict[str, Any]:
     return {
         "kind": c.kind,
-        "tool_name": c.tool_name,
-        "head": list(c.head) if c.head else None,
+        "tokens": list(c.tokens) if c.tokens else None,
         "path_pattern": c.path_pattern,
         "source": c.source,
         "existing_memories": c.existing_memories,

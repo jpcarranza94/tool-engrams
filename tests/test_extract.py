@@ -1,7 +1,8 @@
 """Trigger extraction tests.
 
 Covers the `(tool_name, tool_input) -> ExtractedTriggerHint` mapping for the
-tools in the PreToolUse whitelist.
+tools in the PreToolUse whitelist. v2 extraction returns the full tokenization
+of the call (not prefix pairs) and relies on subsequence matching downstream.
 """
 
 from __future__ import annotations
@@ -9,17 +10,14 @@ from __future__ import annotations
 from toolengrams.retrieval.extract import extract_hints
 
 
-def test_bash_single_head():
+def test_bash_tokenizes_command():
     hint = extract_hints("Bash", {"command": "mycli -c 'SELECT 1'"})
-    assert ("mycli",) in hint.head_prefixes
-    # mycli is not in the subcommand allowlist, so no second-token prefix.
-    assert ("mycli", "-c") not in hint.head_prefixes
+    assert hint.tokens == ["mycli", "-c", "SELECT 1"]
 
 
-def test_bash_subcommand_expansion():
+def test_bash_subcommand_full_tokens():
     hint = extract_hints("Bash", {"command": "git push origin main"})
-    assert ("git",) in hint.head_prefixes
-    assert ("git", "push") in hint.head_prefixes
+    assert hint.tokens == ["git", "push", "origin", "main"]
 
 
 def test_bash_extracts_tilde_path():
@@ -35,20 +33,20 @@ def test_bash_extracts_absolute_path():
 def test_bash_malformed_quoting_still_tokenizes():
     # Unterminated quote — shlex would raise; we fall back to whitespace split.
     hint = extract_hints("Bash", {"command": "git commit -m \"oops"})
-    assert ("git",) in hint.head_prefixes
-    assert ("git", "commit") in hint.head_prefixes
+    assert hint.tokens[0] == "git"
+    assert "commit" in hint.tokens
 
 
 def test_bash_empty_command():
     hint = extract_hints("Bash", {"command": ""})
-    assert hint.head_prefixes == []
+    assert hint.tokens == []
     assert hint.paths == []
 
 
 def test_read_file_path():
     hint = extract_hints("Read", {"file_path": "/home/user/projects/foo/bar.py"})
     assert hint.paths == ["/home/user/projects/foo/bar.py"]
-    assert hint.head_prefixes == []
+    assert hint.tokens == []
 
 
 def test_edit_file_path():
@@ -56,14 +54,14 @@ def test_edit_file_path():
     assert "~/.claude/CLAUDE.md" in hint.paths
 
 
-def test_webfetch_host_as_head():
+def test_webfetch_host_and_path_as_tokens():
     hint = extract_hints("WebFetch", {"url": "https://api.github.com/repos/foo/bar"})
-    assert ("api.github.com",) in hint.head_prefixes
+    assert hint.tokens == ["api.github.com", "repos", "foo", "bar"]
 
 
 def test_webfetch_no_scheme():
     hint = extract_hints("WebFetch", {"url": "example.com/path"})
-    assert ("example.com",) in hint.head_prefixes
+    assert hint.tokens[0] == "example.com"
 
 
 def test_grep_path():
@@ -79,5 +77,5 @@ def test_glob_pattern_and_path():
 
 def test_unknown_tool_no_hints():
     hint = extract_hints("SendMessage", {"to": "foo", "message": "bar"})
-    assert hint.head_prefixes == []
+    assert hint.tokens == []
     assert hint.paths == []

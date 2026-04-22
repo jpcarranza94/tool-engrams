@@ -1,31 +1,32 @@
 """Formation-time trigger extraction from memory body text.
 
-The design (docs/design-v8.md §7) says `/remember` should deterministically
+The design (docs/design-v9.md §3) says `engram remember` should deterministically
 parse the body for patterns that bind the memory to future tool calls:
 
-  - Backticked shell snippets → Bash tool_head triggers
+  - Backticked shell snippets → token_subseq triggers
   - Tilde / absolute / repo-rooted paths → path_glob triggers
-  - URL hosts → WebFetch tool_head triggers
-  - Bare CLI names mentioned in prose → Bash tool_head (single token only)
+  - URL hosts → token_subseq triggers (host as the first token)
+  - Bare CLI names mentioned in prose → token_subseq (single-token) triggers
 
 Then it consolidates against existing vocabulary: candidates whose pattern
-already exists on ≥2 other memories get annotated with the match count so
+already exists on ≥1 other memory get annotated with the match count so
 upstream can prefer convergence over sprouting new clusters.
 
 This module is pure extraction + annotation; it never touches the DB by
-itself. `commands/remember.py` wires it to persistence.
+itself. `cli/remember.py` wires it to persistence.
 """
 
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
-from dataclasses import dataclass, field
-from typing import Literal
+from dataclasses import dataclass
+from typing import Iterable, Literal
 
 from ..retrieval.extract import _SUBCOMMAND_TOOLS, _tokenize_bash
 
-CandidateKind = Literal["tool_head", "path_glob"]
+CandidateKind = Literal["token_subseq", "path_glob"]
 
 # Backticked shell snippet. Single-line only — we don't try to parse fenced blocks.
 _BACKTICK_RE = re.compile(r"`([^`\n]+)`")
@@ -34,8 +35,6 @@ _BACKTICK_RE = re.compile(r"`([^`\n]+)`")
 _URL_RE = re.compile(r"https?://([^\s`'\"()<>]+)")
 
 # Tilde / absolute / dotted-relative paths that look like filesystem refs.
-# Intentionally narrower than extract._PATH_RE — we want things a human would
-# typeset as a path, not every slash-containing token.
 _PATH_RE = re.compile(
     r"(?<![/\w])("
     r"~(?:/[A-Za-z0-9_./\-]+)?"          # ~/foo/bar
@@ -54,15 +53,14 @@ class FormationCandidate:
     """A single candidate trigger extracted from a memory body."""
 
     kind: CandidateKind
-    tool_name: str | None = None          # "Bash" / "WebFetch" for tool_head, None for path_glob
-    head: tuple[str, ...] = ()
+    tokens: tuple[str, ...] = ()
     path_pattern: str | None = None
-    source: str = ""                       # "backtick" | "path" | "url" | "cli-name"
+    source: str = ""                       # "backtick" | "path" | "url" | "extra" | "explicit"
     existing_memories: int = 0             # set by consolidate_vocabulary
 
     @property
     def dedup_key(self) -> tuple:
-        return (self.kind, self.tool_name, self.head, self.path_pattern)
+        return (self.kind, self.tokens, self.path_pattern)
 
 
 # --------- extraction ---------
@@ -105,24 +103,22 @@ def _extract_backticks(body: str, add) -> None:
             continue
 
         # For subcommand tools (git, aws, docker, etc.), prefer the more
-        # specific head-2 trigger. Only emit head-1 if no head-2 exists.
-        emitted_head2 = False
+        # specific two-token trigger. Only emit one-token if no two-token exists.
+        emitted_two = False
         if head1 in _SUBCOMMAND_TOOLS and len(tokens) >= 2:
             head2 = tokens[1]
             if _CLI_NAME_RE.match(head2):
                 add(FormationCandidate(
-                    kind="tool_head",
-                    tool_name="Bash",
-                    head=(head1, head2),
+                    kind="token_subseq",
+                    tokens=(head1, head2),
                     source="backtick",
                 ))
-                emitted_head2 = True
+                emitted_two = True
 
-        if not emitted_head2:
+        if not emitted_two:
             add(FormationCandidate(
-                kind="tool_head",
-                tool_name="Bash",
-                head=(head1,),
+                kind="token_subseq",
+                tokens=(head1,),
                 source="backtick",
             ))
 
@@ -157,12 +153,10 @@ def _extract_urls(body: str, add) -> None:
         host = host_path.split("/", 1)[0].rstrip(".,;:)]}'\"")
         if host:
             add(FormationCandidate(
-                kind="tool_head",
-                tool_name="WebFetch",
-                head=(host,),
+                kind="token_subseq",
+                tokens=(host,),
                 source="url",
             ))
-
 
 
 # --------- consolidation ---------
@@ -180,11 +174,12 @@ def consolidate_vocabulary(
     """
     out = list(candidates)
     for c in out:
-        if c.kind == "tool_head":
+        if c.kind == "token_subseq":
+            tokens_json = json.dumps(list(c.tokens))
             row = conn.execute(
                 "SELECT COUNT(DISTINCT memory_id) FROM triggers "
-                "WHERE kind = 'tool_head' AND tool_name = ? AND head_joined = ?",
-                (c.tool_name, " ".join(c.head)),
+                "WHERE kind = 'token_subseq' AND tokens_json = ?",
+                (tokens_json,),
             ).fetchone()
         elif c.kind == "path_glob":
             row = conn.execute(
@@ -196,5 +191,3 @@ def consolidate_vocabulary(
             row = (0,)
         c.existing_memories = int(row[0] or 0)
     return out
-
-

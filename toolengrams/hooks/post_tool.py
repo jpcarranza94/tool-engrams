@@ -49,18 +49,12 @@ def _run(payload: dict[str, Any]) -> int:
     now_ts = int(time.time())
     conn = db.connect()
     try:
-        # Reinforcement: only on success. Target PRIMARY surfaces (hook =
-        # 'pre_tool_use'); associative-track surfaces (hook = 'pre_tool_use_assoc')
-        # don't count — their tool call wasn't aimed at them.
         if not is_error:
             memory_ids = get_tool_call_surfaces(
                 conn, session_id, tool_use_id, "pre_tool_use",
             )
             bump_useful_counts(conn, memory_ids)
 
-        # Always increment the per-session turn counter (tracks conversational
-        # distance for Hebbian co-activation). Runs regardless of error state —
-        # every tool call is a turn.
         increment_session_turn(conn, session_id, now_ts)
     finally:
         conn.close()

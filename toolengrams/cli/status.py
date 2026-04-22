@@ -30,14 +30,6 @@ def main(argv: list[str] | None = None) -> int:
             "GROUP BY kind"
         ).fetchall()
 
-        # Association stats.
-        assoc_stats = conn.execute(
-            "SELECT COUNT(*) AS pairs, "
-            "  AVG(strength) AS avg_strength, "
-            "  MAX(strength) AS max_strength "
-            "FROM memory_associations"
-        ).fetchone()
-
         # Last consolidation run.
         last_run = conn.execute(
             "SELECT run_date, sessions_scanned, memories_archived, "
@@ -56,11 +48,6 @@ def main(argv: list[str] | None = None) -> int:
                 "total_useful": mem_stats["total_useful"] or 0,
             },
             "triggers": {r["kind"]: r["count"] for r in trigger_stats},
-            "associations": {
-                "pairs": assoc_stats["pairs"] or 0,
-                "avg_strength": round(assoc_stats["avg_strength"] or 0, 3),
-                "max_strength": round(assoc_stats["max_strength"] or 0, 3),
-            },
             "last_consolidation": dict(last_run) if last_run else None,
             "schedule_installed": schedule_installed,
         }
