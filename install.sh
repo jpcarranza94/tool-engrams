@@ -85,8 +85,9 @@ if not any("engram pretool" in str(h) for h in hooks.get("PreToolUse", [])):
 else:
     print("  PreToolUse hook already present")
 
-# PostToolUse
-if not any("engram post-tool" in str(h) for h in hooks.get("PostToolUse", [])):
+# PostToolUse (success reinforcement + turn counter)
+if not any("engram post-tool" in str(h) and "post-tool-failure" not in str(h)
+           for h in hooks.get("PostToolUse", [])):
     hooks.setdefault("PostToolUse", []).append({
         "matcher": "Bash|Read|Edit|Write|Grep|Glob|WebFetch|NotebookEdit",
         "hooks": [{
@@ -98,6 +99,21 @@ if not any("engram post-tool" in str(h) for h in hooks.get("PostToolUse", [])):
     print("  Added PostToolUse hook")
 else:
     print("  PostToolUse hook already present")
+
+# PostToolUseFailure (hint injection on real tool failures)
+if not any("engram post-tool-failure" in str(h)
+           for h in hooks.get("PostToolUseFailure", [])):
+    hooks.setdefault("PostToolUseFailure", []).append({
+        "matcher": "Bash|Read|Edit|Write|Grep|Glob|WebFetch|NotebookEdit",
+        "hooks": [{
+            "type": "command",
+            "command": "engram post-tool-failure",
+            "timeout": 3000,
+        }]
+    })
+    print("  Added PostToolUseFailure hook")
+else:
+    print("  PostToolUseFailure hook already present")
 
 # UserPromptSubmit — watcher liveness check
 if not any("engram user-prompt" in str(h) for h in hooks.get("UserPromptSubmit", [])):
