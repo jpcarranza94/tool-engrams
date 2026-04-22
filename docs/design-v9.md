@@ -13,8 +13,7 @@ v8 shipped the core storage + retrieval + watcher + consolidation machinery. The
 **1a. Two memory types aren't doing useful work.** The `feedback` vs `reference` split was meant to separate "block on match" from "just inject context." In practice:
 
 - `reference` memories inject on *every* matching PreToolUse. The noise-to-signal ratio is bad: most calls that match a reference memory don't actually need the context. Claude knows.
-- `feedback` memories deny calls pre-hook. This works for the ergeon-cli style "use the other flag" case, but the deny UX is harsh — we block calls Claude might intentionally want to run (e.g. WIP force-push).
-- Claude Code's own permission system is a better fit for deny semantics anyway (rule-based, explicit, scoped to settings). Memory-based deny overlaps with it without being better.
+- `feedback` memories deny calls pre-hook. A PreToolUse deny fails the call *for Claude* (not the user) and prompts a retry with the injected context — it's an in-loop correction, not a user-facing block. Fine mechanically, but the question is whether forcing a retry is worth it when an error-time hint would produce the same correction at lower cost. For most patterns it isn't: the agent would likely have discovered the same thing by running the call, seeing the error, and adapting. Block-style memories are useful in a narrow class where the failure mode is expensive or invisible (destructive op, silently-wrong output). That's a small enough class to keep `block` as an option without making it the default.
 
 **1b. Prefix matching on head tokens breaks for real CLIs.** `ergeon order 12345 reassign` can't match a trigger `["ergeon", "order", "reassign"]` because `12345` sits between the matching tokens. Any subcommand CLI with positional IDs before verbs has this shape. `gh pr 123 comment`, `jira sprint 5 add`, `kubectl get pod-abc123 -o json` — all real.
 
@@ -201,7 +200,6 @@ A lot, actually:
 - SQLite backend + migration runner
 - Watcher (with configurable prompt)
 - Consolidation agent (nightly Opus review)
-- Hebbian associations table (for co-activation analytics; not a surface track anymore)
 - Session bookkeeping (surfaces, turns)
 - The `engram` CLI shell (`remember`, `forget`, `recall`, `pin`, `status`, `dashboard`)
 - The overall package layout we just landed (cli/, hooks/, formation/, retrieval/, reinforcement/, consolidation/, prompts/)
@@ -229,11 +227,12 @@ Steps 1–3 are the core behavior change. 4–6 are ergonomics. 7 is positioning
 
 ## 11. Open questions
 
-1. **Should `block` memories also surface on PostToolUse on failure?** If a block memory matched and Claude got past it somehow (e.g. the deny was dismissed by user), should we still inject the context after the call fails? Probably yes — but small case, defer.
-2. **Naming: `block` / `hint`, or something else?** `guard` / `tip`? `deny` / `recall`? Bikeshed-worthy. Keeping `block` / `hint` in the doc as placeholder.
-3. **First-token bucket for path triggers?** Currently we fetch all path triggers and fnmatch. Fine at low volume; revisit if path-memory corpus grows.
-4. **Session-start surfacing of pinned memories.** Killed in the spec above, but might come back as a narrow feature if dogfooding shows lead-in value.
-5. **What about PostToolUse on tool *success* where the output contains an error keyword?** (e.g., a shell command that exits 0 but emits "WARNING:".) Probably punt — too heuristic. Revisit if it comes up.
+1. **Does a PreToolUse deny fire PostToolUse?** Open empirical question. If Claude Code runs PostToolUse with `is_error=true` after a PreToolUse deny, every blocked call would *also* trigger hint retrieval on the retry — double-firing context. Must verify before shipping step 2 of §10: run a tiny harness test, observe whether PostToolUse payload arrives with a non-zero exit after a denied call, and if so, filter those out in `hooks/post_tool.py` (checking for a deny marker in the tool_response, or a new field if Claude Code provides one).
+2. **Should `block` memories also surface on PostToolUse on failure?** Separate from (1): if a block fired pre and the retry still fails, is the same body useful again in PostToolUse? Probably yes but edge case, defer.
+3. **Naming: `block` / `hint`, or something else?** `guard` / `tip`? `deny` / `recall`? Bikeshed-worthy. Keeping `block` / `hint` in the doc as placeholder.
+4. **First-token bucket for path triggers?** Currently we fetch all path triggers and fnmatch. Fine at low volume; revisit if path-memory corpus grows.
+5. **Session-start surfacing of pinned memories.** Killed in the spec above, but might come back as a narrow feature if dogfooding shows lead-in value.
+6. **What about PostToolUse on tool *success* where the output contains an error keyword?** (e.g., a shell command that exits 0 but emits "WARNING:".) Probably punt — too heuristic. Revisit if it comes up.
 
 ## 12. Explicitly not in v2
 
@@ -245,5 +244,6 @@ Steps 1–3 are the core behavior change. 4–6 are ergonomics. 7 is positioning
 - Hebbian co-activation as a surface track (still stored, for analytics only)
 - MCP server variant
 - Non-Claude-Code harnesses (Cursor, Aider, etc.)
+- Hebbian associations (table, retrieval, co-activation bookkeeping). Drop it. Recall itself isn't reliable yet; maintaining a secondary ranking signal is premature. Can be rebuilt later if dogfooding shows a specific case where direct triggers miss and association would have caught it.
 
 These are all real ideas, but each dilutes the v2 "ship and measure" story. Revisit after dogfooding.
