@@ -21,7 +21,7 @@ SEED_MEMORIES = [
         "type": "reference",
         "scope": "global",
         "triggers": [
-            {"kind": "tool_head", "tool_name": "Bash", "head": ["psql", "-h"]},
+            {"kind": "token_subseq", "tokens": ["psql", "-h"]},
         ],
     },
     {
@@ -35,7 +35,7 @@ SEED_MEMORIES = [
         "type": "feedback",
         "scope": "global",
         "triggers": [
-            {"kind": "tool_head", "tool_name": "Bash", "head": ["git", "commit"]},
+            {"kind": "token_subseq", "tokens": ["git", "commit"]},
         ],
     },
     {
@@ -49,7 +49,7 @@ SEED_MEMORIES = [
         "type": "reference",
         "scope": "global",
         "triggers": [
-            {"kind": "tool_head", "tool_name": "Bash", "head": ["ssh", "deploy@"]},
+            {"kind": "token_subseq", "tokens": ["ssh", "deploy@production"]},
         ],
     },
 ]
@@ -91,13 +91,15 @@ def main() -> int:
 def _insert_triggers(conn, memory_id: int, triggers: list[dict]) -> None:
     for t in triggers:
         kind = t["kind"]
-        if kind == "tool_head":
-            head_joined = " ".join(t["head"])
+        if kind == "token_subseq":
+            tokens = list(t["tokens"])
+            if not tokens:
+                continue
             conn.execute(
                 "INSERT INTO triggers "
-                "(memory_id, kind, tool_name, head_joined, head_length) "
-                "VALUES (?, 'tool_head', ?, ?, ?)",
-                (memory_id, t["tool_name"], head_joined, len(t["head"])),
+                "(memory_id, kind, first_token, tokens_json) "
+                "VALUES (?, 'token_subseq', ?, ?)",
+                (memory_id, tokens[0], json.dumps(tokens)),
             )
         elif kind == "path_glob":
             conn.execute(

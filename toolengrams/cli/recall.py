@@ -81,7 +81,7 @@ def _show_detail(conn, memory_id: int) -> int:
         return 1
 
     triggers = conn.execute(
-        "SELECT kind, tool_name, head_joined, head_length, path_pattern "
+        "SELECT kind, first_token, tokens_json, path_pattern "
         "FROM triggers WHERE memory_id = ?",
         (memory_id,),
     ).fetchall()

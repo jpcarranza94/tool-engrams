@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from toolengrams.formation import (
     FormationCandidate,
     consolidate_vocabulary,
@@ -10,8 +12,8 @@ from toolengrams.formation import (
 )
 
 
-def _heads(candidates: list[FormationCandidate], tool: str) -> set[tuple[str, ...]]:
-    return {c.head for c in candidates if c.kind == "tool_head" and c.tool_name == tool}
+def _token_sets(candidates: list[FormationCandidate]) -> set[tuple[str, ...]]:
+    return {c.tokens for c in candidates if c.kind == "token_subseq"}
 
 
 def _globs(candidates: list[FormationCandidate]) -> set[str]:
@@ -21,44 +23,42 @@ def _globs(candidates: list[FormationCandidate]) -> set[str]:
 # ---------- backtick extraction ----------
 
 
-def test_backtick_single_token_cli_emits_head1():
+def test_backtick_single_token_cli():
     c = extract_candidates("Run `mycli` against the replica.")
-    assert ("mycli",) in _heads(c, "Bash")
+    assert ("mycli",) in _token_sets(c)
 
 
-def test_backtick_subcommand_emits_head2_only():
-    """When head-2 exists, head-1 is suppressed (too broad)."""
+def test_backtick_subcommand_emits_two_token_only():
+    """When a second token exists for a subcommand tool, single-token is suppressed."""
     c = extract_candidates("Use `git push origin main` to publish.")
-    heads = _heads(c, "Bash")
-    assert ("git", "push") in heads
-    assert ("git",) not in heads  # suppressed — git alone is too noisy
+    tokens = _token_sets(c)
+    assert ("git", "push") in tokens
+    assert ("git",) not in tokens
 
 
-def test_backtick_subcommand_without_head2_emits_head1():
-    """Bare subcommand tool with no args still gets head-1."""
+def test_backtick_subcommand_without_second_token_emits_single():
+    """Bare subcommand tool with no args still gets the one-token trigger."""
     c = extract_candidates("Run `git` to see help.")
-    heads = _heads(c, "Bash")
-    assert ("git",) in heads
+    assert ("git",) in _token_sets(c)
 
 
-def test_backtick_non_subcommand_tool_only_emits_head1():
+def test_backtick_non_subcommand_tool_only_single_token():
     c = extract_candidates("`curl https://example.com` fetches it.")
-    heads = _heads(c, "Bash")
-    assert ("curl",) in heads
-    # curl is not in _SUBCOMMAND_TOOLS so no head2
-    assert not any(h[0] == "curl" and len(h) == 2 for h in heads)
+    tokens = _token_sets(c)
+    assert ("curl",) in tokens
+    # curl is not in _SUBCOMMAND_TOOLS so no two-token trigger
+    assert not any(t[0] == "curl" and len(t) == 2 for t in tokens)
 
 
-def test_backtick_path_snippet_is_not_treated_as_tool_head():
+def test_backtick_path_snippet_is_not_a_token_trigger():
     c = extract_candidates("Config is at `/etc/foo.conf`.")
-    heads = _heads(c, "Bash")
-    assert all(h[0] != "/etc/foo.conf" for h in heads)
+    tokens = _token_sets(c)
+    assert all(t[0] != "/etc/foo.conf" for t in tokens)
 
 
-def test_backtick_flag_is_not_treated_as_tool_head():
+def test_backtick_flag_is_not_a_token_trigger():
     c = extract_candidates("Pass `--verbose` to debug.")
-    heads = _heads(c, "Bash")
-    assert not heads  # --verbose starts with '-', filtered
+    assert not _token_sets(c)
 
 
 # ---------- path extraction ----------
@@ -93,16 +93,16 @@ def test_path_with_trailing_punctuation_is_stripped():
 # ---------- URL extraction ----------
 
 
-def test_url_extracts_host_as_webfetch_head():
+def test_url_extracts_host_as_single_token_trigger():
     c = extract_candidates("Docs at https://api.github.com/repos/foo/bar for reference.")
-    assert ("api.github.com",) in _heads(c, "WebFetch")
+    assert ("api.github.com",) in _token_sets(c)
 
 
 def test_http_and_https_both_extract():
     c = extract_candidates("See http://example.com and https://other.example.com/path")
-    heads = _heads(c, "WebFetch")
-    assert ("example.com",) in heads
-    assert ("other.example.com",) in heads
+    tokens = _token_sets(c)
+    assert ("example.com",) in tokens
+    assert ("other.example.com",) in tokens
 
 
 # ---------- dedup ----------
@@ -110,33 +110,33 @@ def test_http_and_https_both_extract():
 
 def test_duplicate_backticks_dedupe():
     c = extract_candidates("`git push` then `git push` again.")
-    heads = [h for h in _heads(c, "Bash") if h == ("git", "push")]
-    assert len(heads) == 1
+    hits = [t for t in _token_sets(c) if t == ("git", "push")]
+    assert len(hits) == 1
 
 
 # ---------- consolidation ----------
 
 
 def test_consolidation_counts_existing_memories(temp_db):
-    # Seed an existing memory with a (Bash, git) trigger.
+    # Seed an existing memory with a (git, status) trigger so the candidate
+    # we're about to extract matches.
     temp_db.execute(
         "INSERT INTO memories (name, body, type, scope, project_slug, created_ts) "
         "VALUES ('seed', 'body', 'reference', 'global', NULL, 1)"
     )
     mid = temp_db.execute("SELECT last_insert_rowid()").fetchone()[0]
     temp_db.execute(
-        "INSERT INTO triggers (memory_id, kind, tool_name, head_joined, head_length) "
-        "VALUES (?, 'tool_head', 'Bash', 'git', 1)",
-        (mid,),
+        "INSERT INTO triggers (memory_id, kind, first_token, tokens_json) "
+        "VALUES (?, 'token_subseq', 'git', ?)",
+        (mid, json.dumps(["git", "status"])),
     )
 
     candidates = extract_candidates("Use `git status` to check")
     annotated = consolidate_vocabulary(temp_db, candidates)
 
-    # Only (git, status) is emitted now (head-1 suppressed). It has 0 existing matches.
-    by_head = {c.head: c.existing_memories for c in annotated if c.kind == "tool_head"}
-    assert ("git",) not in by_head  # suppressed
-    assert by_head[("git", "status")] == 0
+    by_tokens = {c.tokens: c.existing_memories for c in annotated if c.kind == "token_subseq"}
+    assert ("git",) not in by_tokens  # suppressed (two-token extracted instead)
+    assert by_tokens[("git", "status")] == 1
 
 
 def test_consolidation_path_glob(temp_db):
@@ -170,20 +170,19 @@ def test_insert_candidate_triggers_writes_rows(temp_db):
     mid = temp_db.execute("SELECT last_insert_rowid()").fetchone()[0]
 
     candidates = [
-        FormationCandidate(kind="tool_head", tool_name="Bash", head=("git", "push"), source="backtick"),
+        FormationCandidate(kind="token_subseq", tokens=("git", "push"), source="backtick"),
         FormationCandidate(kind="path_glob", path_pattern="**/*.py", source="path"),
     ]
     n = insert_candidate_triggers(temp_db, mid, candidates)
     assert n == 2
 
     rows = temp_db.execute(
-        "SELECT kind, tool_name, head_joined, head_length, path_pattern "
+        "SELECT kind, first_token, tokens_json, path_pattern "
         "FROM triggers WHERE memory_id = ? ORDER BY id",
         (mid,),
     ).fetchall()
-    assert rows[0]["kind"] == "tool_head"
-    assert rows[0]["tool_name"] == "Bash"
-    assert rows[0]["head_joined"] == "git push"
-    assert rows[0]["head_length"] == 2
+    assert rows[0]["kind"] == "token_subseq"
+    assert rows[0]["first_token"] == "git"
+    assert json.loads(rows[0]["tokens_json"]) == ["git", "push"]
     assert rows[1]["kind"] == "path_glob"
     assert rows[1]["path_pattern"] == "**/*.py"

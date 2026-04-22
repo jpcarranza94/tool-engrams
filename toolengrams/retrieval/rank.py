@@ -1,19 +1,26 @@
 """Candidate retrieval + per-cluster Laplace-smoothed filter.
 
-Scoring formulas live in reinforcement/scoring.py — this module is only
-about selecting candidates from the store and gating them by cluster quality.
+Matching model (v2, see docs/design-v9.md §3.2):
+  - token_subseq: the call's first token selects a bucket (indexed lookup),
+    then we subsequence-match the stored trigger tokens against the call's
+    tokens in Python.
+  - path_glob: fnmatch the stored pattern against each extracted call path.
+
+Scoring formulas live in reinforcement/scoring.py — this module is only about
+selecting candidates from the store and gating them by cluster quality.
 """
 
 from __future__ import annotations
 
 import fnmatch
+import json
 import sqlite3
 import time
 from dataclasses import dataclass
 
 from ..models import Candidate, ClusterStats
 from ..reinforcement.scoring import final_score
-from .extract import ExtractedTriggerHint, join_head
+from .extract import ExtractedTriggerHint
 
 # Laplace threshold constants — control which candidates pass the quality gate.
 #
@@ -53,35 +60,34 @@ def retrieve_candidates(
 ) -> list[Candidate]:
     """Return all memories whose triggers match this tool call.
 
-    Matching rules (v1):
-      - tool_head: any stored head that is a prefix of an extracted head
-      - path_glob: fnmatch against each extracted path
-
     Scope filter: (scope='global') OR (scope='project' AND project_slug=?).
     Archived memories excluded.
     """
     candidates: dict[int, Candidate] = {}
 
-    # --- tool_head matches ---
-    head_strings = [join_head(h) for h in hint.head_prefixes]
-    if head_strings:
+    # --- token_subseq matches ---
+    if hint.tokens:
+        first = hint.tokens[0]
         sql = """
             SELECT
                 m.id, m.name, m.body, m.type, m.scope,
                 m.surface_count, m.useful_count, m.last_surfaced_ts, m.pinned,
-                t.tool_name, t.head_joined, t.head_length
+                t.tokens_json
             FROM triggers t
             JOIN memories m ON m.id = t.memory_id
-            WHERE t.kind = 'tool_head'
-              AND t.tool_name = ?
+            WHERE t.kind = 'token_subseq'
+              AND t.first_token = ?
               AND m.archived_ts IS NULL
               AND (m.scope = 'global' OR m.project_slug = ?)
         """
-        rows = conn.execute(sql, (hint.tool_name, project_slug)).fetchall()
+        rows = conn.execute(sql, (first, project_slug)).fetchall()
+        call = tuple(hint.tokens)
         for row in rows:
-            if not _head_matches(row["head_joined"], head_strings):
+            stored = _load_tokens(row["tokens_json"])
+            if not stored:
                 continue
-            _merge_candidate(candidates, row)
+            if is_subsequence(stored, call):
+                _merge_token_candidate(candidates, row, stored)
 
     # --- path_glob matches ---
     if hint.paths:
@@ -89,7 +95,7 @@ def retrieve_candidates(
             SELECT
                 m.id, m.name, m.body, m.type, m.scope,
                 m.surface_count, m.useful_count, m.last_surfaced_ts, m.pinned,
-                t.tool_name, t.path_pattern
+                t.path_pattern
             FROM triggers t
             JOIN memories m ON m.id = t.memory_id
             WHERE t.kind = 'path_glob'
@@ -98,43 +104,37 @@ def retrieve_candidates(
         """
         rows = conn.execute(sql, (project_slug,)).fetchall()
         for row in rows:
-            if not _any_path_matches(row["path_pattern"], hint.paths):
-                continue
-            _merge_path_candidate(candidates, row)
+            if _any_path_matches(row["path_pattern"], hint.paths):
+                _merge_path_candidate(candidates, row)
 
-    # --- score everything ---
     for c in candidates.values():
         c.final_score = final_score(c, now_ts)
 
     return list(candidates.values())
 
 
-def _head_matches(stored_head: str | None, call_heads: list[str]) -> bool:
-    """Stored head must be a space-joined prefix of at least one of the extracted heads.
+def is_subsequence(needle: tuple[str, ...], haystack: tuple[str, ...]) -> bool:
+    """All tokens in `needle` appear in `haystack` in order (non-contiguous allowed).
 
-    'git' matches 'git push'. 'ssh deploy@' matches 'ssh deploy@35.1.2.3'
-    (prefix match on the joined string, not on tokens alone).
+    Matches v2 §3.2: `["ergeon", "order", "reassign"]` matches
+    `ergeon order 12345 reassign` because "12345" is simply skipped.
     """
-    if not stored_head:
+    if not needle:
         return False
-    for call in call_heads:
-        if call == stored_head or call.startswith(stored_head + " ") or call.startswith(stored_head):
-            # Exact token equality OR token-boundary prefix OR raw string prefix
-            # (the last case handles 'ssh deploy@' -> 'ssh deploy@35.1.2.3')
-            if _is_valid_prefix(stored_head, call):
-                return True
-    return False
+    it = iter(haystack)
+    return all(token in it for token in needle)
 
 
-def _is_valid_prefix(stored: str, call: str) -> bool:
-    """Either a token-boundary match or a raw string prefix of the call."""
-    if stored == call:
-        return True
-    if call.startswith(stored + " "):
-        return True
-    # Raw string prefix — only valid when the stored head already ends in a
-    # partial token (no trailing space). Catches 'ssh deploy@' -> 'ssh deploy@35.1.2.3'.
-    return call.startswith(stored) and not stored.endswith(" ")
+def _load_tokens(raw: str | None) -> tuple[str, ...]:
+    if not raw:
+        return ()
+    try:
+        parsed = json.loads(raw)
+    except (ValueError, TypeError):
+        return ()
+    if not isinstance(parsed, list):
+        return ()
+    return tuple(str(x) for x in parsed)
 
 
 def _any_path_matches(pattern: str | None, paths: list[str]) -> bool:
@@ -143,17 +143,19 @@ def _any_path_matches(pattern: str | None, paths: list[str]) -> bool:
     return any(fnmatch.fnmatchcase(p, pattern) for p in paths)
 
 
-def _merge_candidate(store: dict[int, Candidate], row: sqlite3.Row) -> None:
+def _merge_token_candidate(
+    store: dict[int, Candidate],
+    row: sqlite3.Row,
+    stored_tokens: tuple[str, ...],
+) -> None:
     existing = store.get(row["id"])
-    head_length = row["head_length"] or 0
-    if existing is None:
+    if existing is None or len(stored_tokens) > len(existing.matched_tokens):
         store[row["id"]] = Candidate(
             memory_id=row["id"],
             name=row["name"],
             body=row["body"],
-            tool_name=row["tool_name"],
-            head_joined=row["head_joined"],
-            head_length=head_length,
+            matched_tokens=stored_tokens,
+            matched_path=None,
             surface_count=row["surface_count"],
             useful_count=row["useful_count"],
             last_surfaced_ts=row["last_surfaced_ts"],
@@ -161,9 +163,6 @@ def _merge_candidate(store: dict[int, Candidate], row: sqlite3.Row) -> None:
             type=row["type"],
             scope=row["scope"],
         )
-    elif head_length > existing.head_length:
-        existing.head_joined = row["head_joined"]
-        existing.head_length = head_length
 
 
 def _merge_path_candidate(store: dict[int, Candidate], row: sqlite3.Row) -> None:
@@ -173,9 +172,8 @@ def _merge_path_candidate(store: dict[int, Candidate], row: sqlite3.Row) -> None
         memory_id=row["id"],
         name=row["name"],
         body=row["body"],
-        tool_name=row["tool_name"],
-        head_joined=None,
-        head_length=0,
+        matched_tokens=(),
+        matched_path=row["path_pattern"],
         surface_count=row["surface_count"],
         useful_count=row["useful_count"],
         last_surfaced_ts=row["last_surfaced_ts"],
@@ -192,32 +190,32 @@ def compute_cluster_stats(
     conn: sqlite3.Connection,
     project_slug: str | None,
     now_ts: int,
-) -> dict[tuple[str, str], ClusterStats]:
-    """Aggregate final_score by (tool_name, head_joined) across non-archived memories.
+) -> dict[str, ClusterStats]:
+    """Aggregate final_score by first_token across non-archived memories.
 
-    This is cheap at v1 scale. If the corpus grows, add a cached cluster_stats table.
+    Path-glob triggers share the empty-string ('') bucket — they have no
+    first_token. This is cheap at v2 scale. If the corpus grows, add a cached
+    cluster_stats table.
     """
     sql = """
         SELECT
-            t.tool_name, t.head_joined,
+            t.kind, t.first_token,
             m.type, m.surface_count, m.useful_count, m.last_surfaced_ts, m.pinned
         FROM triggers t
         JOIN memories m ON m.id = t.memory_id
-        WHERE t.kind = 'tool_head'
-          AND m.archived_ts IS NULL
+        WHERE m.archived_ts IS NULL
           AND (m.scope = 'global' OR m.project_slug = ?)
     """
     rows = conn.execute(sql, (project_slug,)).fetchall()
-    agg: dict[tuple[str, str], ClusterStats] = {}
+    agg: dict[str, ClusterStats] = {}
     for row in rows:
-        key = (row["tool_name"], row["head_joined"])
+        key = row["first_token"] or ""
         c = Candidate(
             memory_id=0,
             name="",
             body="",
-            tool_name=row["tool_name"],
-            head_joined=row["head_joined"],
-            head_length=0,
+            matched_tokens=(),
+            matched_path=None,
             surface_count=row["surface_count"],
             useful_count=row["useful_count"],
             last_surfaced_ts=row["last_surfaced_ts"],
@@ -228,8 +226,7 @@ def compute_cluster_stats(
         score = final_score(c, now_ts)
         if key not in agg:
             agg[key] = ClusterStats(
-                tool_name=row["tool_name"],
-                head_joined=row["head_joined"],
+                first_token=key,
                 n_memories=0,
                 sum_final_score=0.0,
             )
@@ -251,7 +248,7 @@ def smoothed_threshold(
 
 def filter_candidates(
     candidates: list[Candidate],
-    cluster_stats: dict[tuple[str, str], ClusterStats],
+    cluster_stats: dict[str, ClusterStats],
     surfaced_ids: set[int],
     cfg: FilterConfig | None = None,
 ) -> list[Candidate]:
@@ -261,12 +258,11 @@ def filter_candidates(
     for c in candidates:
         if c.memory_id in surfaced_ids:
             continue
-        key = (c.tool_name or "", c.head_joined or "")
-        cluster = cluster_stats.get(key)
+        cluster = cluster_stats.get(c.first_token)
         threshold = smoothed_threshold(cluster, cfg)
         if c.final_score >= threshold:
             accepted.append(c)
-    accepted.sort(key=lambda c: (-c.head_length, -c.final_score))
+    accepted.sort(key=lambda c: (-len(c.matched_tokens), -c.final_score))
     return accepted[: cfg.top_k]
 
 

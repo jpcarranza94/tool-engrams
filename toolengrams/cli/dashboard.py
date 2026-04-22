@@ -16,6 +16,16 @@ from .. import db
 LOG_PATH = Path.home() / ".claude" / "tool-engrams" / "watcher.log"
 
 
+def _decode_tokens(raw: str | None) -> list[str]:
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+    except (ValueError, TypeError):
+        return []
+    return [str(x) for x in parsed] if isinstance(parsed, list) else []
+
+
 def main(argv: list[str] | None = None) -> int:
     conn = db.connect()
     try:
@@ -81,17 +91,8 @@ def _build_html(conn: sqlite3.Connection) -> str:
     ).fetchall()
 
     triggers = conn.execute(
-        "SELECT memory_id, kind, tool_name, head_joined, path_pattern "
+        "SELECT memory_id, kind, first_token, tokens_json, path_pattern "
         "FROM triggers ORDER BY memory_id"
-    ).fetchall()
-
-    associations = conn.execute(
-        "SELECT a.memory_a_id, a.memory_b_id, a.strength, a.co_fire_count, a.last_co_fire_ts, "
-        "ma.name AS name_a, mb.name AS name_b "
-        "FROM memory_associations a "
-        "JOIN memories ma ON ma.id = a.memory_a_id "
-        "JOIN memories mb ON mb.id = a.memory_b_id "
-        "ORDER BY a.strength DESC"
     ).fetchall()
 
     surfaces = conn.execute(
@@ -143,8 +144,10 @@ def _build_html(conn: sqlite3.Connection) -> str:
         trigs = triggers_by_mem.get(m["id"], [])
         trig_tags = []
         for t in trigs:
-            if t["kind"] == "tool_head":
-                trig_tags.append(f'<span class="tag head">{t["tool_name"]}: {t["head_joined"]}</span>')
+            if t["kind"] == "token_subseq":
+                tokens = _decode_tokens(t["tokens_json"])
+                label = " ".join(tokens) if tokens else (t["first_token"] or "?")
+                trig_tags.append(f'<span class="tag head">{label}</span>')
             elif t["kind"] == "path_glob":
                 trig_tags.append(f'<span class="tag path">{t["path_pattern"]}</span>')
         trig_html = " ".join(trig_tags) or '<span class="tag none">no triggers</span>'
@@ -192,18 +195,6 @@ def _build_html(conn: sqlite3.Connection) -> str:
             <td>{s['name']}</td>
             <td><span class="tag">{s['hook']}</span></td>
             <td class="mono">{s['session_id'][:12]}…</td>
-        </tr>""")
-
-    # Association rows.
-    assoc_rows = []
-    for a in associations:
-        assoc_rows.append(f"""
-        <tr>
-            <td>{a['name_a']}</td>
-            <td>{a['name_b']}</td>
-            <td class="num">{a['strength']:.3f}</td>
-            <td class="num">{a['co_fire_count']}</td>
-            <td class="ts">{_ts(a['last_co_fire_ts'])}</td>
         </tr>""")
 
     # Consolidation rows.
@@ -293,7 +284,6 @@ td {{ padding: 10px 12px; border-top: 1px solid #21262d; vertical-align: top; fo
     <div class="stat"><div class="val">{len(archived)}</div><div class="label">Archived</div></div>
     <div class="stat"><div class="val">{total_surfaces}</div><div class="label">Total surfaces</div></div>
     <div class="stat"><div class="val">{total_useful}</div><div class="label">Total useful</div></div>
-    <div class="stat"><div class="val">{len(associations)}</div><div class="label">Associations</div></div>
     <div class="stat">
         <div class="val"><span class="obs-dot" style="background:{obs_color}"></span>{obs_label}</div>
         <div class="label">Watcher</div>
@@ -304,7 +294,6 @@ td {{ padding: 10px 12px; border-top: 1px solid #21262d; vertical-align: top; fo
 <div class="tabs">
     <div class="tab active" data-tab="memories">Memories<span class="tab-count">{len(active)}</span></div>
     <div class="tab" data-tab="surfaces">Surfaces<span class="tab-count">{len(surfaces)}</span></div>
-    <div class="tab" data-tab="associations">Associations<span class="tab-count">{len(associations)}</span></div>
     <div class="tab" data-tab="consolidation">Consolidation<span class="tab-count">{len(consolidations)}</span></div>
     <div class="tab" data-tab="archived">Archived<span class="tab-count">{len(archived)}</span></div>
 </div>
@@ -320,13 +309,6 @@ td {{ padding: 10px 12px; border-top: 1px solid #21262d; vertical-align: top; fo
 <table>
 <tr><th>Time</th><th>Memory</th><th>Hook</th><th>Session</th></tr>
 {"".join(surface_rows) or '<tr><td colspan="4" class="empty">No surfaces recorded</td></tr>'}
-</table>
-</div>
-
-<div class="tab-panel" id="associations">
-<table>
-<tr><th>Memory A</th><th>Memory B</th><th>Strength</th><th>Co-fires</th><th>Last</th></tr>
-{"".join(assoc_rows) or '<tr><td colspan="5" class="empty">No associations yet</td></tr>'}
 </table>
 </div>
 

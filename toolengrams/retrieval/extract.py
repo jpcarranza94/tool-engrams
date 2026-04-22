@@ -1,16 +1,15 @@
-"""Extract lookup hints (head-token prefixes, paths) from a tool call payload.
+"""Extract lookup hints (tokens, paths) from a tool call payload.
 
 Given `(tool_name, tool_input)`, produce:
-  - head_prefixes: list of 1- or 2-token prefixes of the command, as tuples
-  - paths:         list of paths referenced by the call (file_path, url host, or
-                   tilde/absolute paths embedded in Bash commands)
+  - tokens: list of tokens representing the call
+    - Bash: shell tokens (shlex-split the command)
+    - WebFetch: URL host + path segments
+  - paths: list of paths referenced by the call (file_path, absolute / tilde
+    paths embedded in Bash, Grep/Glob paths, etc.)
 
-The head-token extraction generates *every prefix* of the leading token sequence
-(length 1 and 2 for now). This lets the downstream lookup find memories bound
-to either `[git]` or `[git, push]` from a single call like `git push origin main`.
-
-Prefix matching on the second token happens at the database layer via
-`head_joined LIKE ?||'%'` — see rank.py.
+The first token anchors the indexed lookup (`triggers.first_token`); the full
+token list is subsequence-matched against stored trigger tokens at retrieval
+time. See retrieval/rank.py for the matcher.
 """
 
 from __future__ import annotations
@@ -21,9 +20,9 @@ from typing import Any
 
 from ..models import ExtractedTriggerHint
 
-# Known CLI first tokens we care about for head extraction.
-# Anything not in this list still gets a single-token head, but the second-token
-# layer is only meaningful for tools that follow the "verb subcommand" pattern.
+# Known CLI first tokens we care about for second-token extraction during
+# memory formation (see formation/candidates.py). Retrieval itself doesn't
+# branch on this — it just subsequence-matches whatever tokens were stored.
 _SUBCOMMAND_TOOLS = {
     "git", "gh", "jira", "docker", "aws", "kubectl", "bq", "psql",
     "npm", "yarn", "pnpm", "cargo", "pip", "brew", "make", "terraform",
@@ -64,21 +63,7 @@ def _extract_from_bash(tool_input: dict[str, Any], hint: ExtractedTriggerHint) -
     if not command:
         return
 
-    tokens = _tokenize_bash(command)
-    if not tokens:
-        return
-
-    head1 = tokens[0]
-    hint.head_prefixes.append((head1,))
-
-    if head1 in _SUBCOMMAND_TOOLS and len(tokens) >= 2:
-        head2 = tokens[1]
-        hint.head_prefixes.append((head1, head2))
-
-    # Also include the full command as a head so that longer stored
-    # triggers (e.g. "git push --force") can prefix-match against it.
-    if len(tokens) > 2:
-        hint.head_prefixes.append(tuple(tokens))
+    hint.tokens = _tokenize_bash(command)
 
     for match in _PATH_RE.findall(command):
         if match not in hint.paths:
@@ -110,13 +95,7 @@ def _extract_from_web(tool_input: dict[str, Any], hint: ExtractedTriggerHint) ->
     url = tool_input.get("url")
     if not url:
         return
-    # Use the host + first path segment as a head prefix: ("api.github.com",)
     stripped = re.sub(r"^https?://", "", url)
-    host = stripped.split("/", 1)[0]
-    if host:
-        hint.head_prefixes.append((host,))
-
-
-def join_head(tokens: tuple[str, ...]) -> str:
-    """Serialize a head prefix to the canonical space-joined form used in the DB."""
-    return " ".join(tokens)
+    parts = [p for p in stripped.split("/") if p]
+    if parts:
+        hint.tokens = parts
