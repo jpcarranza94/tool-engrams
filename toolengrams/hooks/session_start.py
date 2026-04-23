@@ -29,6 +29,7 @@ import sys
 from .. import db
 from ..prompts.session_start import FORMATION_GUIDANCE
 from ..watcher import derive_transcript_path, spawn_watcher
+from ._skip import is_internal_cwd
 
 
 def main() -> int:
@@ -56,11 +57,6 @@ def main() -> int:
         return 0
 
 
-# Temp dir prefixes that indicate non-user sessions (consolidation agent,
-# old observer, experiments). Don't spawn watchers for these.
-_SKIP_CWD_PREFIXES = ("engram-consolidate-", "engram-observe-", "engram-experiment-")
-
-
 def _maybe_spawn_watcher(payload: dict) -> None:
     """Spawn watcher on startup; check existing on resume; skip clear/compact."""
     source = payload.get("source", "")
@@ -71,8 +67,7 @@ def _maybe_spawn_watcher(payload: dict) -> None:
         return
 
     # Skip non-user sessions (consolidation agent, old observer, etc.)
-    cwd_basename = cwd.rstrip("/").rsplit("/", 1)[-1] if "/" in cwd else cwd
-    if any(cwd_basename.startswith(prefix) for prefix in _SKIP_CWD_PREFIXES):
+    if is_internal_cwd(cwd):
         return
 
     if source in ("startup", "compact", "clear"):

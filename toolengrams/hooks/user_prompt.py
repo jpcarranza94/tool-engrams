@@ -20,6 +20,7 @@ import sys
 
 from .. import db
 from ..watcher import derive_transcript_path, spawn_watcher
+from ._skip import is_internal_cwd
 
 
 def main() -> int:
@@ -47,6 +48,13 @@ def main() -> int:
 def _ensure_watcher_alive(session_id: str, cwd: str) -> None:
     """If watcher is dead or was never started, spawn it."""
     if not cwd:
+        return
+
+    # Skip ToolEngrams' own subprocess sessions (consolidation agent, etc.).
+    # Without this, the consolidation agent's `claude -p` subprocess would
+    # cause its own UserPromptSubmit hook to spawn a watcher on its temp
+    # transcript — heavy irrelevant deltas + wasted Haiku calls.
+    if is_internal_cwd(cwd):
         return
 
     conn = db.connect()
