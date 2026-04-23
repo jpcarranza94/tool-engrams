@@ -36,7 +36,7 @@ def _get_memory_summary(db_path: Path) -> str:
     conn.row_factory = _sqlite3.Row
 
     memories = conn.execute(
-        "SELECT m.id, m.name, m.body, m.type, m.surface_count, m.useful_count "
+        "SELECT m.id, m.name, m.body, m.kind, m.surface_count, m.useful_count "
         "FROM memories m WHERE m.archived_ts IS NULL ORDER BY m.id"
     ).fetchall()
 
@@ -44,7 +44,7 @@ def _get_memory_summary(db_path: Path) -> str:
     for m in memories:
         u = usefulness(m["useful_count"], m["surface_count"])
         lines.append(
-            f"  [{m['id']}] \"{m['name']}\" type={m['type']} "
+            f"  [{m['id']}] \"{m['name']}\" kind={m['kind']} "
             f"surfaces={m['surface_count']} useful={m['useful_count']} "
             f"usefulness={u:.2f}"
         )
