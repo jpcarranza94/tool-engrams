@@ -131,13 +131,19 @@ def watcher_main(session_id: str, transcript_path: str, cwd: str) -> int:
 
             # Parse + save.
             response = _parse_response(stdout)
-            if response and response.get("action") == "create":
+            action = (response or {}).get("action") or "parse_error"
+            if action == "create":
                 for mem in response.get("memories", []):
                     try:
                         _save_memory(mem, cwd)
                         _log(f"SAVE session={session_id} name={mem.get('name', '?')}")
                     except Exception as e:
                         _log(f"SAVE-ERROR session={session_id} error={e}")
+            else:
+                # Healthy-but-quiet: Haiku returned none / parse failed. Log so
+                # we can distinguish "watcher ticking, model sees nothing to save"
+                # from "watcher dead".
+                _log(f"HAIKU-{action.upper()} session={session_id} lines={len(new_lines)}")
 
             last_line += len(new_lines)
             _update_state(session_id, watcher_session_id, last_line)
