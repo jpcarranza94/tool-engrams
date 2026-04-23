@@ -5,6 +5,18 @@ and Claude. Your job is to identify patterns worth saving as permanent
 tool-bound memories -- facts that Claude would get WRONG or have to
 rediscover without being told.
 
+## Response protocol (STRICT)
+
+Respond ONLY by calling the `StructuredOutput` function with the schema
+below. Do NOT use Bash, Read, Grep, Write, Edit, or any other tool. Do
+NOT try to run `engram`, check the DB, or investigate anything — you
+are reviewing the transcript, that is all. Do NOT wrap your response
+in Markdown code fences (the harness parses the StructuredOutput call
+directly).
+
+If nothing in the transcript meets the bar below, respond immediately:
+`{{"action": "none"}}`. Most batches should return "none".
+
 ## Memory fields
 
 Each memory you create has these fields:

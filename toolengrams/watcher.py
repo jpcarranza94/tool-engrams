@@ -12,6 +12,7 @@ that accumulates conversational context across the entire work session.
 from __future__ import annotations
 
 import json
+import re
 import os
 import shutil
 import signal
@@ -345,7 +346,29 @@ def _format_delta(lines: list[str]) -> str:
                             parts.append(f"TOOL ({tool_name})")
             continue
 
-    return "\n".join(parts)
+    joined = "\n".join(parts)
+    return _cap_delta(joined)
+
+
+# Cap the formatted delta sent to Haiku. Dormant sessions can accumulate
+# huge transcripts (one observed at 345 KB = ~86K tokens on a single call).
+# Long deltas both cost more and dilute the signal — Haiku starts narrating
+# the whole conversation rather than spotting extractable patterns. Keep
+# the tail since recent activity is most likely to contain extractable
+# patterns (errors + corrections that happened this interval).
+MAX_DELTA_CHARS = 40_000
+
+
+def _cap_delta(text: str) -> str:
+    if len(text) <= MAX_DELTA_CHARS:
+        return text
+    tail = text[-MAX_DELTA_CHARS:]
+    # Don't start the tail mid-line — trim to the first newline.
+    nl = tail.find("\n")
+    if 0 <= nl < 2000:
+        tail = tail[nl + 1 :]
+    dropped = len(text) - len(tail)
+    return f"[…earlier activity truncated — {dropped} chars / {dropped // 80} lines dropped…]\n{tail}"
 
 
 def _claude_p_new(message: str, schema: str) -> str:
@@ -409,14 +432,50 @@ def _extract_session_id(stdout: str) -> str | None:
 
 
 def _parse_response(stdout: str) -> dict | None:
-    """Extract and parse the JSON response from claude -p output."""
+    """Extract and parse the JSON response from claude -p output.
+
+    Haiku returns the response one of two ways:
+      - via the StructuredOutput tool (when `--json-schema` is honored) →
+        `result` field is already clean JSON.
+      - as a text block with Markdown-fenced JSON (```json ... ```) →
+        `result` still contains the fences; naive json.loads fails.
+    This parser handles both and also tolerates trailing/leading prose.
+    """
     result_text = parse_claude_json_output(stdout)
     if not result_text:
         return None
-    try:
-        return json.loads(result_text.strip())
-    except (json.JSONDecodeError, ValueError):
-        return None
+    candidates = _candidate_json_strings(result_text)
+    for s in candidates:
+        try:
+            parsed = json.loads(s)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+    return None
+
+
+def _candidate_json_strings(text: str) -> list[str]:
+    """Yield plausible JSON snippets extracted from a mixed text/code-fenced response."""
+    out: list[str] = []
+    stripped = text.strip()
+    if stripped:
+        out.append(stripped)
+
+    # ```json ... ``` or ``` ... ```
+    fence_re = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL | re.IGNORECASE)
+    for m in fence_re.finditer(text):
+        inner = m.group(1).strip()
+        if inner:
+            out.append(inner)
+
+    # Largest balanced {...} block, as a last resort.
+    first = text.find("{")
+    last = text.rfind("}")
+    if first != -1 and last > first:
+        out.append(text[first : last + 1].strip())
+
+    return out
 
 
 def _legacy_type_to_kind(type_value: str | None) -> str:
