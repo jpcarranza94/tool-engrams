@@ -67,10 +67,39 @@ def is_installed() -> bool:
 # ---------- macOS: launchd ----------
 
 
+def _resolve_plist_path() -> str:
+    """Build a PATH the launchd job can use.
+
+    launchd gives jobs a minimal `/usr/bin:/bin:/usr/sbin:/sbin`, which
+    means `shutil.which("claude")` inside the spawned engram process
+    returns None and the consolidation agent bails with "claude CLI not
+    found on PATH". Resolve `claude` and `engram` at install time and
+    include both their parent dirs plus the common user-bin paths.
+    """
+    parts: list[str] = []
+
+    def _add_parent(binary: str) -> None:
+        p = shutil.which(binary)
+        if p:
+            parent = str(Path(p).parent)
+            if parent not in parts:
+                parts.append(parent)
+
+    _add_parent("engram")
+    _add_parent("claude")
+    # Common toolchain dirs that often carry jq, git, sqlite3, etc.
+    for fixed in ("/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"):
+        if fixed not in parts:
+            parts.append(fixed)
+
+    return ":".join(parts)
+
+
 def _generate_plist() -> str:
     engram_bin = _find_engram()
     args = ["--yesterday", "--json"]
     args_xml = "\n".join(f"        <string>{a}</string>" for a in args)
+    path_env = _resolve_plist_path()
 
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -84,6 +113,11 @@ def _generate_plist() -> str:
         <string>consolidate</string>
 {args_xml}
     </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>{path_env}</string>
+    </dict>
     <key>StartCalendarInterval</key>
     <dict>
         <key>Hour</key>
