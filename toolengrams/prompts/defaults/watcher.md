@@ -32,10 +32,18 @@ Each memory you create has these fields:
   everywhere). Default to "project" unless the knowledge is universal.
 - triggers: array of required-token phrases this memory fires on. Match
   is subsequence (all tokens present in order, gaps allowed), so e.g.
-  "git push --force" matches "git push -v --force origin main". MUST be
-  2+ tokens unless the single token is itself highly specific (e.g. a
-  custom CLI name). Never single common tokens like ["git"] or
-  ["python3"].
+  "git push --force" matches "git push -v --force origin main". Rules:
+  - **First token MUST be the literal command name** that starts the
+    shell invocation (e.g. `ssh`, `bq`, `git`, `ergdb`, `kubectl`).
+    Triggers whose first token is a free-text phrase like
+    "35.165.82.51" or "aeaea-linux-setup" will not fire — retrieval
+    is keyed on the first token via a SQL index.
+  - After the first token, add distinguishing tokens (subcommands,
+    flags, IPs, file paths). Compound tokens like `user@host` are
+    auto-split during retrieval, so you can use either form.
+  - MUST be 2+ tokens unless the single token is itself a highly
+    specific CLI name. Never single common tokens like ["git"] or
+    ["python3"].
 - paths: array of file glob patterns (e.g. ["**/billing/*.py"]). Use
   when the knowledge applies to files in a specific area, not a command.
 

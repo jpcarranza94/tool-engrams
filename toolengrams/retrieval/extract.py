@@ -63,11 +63,40 @@ def _extract_from_bash(tool_input: dict[str, Any], hint: ExtractedTriggerHint) -
     if not command:
         return
 
-    hint.tokens = _tokenize_bash(command)
+    hint.tokens = _expand_compound_tokens(_tokenize_bash(command))
 
     for match in _PATH_RE.findall(command):
         if match not in hint.paths:
             hint.paths.append(match)
+
+
+# Delimiters inside a single shell token whose parts are usually treated as
+# separate semantic atoms by humans writing triggers. Splitting on these at
+# extract time lets a trigger like [ssh, 35.165.82.51] match a call
+# `ssh ubuntu@35.165.82.51 …` whose shlex token is `ubuntu@35.165.82.51`.
+# Kept narrow — we don't split on `/` (paths go through path_glob), nor `=`
+# (breaks common flags like --foo=bar that a user might type verbatim).
+_EXPAND_DELIMS = ("@",)
+
+
+def _expand_compound_tokens(tokens: list[str]) -> list[str]:
+    """Return `tokens` plus the delimiter-split parts of each token.
+
+    Preserves order and original tokens. For `ubuntu@35.165.82.51`, the
+    returned list contains the original AND `ubuntu`, `35.165.82.51` inline.
+    This keeps subsequence matching semantics intact while widening what
+    parts-of-compound-tokens can match.
+    """
+    out: list[str] = []
+    for tok in tokens:
+        out.append(tok)
+        for d in _EXPAND_DELIMS:
+            if d in tok:
+                for part in tok.split(d):
+                    if part and part not in out:
+                        out.append(part)
+                break
+    return out
 
 
 def _extract_from_file_tool(tool_input: dict[str, Any], hint: ExtractedTriggerHint) -> None:
