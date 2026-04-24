@@ -7,12 +7,21 @@ from pathlib import Path
 
 
 def parse_claude_json_output(stdout: str) -> str:
-    """Extract the result text from claude -p --output-format json output."""
+    """Extract the result text from claude -p --output-format json output.
+
+    When --json-schema is used, the constrained JSON response is in the
+    `structured_output` field (already a dict). The `result` field contains
+    free-form text summary which is NOT the structured data.
+    """
     for line in stdout.splitlines():
         line = line.strip()
         if line.startswith("{"):
             try:
                 payload = json.loads(line)
+                # Prefer structured_output (from --json-schema constrained decoding).
+                so = payload.get("structured_output")
+                if so is not None:
+                    return json.dumps(so) if isinstance(so, dict) else str(so)
                 return payload.get("result", "")
             except json.JSONDecodeError:
                 continue
