@@ -140,10 +140,11 @@ def watcher_main(session_id: str, transcript_path: str, cwd: str) -> int:
                         _log(f"SAVE session={session_id} name={mem.get('name', '?')}")
                     except Exception as e:
                         _log(f"SAVE-ERROR session={session_id} error={e}")
+            elif action == "parse_error":
+                # Log enough of the raw stdout to diagnose what went wrong.
+                stdout_preview = (stdout or "")[:300].replace("\n", "\\n")
+                _log(f"HAIKU-PARSE_ERROR session={session_id} lines={len(new_lines)} stdout={stdout_preview}")
             else:
-                # Healthy-but-quiet: Haiku returned none / parse failed. Log so
-                # we can distinguish "watcher ticking, model sees nothing to save"
-                # from "watcher dead".
                 _log(f"HAIKU-{action.upper()} session={session_id} lines={len(new_lines)}")
 
             last_line += len(new_lines)
