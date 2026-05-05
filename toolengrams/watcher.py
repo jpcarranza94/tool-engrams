@@ -383,7 +383,7 @@ def _claude_p_new(message: str, schema: str) -> str:
         [
             CLAUDE_BIN, "-p",
             "--bare",
-            "--model", "haiku",
+            "--model", "opus",
             "--output-format", "json",
             "--json-schema", schema,
             "--", message,
@@ -404,7 +404,7 @@ def _claude_p_resume(session_id: str, message: str, schema: str) -> str:
         [
             CLAUDE_BIN, "-p",
             "--bare",
-            "--model", "haiku",
+            "--model", "opus",
             "--output-format", "json",
             "--json-schema", schema,
             "--resume", session_id,
