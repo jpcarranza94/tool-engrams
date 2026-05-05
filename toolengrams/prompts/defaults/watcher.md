@@ -21,33 +21,81 @@ If nothing in the transcript meets the bar below, respond immediately:
 
 Each memory you create has these fields:
 
-- name: short kebab-case identifier (e.g. "ergdb-statustype-label-column")
-- body: starts with "Without this memory, Claude would..." then describes
+- **name**: short kebab-case identifier (e.g. "ergdb-statustype-label-column")
+- **body**: starts with "Without this memory, Claude would..." then describes
   the pattern. Max 250 chars. Must be specific and actionable.
-- kind: "block" (PreToolUse denies the call + injects context, Claude
-  must retry -- use for rare cases where you want to prevent the call
-  entirely) or "hint" (PostToolUseFailure injects context when the call
-  fails -- DEFAULT for most discoveries).
-- scope: "project" (only surfaces in this repo) or "global" (surfaces
+- **kind**: determines WHEN and HOW the memory surfaces (see "Two kinds" below)
+- **scope**: "project" (only surfaces in this repo) or "global" (surfaces
   everywhere). Default to "project" unless the knowledge is universal.
-- triggers: array of required-token phrases this memory fires on. Match
-  is subsequence (all tokens present in order, gaps allowed), so e.g.
-  "git push --force" matches "git push -v --force origin main". Rules:
-  - **First token MUST be the literal command name** that starts the
-    shell invocation (e.g. `ssh`, `bq`, `git`, `ergdb`, `kubectl`).
-    Triggers whose first token is a free-text phrase like
-    "35.165.82.51" or "aeaea-linux-setup" will not fire — retrieval
-    is keyed on the first token via a SQL index.
-  - After the first token, add distinguishing tokens (subcommands,
-    flags, IPs, file paths). Compound tokens like `user@host` are
-    auto-split during retrieval, so you can use either form.
-  - MUST be 2+ tokens unless the single token is itself a highly
-    specific CLI name. Never single common tokens like ["git"] or
-    ["python3"].
-- paths: array of file glob patterns (e.g. ["**/billing/*.py"]). Use
-  when the knowledge applies to files in a specific area, not a command.
+- **triggers**: array of required-token phrases (see "Triggers" below)
+- **paths**: array of file glob patterns (see "Path memories" below)
 
 At least one trigger OR path required.
+
+## Two kinds of memory
+
+| kind | Surfaces at | Effect | Use when |
+|------|------------|--------|----------|
+| **block** | **PreToolUse** (BEFORE every matching tool call) | **Denies the call**. Claude sees the memory body, understands the correction, retries with fixed args. The user never sees the denied call. | Claude would make the SAME mistake again with high confidence. Clear corrections: wrong column name, wrong flag, wrong path, wrong state name. |
+| **hint** | **PostToolUseFailure** (AFTER a matching call fails) | Injects context. Claude sees why it failed and how to fix. Non-blocking. | Claude MIGHT make the mistake. Workarounds, non-obvious flags, "if this fails try X" guidance. |
+
+**Default to block for clear corrections.** If the transcript shows Claude
+hit an error and the fix is unambiguous (wrong column, wrong flag, wrong
+syntax), use block -- it prevents the error entirely next time. Only use
+hint when the failure mode is conditional or the fix depends on context.
+
+Examples of block-worthy patterns:
+- Wrong column name in a database query → block
+- Wrong Jira state name ("In staging QC" vs "In Staging/QC") → block
+- ILIKE doesn't exist in BigQuery → block
+- Wrong CLI flag that always fails → block
+
+Examples of hint-worthy patterns:
+- "If llama-server OOMs, try -ctk q8_0" → hint (conditional on OOM)
+- "hf download doesn't resume across restarts" → hint (informational)
+- "Jenkins coverage gate measures branch, not line" → hint (context)
+
+## Triggers (command-bound memories)
+
+Triggers are token subsequences. Match logic: all trigger tokens must
+appear in the tool call's tokenization, in order, gaps allowed.
+
+Example: trigger `["jira", "issue", "move"]` matches:
+- `jira issue move SYS-123 "Done"` ✓
+- `jira issue move SYS-123 "In Staging/QC"` ✓
+- `jira issue list` ✗ (missing "move")
+
+Rules:
+- **First token MUST be the literal command name** that starts the
+  shell invocation (e.g. `ssh`, `bq`, `git`, `ergdb`, `kubectl`).
+- Add distinguishing tokens (subcommands, flags, IPs, file paths).
+- MUST be 2+ tokens unless the single token is a highly specific CLI.
+- **Think about surfacing frequency**: triggers that are too specific
+  (e.g. `["llama-server", "-ctk", "q8_0"]`) may never fire again.
+  Slightly broader triggers (e.g. `["llama-server"]` for OOM advice)
+  fire more often when relevant.
+
+## Path memories (file-bound knowledge)
+
+Path memories use glob patterns and surface when Claude interacts with
+matching files via **any file tool**: Read, Edit, Write, Grep, Glob.
+
+This makes them powerful for knowledge ABOUT code areas:
+- Module responsibilities and relationships
+- Architectural decisions that aren't obvious from reading the code
+- Conventions specific to a directory/file pattern
+- "If you're editing X, you also need to update Y"
+
+Examples:
+- `["**/migrations/*.py"]` → "Always include --fake-initial for this app"
+- `["**/concurrency.py"]` → "Uses None-default pattern for monkeypatching"
+- `["**/billing/*.py"]` → "Custom Decimal precision, never use float"
+- `["**/deploy.sh", "**/env/*.gpg"]` → "GPG files must end with newline"
+- `["adrs/*.md"]` → "Don't change decision/status when adding options"
+
+Path memories fire every time Claude reads, edits, or searches those
+files -- making them high-frequency compared to command triggers. Use
+them for knowledge that applies to an AREA of code, not a single command.
 
 ## Quality bar (HIGH -- reject most batches)
 
@@ -55,63 +103,73 @@ Before saving, pass this test: "Without this memory, Claude would..."
 If you can't finish with a SPECIFIC failure, respond {{"action": "none"}}.
 
 What qualifies (in order of value):
-1. Corrections Claude hit an error on and had to retry -- use kind=hint
-   (the most common case; PostToolUseFailure will surface it next time
-   the same call pattern fails).
-2. User-stated rules to enforce BEFORE a call ("never use --force on
-   main"). Use kind=block. Rare.
-3. Non-obvious tool patterns -- trial-and-error discoveries, surprising
-   API flags, workarounds. kind=hint.
-4. Project-specific facts bound to tools -- schema details, service
-   endpoints, deploy workflows. kind=hint, scope=project.
-5. Code-area conventions -- rules for files matching a glob pattern.
-   Use paths. Only if NON-OBVIOUS from reading the code itself.
+1. **Clear corrections** -- Claude hit an error, the fix is unambiguous.
+   Use kind=block so it's prevented next time.
+2. **Conditional workarounds** -- "if X fails, the cause is usually Y."
+   Use kind=hint.
+3. **Project-specific tool facts** -- schema details, deploy workflows,
+   service endpoints. Use kind=hint, scope=project.
+4. **Code-area knowledge** -- rules, relationships, or conventions for
+   files matching a glob pattern. Use paths.
+5. **Architectural context** -- "this file is responsible for X, and
+   changes here require updating Y." Use paths.
 
 What to REJECT:
 - Commands that worked without corrections.
 - Generic CLI/framework knowledge Claude already has.
 - One-off investigations unlikely to recur.
+- Knowledge derivable from reading the code or CLAUDE.md.
 
-## Examples of good memories
+## Examples
 
-Example 1 (hint -- error Claude hit and corrected):
+Example 1 (block -- clear correction, prevents the error):
 {{"action": "create", "memories": [{{
-  "name": "ergdb-statustype-label-not-name",
-  "body": "Without this memory, Claude would query core_statustype using column 'name' which doesn't exist. The correct column is 'label'. deal_status_id=8 means Deal Won.",
-  "kind": "hint",
+  "name": "jira-staging-qc-slash-format",
+  "body": "Without this memory, Claude would use 'In staging QC' causing 'invalid transition state'. The correct Jira state is 'In Staging/QC' with forward slash.",
+  "kind": "block",
   "scope": "project",
-  "triggers": ["ergdb -c"],
+  "triggers": ["jira issue move"],
   "paths": []
 }}]}}
 
-Example 2 (hint -- non-obvious workflow):
+Example 2 (block -- wrong column, always fails):
 {{"action": "create", "memories": [{{
-  "name": "npm-must-run-from-frontend-subdir",
-  "body": "Without this memory, Claude would run npm commands from the repo root and get ENOENT errors. Pattern: cd frontend/ before running npm, npx, or npm run commands.",
-  "kind": "hint",
-  "scope": "project",
-  "triggers": ["npm run", "npx", "npm install"],
+  "name": "bq-no-ilike-use-lower-like",
+  "body": "Without this memory, Claude would use ILIKE in BigQuery (syntax error). BigQuery has no ILIKE. Use LOWER(col) LIKE LOWER(pattern) instead.",
+  "kind": "block",
+  "scope": "global",
+  "triggers": ["bq query"],
   "paths": []
 }}]}}
 
-Example 3 (hint -- code-area convention with path glob):
+Example 3 (hint -- conditional, depends on context):
 {{"action": "create", "memories": [{{
-  "name": "billing-custom-decimal-precision",
-  "body": "Without this memory, Claude would use default Decimal precision in billing files, causing tax rounding errors. Pattern: always use Decimal('0.0001') precision in billing/.",
+  "name": "llama-server-kv-cache-oom-fix",
+  "body": "Without this memory, Claude would OOM running 26B+ models with 128K context. Use -ctk q8_0 -ctv q8_0 to quantize KV cache, reducing from ~10GB to ~2GB.",
+  "kind": "hint",
+  "scope": "project",
+  "triggers": ["llama-server"],
+  "paths": []
+}}]}}
+
+Example 4 (path -- code-area convention):
+{{"action": "create", "memories": [{{
+  "name": "deploy-script-gpg-trailing-newline",
+  "body": "Without this memory, Claude would miss that .env.production.gpg needs a trailing newline. Without it, >> .env appends concatenate with previous line, breaking env parsing.",
   "kind": "hint",
   "scope": "project",
   "triggers": [],
-  "paths": ["**/billing/*.py"]
+  "paths": ["**/deploy.sh", "**/env/*.gpg"]
 }}]}}
 
-Example 4 (block -- user-stated rule to enforce upfront):
+Example 5 (path -- architectural knowledge):
 {{"action": "create", "memories": [{{
-  "name": "no-force-push-to-main",
-  "body": "Without this memory, Claude might force-push main. User rule: NEVER force push to main. Always use --force-with-lease on feature branches only.",
-  "kind": "block",
-  "scope": "global",
-  "triggers": ["git push --force", "git push -f"],
-  "paths": []
+  "name": "concurrency-module-none-default-pattern",
+  "body": "Without this memory, Claude would use constant default args in concurrency.py. This module uses None-default + read-at-call-time pattern so test fixtures can monkeypatch module constants.",
+  "kind": "hint",
+  "scope": "project",
+  "triggers": [],
+  "paths": ["**/concurrency.py"]
 }}]}}
 
 ## Response format
