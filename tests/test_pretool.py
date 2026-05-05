@@ -48,8 +48,8 @@ def _seed_token_memory(conn, name: str, body: str, tokens: list[str], *,
     return mid
 
 
-def test_pretool_hint_memory_does_not_surface(temp_db, monkeypatch):
-    """Seed's psql replica memory is kind=hint → should NOT surface in pretool."""
+def test_pretool_hint_memory_surfaces_as_allow(temp_db, monkeypatch):
+    """Seed's psql replica memory is kind=hint → surfaces with allow (not deny)."""
     seed.main()
 
     payload = {
@@ -61,7 +61,9 @@ def test_pretool_hint_memory_does_not_surface(temp_db, monkeypatch):
         "tool_use_id": "tu-1",
     }
     result = _run_pretool(payload, monkeypatch)
-    assert result == {}
+    hso = result["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "allow"
+    assert "replica" in hso["additionalContext"].lower()
 
 
 def test_pretool_block_memory_denies_and_injects_context(temp_db, monkeypatch):
@@ -194,8 +196,8 @@ def test_pretool_path_glob_block_on_file_tool(temp_db, monkeypatch):
     assert "Python file rule" in hso["additionalContext"]
 
 
-def test_pretool_path_glob_hint_does_not_fire(temp_db, monkeypatch):
-    """A hint-kind path_glob memory must NOT surface in pretool."""
+def test_pretool_path_glob_hint_surfaces_as_allow(temp_db, monkeypatch):
+    """A hint-kind path_glob memory surfaces in pretool with allow."""
     now_ts = int(time.time())
     cur = temp_db.execute(
         "INSERT INTO memories (name, description, body, kind, scope, project_slug, created_ts) "
@@ -218,7 +220,9 @@ def test_pretool_path_glob_hint_does_not_fire(temp_db, monkeypatch):
         "tool_use_id": "tu-hint",
     }
     result = _run_pretool(payload, monkeypatch)
-    assert result == {}
+    hso = result["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "allow"
+    assert "Python hint body" in hso["additionalContext"]
 
 
 def test_pretool_block_token_memory_denies(temp_db, monkeypatch):

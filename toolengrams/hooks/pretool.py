@@ -1,12 +1,11 @@
-"""PreToolUse hook — block-only.
+"""PreToolUse hook — blocks + hints.
 
-v2 (design-v9 §3.1): only `block`-kind memories surface in PreToolUse. Every
-match produces `permissionDecision: deny` + the memory body as
-`additionalContext`. Hint-kind memories live on a separate track wired into
-PostToolUseFailure (step 3).
+Surfaces BOTH kinds of memory before every whitelisted tool call:
+  - block memories -> permissionDecision: deny (Claude retries with context)
+  - hint memories  -> permissionDecision: allow + additionalContext
 
-A deny here doesn't "fail the call for the user" — it fails the call *for
-Claude* and prompts a retry with the injected context in scope. See §1a.
+If ANY block matches, the entire call is denied (block takes precedence).
+If only hints match, the call proceeds with injected context.
 
 Contract (input):
     {
@@ -87,13 +86,13 @@ def _run(payload: dict[str, Any]) -> int:
     conn = db.connect()
     now_ts = now()
 
-    # Blocks only. Hints don't surface at PreToolUse — they go out on failure.
-    candidates = retrieve_candidates(conn, hint, project_slug, now_ts, kind="block")
+    # Retrieve ALL matching memories (both block and hint).
+    candidates = retrieve_candidates(conn, hint, project_slug, now_ts)
     if not candidates:
         _emit({})
         return 0
 
-    # Session dedup — the same block already surfaced this session doesn't re-fire.
+    # Session dedup — don't re-show the same memory twice in a session.
     surfaced_ids = get_already_surfaced(conn, session_id)
     fresh = [c for c in candidates if c.memory_id not in surfaced_ids]
     if not fresh:
@@ -109,11 +108,14 @@ def _run(payload: dict[str, Any]) -> int:
                  "pre_tool_use", current_turn, now_ts)
     bump_surface_counts(conn, memory_ids, now_ts)
 
+    # Deny if ANY block matches; allow (with context) if only hints.
+    has_block = any(c.kind == "block" for c in fresh)
+
     _emit({
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "additionalContext": format_injection(fresh),
-            "permissionDecision": "deny",
+            "permissionDecision": "deny" if has_block else "allow",
         }
     })
     return 0

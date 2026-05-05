@@ -1,28 +1,34 @@
-"""PreToolUse injection format — how memories are presented to Claude."""
+"""PreToolUse injection format — how memories are presented to Claude.
 
-PRIMARY_HEADER = "Relevant memories for this tool call:"
+Memories are sorted by specificity (longest matching trigger first) then
+by relevance score. The injection labels each memory with its kind
+(block/hint) so Claude understands the weight: blocks are corrections
+that prevented the call; hints are contextual guidance.
+"""
+
+HEADER = "Relevant memories for this tool call (ordered by relevance):"
 
 
 def format_injection(
-    primary,
+    candidates,
     max_chars: int = 6000,
     max_body: int = 1200,
 ) -> str:
     """Format matched memory candidates into additionalContext text.
 
-    Args:
-        primary: List of Candidate objects that structurally match the tool call.
-        max_chars: Total character budget.
-        max_body: Per-memory body truncation length.
+    Candidates are pre-sorted by the hook (specificity DESC, score DESC).
+    Each memory is labeled with its kind so Claude can prioritize:
+      [block: name] — this is a correction, the call was denied for this reason
+      [hint: name]  — contextual guidance, take into account
 
     Returns the formatted string, or "" if nothing fits.
     """
-    if not primary:
+    if not candidates:
         return ""
 
     remaining = max_chars
     blocks: list[str] = []
-    for c in primary:
+    for c in candidates:
         block = _format_block(c, max_body)
         if len(block) + 2 > remaining:
             break
@@ -31,11 +37,11 @@ def format_injection(
 
     if not blocks:
         return ""
-    return PRIMARY_HEADER + "\n\n" + "\n\n".join(blocks)
+    return HEADER + "\n\n" + "\n\n".join(blocks)
 
 
 def _format_block(c, max_body: int) -> str:
     body = c.body.strip()
     if len(body) > max_body:
         body = body[: max_body - 1].rstrip() + "…"
-    return f"[memory: {c.name}]\n{body}"
+    return f"[{c.kind}: {c.name}]\n{body}"
