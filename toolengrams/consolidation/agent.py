@@ -21,8 +21,21 @@ from ..reinforcement.scoring import usefulness
 from ..subprocess_utils import parse_claude_json_output, write_agent_settings
 from .collect import SessionFile
 
-CLAUDE_BIN = shutil.which("claude")
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+
+# Session budget for the consolidation agent. Prevents timeout on heavy days.
+MAX_SESSIONS = 10
+MAX_TOTAL_BYTES = 10 * 1024 * 1024  # 10 MB total
+MAX_SINGLE_SESSION_BYTES = 5 * 1024 * 1024  # 5 MB per session — skip giants
+
+
+def _find_claude() -> str | None:
+    """Resolve claude binary at call time, not import time.
+
+    Module-level shutil.which() fails when the module is imported before
+    PATH is fully set (launchd's minimal environment).
+    """
+    return shutil.which("claude")
 
 
 def _get_memory_summary(db_path: Path) -> str:
@@ -66,6 +79,28 @@ def _get_memory_summary(db_path: Path) -> str:
     return "\n".join(lines)
 
 
+def _prioritize_sessions(sessions: list[SessionFile]) -> list[SessionFile]:
+    """Select the most important sessions within budget.
+
+    Sort by size descending (larger sessions = more substantive work),
+    skip sessions over MAX_SINGLE_SESSION_BYTES (too large for the agent
+    to process in time), take up to MAX_SESSIONS or MAX_TOTAL_BYTES.
+    """
+    # Filter out giant sessions the agent can't process in 30 min.
+    eligible = [s for s in sessions if s.size_bytes <= MAX_SINGLE_SESSION_BYTES]
+    sorted_sessions = sorted(eligible, key=lambda s: -s.size_bytes)
+    selected: list[SessionFile] = []
+    total = 0
+    for s in sorted_sessions:
+        if len(selected) >= MAX_SESSIONS:
+            break
+        if total + s.size_bytes > MAX_TOTAL_BYTES and selected:
+            break
+        selected.append(s)
+        total += s.size_bytes
+    return selected
+
+
 @dataclass(slots=True)
 class AgentResult:
     report: str
@@ -81,7 +116,8 @@ def run_consolidation_agent(
     target_date: str,
 ) -> AgentResult:
     """Spawn an Opus agent to review today's sessions and consolidate memories."""
-    if not CLAUDE_BIN:
+    claude_bin = _find_claude()
+    if not claude_bin:
         return AgentResult(
             report="", returncode=1, raw_stdout="", raw_stderr="",
             error="claude CLI not found on PATH",
@@ -92,6 +128,9 @@ def run_consolidation_agent(
             report="No sessions to review.", returncode=0,
             raw_stdout="", raw_stderr="",
         )
+
+    # Cap sessions to prevent timeout on heavy days.
+    sessions = _prioritize_sessions(sessions)
 
     # Build the agent's working environment.
     work_dir = tempfile.mkdtemp(prefix="engram-consolidate-")
@@ -115,7 +154,7 @@ def run_consolidation_agent(
 
     try:
         proc = subprocess.run(
-            [CLAUDE_BIN, "-p", "--output-format", "json", prompt],
+            [claude_bin, "-p", "--bare", "--output-format", "json", "--", prompt],
             cwd=work_dir,
             env=env,
             capture_output=True,
