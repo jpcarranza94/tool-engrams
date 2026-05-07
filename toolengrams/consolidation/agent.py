@@ -154,7 +154,7 @@ def run_consolidation_agent(
 
     try:
         proc = subprocess.run(
-            [claude_bin, "-p", "--bare", "--output-format", "json", "--", prompt],
+            [claude_bin, "-p", "--output-format", "json", "--", prompt],
             cwd=work_dir,
             env=env,
             capture_output=True,
