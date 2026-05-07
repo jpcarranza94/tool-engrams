@@ -87,8 +87,10 @@ def watcher_main(session_id: str, transcript_path: str, cwd: str) -> int:
 
     signal.signal(signal.SIGTERM, _handle_sigterm)
 
+    # Resume from where we left off if this is a respawn (watcher_state
+    # persists last_line_read across restarts). Fresh sessions start at 0.
     watcher_session_id = None
-    last_line = 0
+    last_line = _get_saved_cursor(session_id)
 
     try:
         while True:
@@ -159,7 +161,12 @@ def watcher_main(session_id: str, transcript_path: str, cwd: str) -> int:
 
 
 def spawn_watcher(session_id: str, transcript_path: str, cwd: str) -> None:
-    """Spawn watcher as a detached background process and record state."""
+    """Spawn watcher as a detached background process and record state.
+
+    On respawn (watcher_state row already exists), preserves last_line_read
+    so the new watcher resumes from where the old one left off — avoids
+    re-reading the entire transcript and creating duplicate memories.
+    """
     try:
         env = os.environ.copy()
         env["PYTHONPATH"] = str(REPO_ROOT)
@@ -176,11 +183,18 @@ def spawn_watcher(session_id: str, transcript_path: str, cwd: str) -> None:
         now_ts = int(time.time())
         conn = db.connect()
         try:
+            # Use INSERT ... ON CONFLICT to preserve last_line_read on respawn.
+            # Fresh sessions get last_line_read=0; respawns keep their cursor.
             conn.execute(
-                "INSERT OR REPLACE INTO watcher_state "
+                "INSERT INTO watcher_state "
                 "(work_session_id, watcher_pid, transcript_path, "
                 " last_line_read, last_checked_ts, cwd, created_ts) "
-                "VALUES (?, ?, ?, 0, ?, ?, ?)",
+                "VALUES (?, ?, ?, 0, ?, ?, ?) "
+                "ON CONFLICT(work_session_id) DO UPDATE SET "
+                "watcher_pid = excluded.watcher_pid, "
+                "transcript_path = excluded.transcript_path, "
+                "last_checked_ts = excluded.last_checked_ts, "
+                "cwd = excluded.cwd",
                 (session_id, proc.pid, transcript_path, now_ts, cwd, now_ts),
             )
         finally:
@@ -202,6 +216,25 @@ def derive_transcript_path(session_id: str, cwd: str) -> str:
 
 def _build_initial_prompt(cwd: str) -> str:
     return f"{build_watcher_prompt()}\n\nProject: {cwd}\n\n--- Session activity ---\n\n"
+
+
+def _get_saved_cursor(session_id: str) -> int:
+    """Read the last_line_read cursor from watcher_state.
+
+    Returns 0 if no state exists (fresh session). On respawn, returns the
+    cursor from the previous watcher instance so we don't re-read the
+    entire transcript.
+    """
+    try:
+        conn = db.connect()
+        row = conn.execute(
+            "SELECT last_line_read FROM watcher_state WHERE work_session_id = ?",
+            (session_id,),
+        ).fetchone()
+        conn.close()
+        return row["last_line_read"] if row else 0
+    except Exception:
+        return 0
 
 
 def _is_session_alive(transcript_path: str, timeout_minutes: int = SESSION_TIMEOUT) -> bool:
@@ -537,12 +570,19 @@ def _update_state(
 
 
 def _cleanup(session_id: str) -> None:
-    """Remove watcher_state row on exit."""
+    """Mark watcher as inactive but PRESERVE cursor for respawn.
+
+    Clears watcher_pid and watcher_session_id so the liveness check
+    knows the watcher is dead, but keeps last_line_read so a respawned
+    watcher resumes from where we left off instead of re-reading the
+    entire transcript.
+    """
     try:
         conn = db.connect()
         try:
             conn.execute(
-                "DELETE FROM watcher_state WHERE work_session_id = ?",
+                "UPDATE watcher_state SET watcher_pid = NULL, "
+                "watcher_session_id = NULL WHERE work_session_id = ?",
                 (session_id,),
             )
         finally:
