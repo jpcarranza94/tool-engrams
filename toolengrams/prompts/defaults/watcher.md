@@ -27,7 +27,10 @@ Each memory you create has these fields:
 - **kind**: determines WHEN and HOW the memory surfaces (see "Two kinds" below)
 - **scope**: "project" (only surfaces in this repo) or "global" (surfaces
   everywhere). Default to "project" unless the knowledge is universal.
-- **triggers**: array of required-token phrases (see "Triggers" below)
+- **triggers**: array of command-prefix STRINGS (see "Triggers" below).
+  Each string is a COMPLETE multi-word trigger phrase like "jira issue move"
+  or "git push --force". Do NOT split tokens into separate array elements —
+  "jira issue move" is ONE string, not ["jira", "issue", "move"].
 - **paths**: array of file glob patterns (see "Path memories" below)
 
 At least one trigger OR path required.
@@ -57,23 +60,35 @@ Examples of hint-worthy patterns:
 
 ## Triggers (command-bound memories)
 
-Triggers are token subsequences. Match logic: all trigger tokens must
-appear in the tool call's tokenization, in order, gaps allowed.
+Each trigger is a SINGLE STRING containing space-separated tokens.
+The system splits the string into tokens and does subsequence matching:
+all tokens must appear in the tool call, in order, gaps allowed.
 
-Example: trigger `["jira", "issue", "move"]` matches:
+**CRITICAL: each trigger is ONE string, not separate array elements.**
+
+CORRECT:   `"triggers": ["jira issue move"]`
+           → one trigger matching any `jira ... issue ... move ...` call
+
+WRONG:     `"triggers": ["jira", "issue", "move"]`
+           → THREE separate triggers, each firing independently on any
+             command containing just "jira" OR "issue" OR "move" — noise!
+
+Example: trigger `"jira issue move"` matches:
 - `jira issue move SYS-123 "Done"` ✓
 - `jira issue move SYS-123 "In Staging/QC"` ✓
 - `jira issue list` ✗ (missing "move")
 
+Multiple triggers in the array means multiple ALTERNATIVE patterns:
+`"triggers": ["git push --force", "git push -f"]`
+→ the memory fires on EITHER `git push --force ...` OR `git push -f ...`
+
 Rules:
-- **First token MUST be the literal command name** that starts the
-  shell invocation (e.g. `ssh`, `bq`, `git`, `ergdb`, `kubectl`).
-- Add distinguishing tokens (subcommands, flags, IPs, file paths).
-- MUST be 2+ tokens unless the single token is a highly specific CLI.
-- **Think about surfacing frequency**: triggers that are too specific
-  (e.g. `["llama-server", "-ctk", "q8_0"]`) may never fire again.
-  Slightly broader triggers (e.g. `["llama-server"]` for OOM advice)
-  fire more often when relevant.
+- **First token MUST be the literal command name** (e.g. `ssh`, `bq`,
+  `git`, `ergdb`, `kubectl`).
+- Each trigger string must have 2+ words. Never a single word like
+  "git" or "python3" — too broad, fires on everything.
+- Think about surfacing frequency: overly specific triggers may never
+  fire. `"llama-server"` is better than `"llama-server -ctk q8_0"`.
 
 ## Path memories (file-bound knowledge)
 
@@ -131,16 +146,18 @@ Example 1 (block -- clear correction, prevents the error):
   "triggers": ["jira issue move"],
   "paths": []
 }}]}}
+Note: "jira issue move" is ONE string → one trigger with 3 tokens.
 
-Example 2 (block -- wrong column, always fails):
+Example 2 (block -- multiple alternative triggers):
 {{"action": "create", "memories": [{{
   "name": "bq-no-ilike-use-lower-like",
   "body": "Without this memory, Claude would use ILIKE in BigQuery (syntax error). BigQuery has no ILIKE. Use LOWER(col) LIKE LOWER(pattern) instead.",
   "kind": "block",
   "scope": "global",
-  "triggers": ["bq query"],
+  "triggers": ["bq query ILIKE", "bq query ilike"],
   "paths": []
 }}]}}
+Note: two ALTERNATIVE triggers — memory fires on either pattern.
 
 Example 3 (hint -- conditional, depends on context):
 {{"action": "create", "memories": [{{
@@ -148,9 +165,10 @@ Example 3 (hint -- conditional, depends on context):
   "body": "Without this memory, Claude would OOM running 26B+ models with 128K context. Use -ctk q8_0 -ctv q8_0 to quantize KV cache, reducing from ~10GB to ~2GB.",
   "kind": "hint",
   "scope": "project",
-  "triggers": ["llama-server"],
+  "triggers": ["llama-server -c"],
   "paths": []
 }}]}}
+Note: "llama-server -c" fires when context size is specified.
 
 Example 4 (path -- code-area convention):
 {{"action": "create", "memories": [{{
