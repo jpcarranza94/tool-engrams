@@ -7,13 +7,17 @@ import os
 import time
 from pathlib import Path
 
+from toolengrams import db
 from toolengrams.watcher import (
+    _cleanup,
     _format_delta,
+    _get_saved_cursor,
     _is_pid_alive,
     _is_session_alive,
     _parse_response,
     _read_lines_from,
     _save_memory,
+    _update_state,
 )
 
 
@@ -312,3 +316,140 @@ def test_is_pid_alive_current_process():
 def test_is_pid_alive_nonexistent():
     # PID 99999 is extremely unlikely to exist.
     assert _is_pid_alive(99999) is False
+
+
+# ---------- cursor lifecycle ----------
+
+
+def test_get_saved_cursor_fresh_session(temp_db):
+    """No watcher_state row → cursor starts at 0."""
+    assert _get_saved_cursor("nonexistent-session") == 0
+
+
+def test_get_saved_cursor_reads_persisted_value(temp_db):
+    """Cursor is read from watcher_state after update."""
+    now_ts = int(time.time())
+    temp_db.execute(
+        "INSERT INTO watcher_state (work_session_id, watcher_pid, transcript_path, "
+        "last_line_read, last_checked_ts, cwd, created_ts) "
+        "VALUES ('cursor-test', 123, '/tmp/t.jsonl', 0, ?, '/tmp', ?)",
+        (now_ts, now_ts),
+    )
+    _update_state("cursor-test", "haiku-1", 42)
+    assert _get_saved_cursor("cursor-test") == 42
+
+
+def test_cleanup_preserves_cursor(temp_db):
+    """_cleanup clears PID but keeps last_line_read for respawn."""
+    now_ts = int(time.time())
+    temp_db.execute(
+        "INSERT INTO watcher_state (work_session_id, watcher_pid, transcript_path, "
+        "last_line_read, last_checked_ts, cwd, created_ts) "
+        "VALUES ('cleanup-test', 999, '/tmp/t.jsonl', 0, ?, '/tmp', ?)",
+        (now_ts, now_ts),
+    )
+    _update_state("cleanup-test", "haiku-1", 75)
+
+    _cleanup("cleanup-test")
+
+    # Cursor preserved
+    assert _get_saved_cursor("cleanup-test") == 75
+    # PID cleared
+    row = temp_db.execute(
+        "SELECT watcher_pid, watcher_session_id FROM watcher_state "
+        "WHERE work_session_id = 'cleanup-test'"
+    ).fetchone()
+    assert row["watcher_pid"] is None
+    assert row["watcher_session_id"] is None
+
+
+def test_respawn_preserves_cursor(temp_db):
+    """INSERT ON CONFLICT (respawn) keeps existing last_line_read."""
+    now_ts = int(time.time())
+    # Initial spawn
+    temp_db.execute(
+        "INSERT INTO watcher_state (work_session_id, watcher_pid, transcript_path, "
+        "last_line_read, last_checked_ts, cwd, created_ts) "
+        "VALUES ('respawn-test', 111, '/tmp/t.jsonl', 0, ?, '/tmp', ?)",
+        (now_ts, now_ts),
+    )
+    _update_state("respawn-test", "haiku-1", 50)
+
+    # Cleanup (timeout)
+    _cleanup("respawn-test")
+    assert _get_saved_cursor("respawn-test") == 50
+
+    # Respawn via ON CONFLICT — same pattern as spawn_watcher
+    temp_db.execute(
+        "INSERT INTO watcher_state (work_session_id, watcher_pid, transcript_path, "
+        "last_line_read, last_checked_ts, cwd, created_ts) "
+        "VALUES (?, ?, ?, 0, ?, ?, ?) "
+        "ON CONFLICT(work_session_id) DO UPDATE SET "
+        "watcher_pid = excluded.watcher_pid, "
+        "transcript_path = excluded.transcript_path, "
+        "last_checked_ts = excluded.last_checked_ts, "
+        "cwd = excluded.cwd",
+        ("respawn-test", 222, "/tmp/t.jsonl", now_ts, "/tmp", now_ts),
+    )
+
+    # Cursor still at 50, NOT reset to 0
+    assert _get_saved_cursor("respawn-test") == 50
+    # But PID is updated
+    row = temp_db.execute(
+        "SELECT watcher_pid FROM watcher_state WHERE work_session_id = 'respawn-test'"
+    ).fetchone()
+    assert row["watcher_pid"] == 222
+
+
+def test_full_lifecycle_cursor_continuity(temp_db, tmp_path):
+    """End-to-end: spawn → process → cleanup → respawn → only new lines."""
+    transcript = tmp_path / "session.jsonl"
+    with open(transcript, "w") as f:
+        for i in range(10):
+            f.write(json.dumps({
+                "type": "user",
+                "message": {"role": "user", "content": f"message {i}"},
+            }) + "\n")
+
+    now_ts = int(time.time())
+
+    # Spawn
+    temp_db.execute(
+        "INSERT INTO watcher_state (work_session_id, watcher_pid, transcript_path, "
+        "last_line_read, last_checked_ts, cwd, created_ts) "
+        "VALUES ('lifecycle', 111, ?, 0, ?, '/tmp', ?)",
+        (str(transcript), now_ts, now_ts),
+    )
+
+    # Process first 5 lines
+    lines = _read_lines_from(str(transcript), 0)[:5]
+    delta1 = _format_delta(lines)
+    assert "message 0" in delta1
+    assert "message 4" in delta1
+    _update_state("lifecycle", "haiku-1", 5)
+
+    # Timeout → cleanup
+    _cleanup("lifecycle")
+
+    # Respawn
+    temp_db.execute(
+        "INSERT INTO watcher_state (work_session_id, watcher_pid, transcript_path, "
+        "last_line_read, last_checked_ts, cwd, created_ts) "
+        "VALUES (?, ?, ?, 0, ?, ?, ?) "
+        "ON CONFLICT(work_session_id) DO UPDATE SET "
+        "watcher_pid = excluded.watcher_pid, "
+        "last_checked_ts = excluded.last_checked_ts",
+        ("lifecycle", 222, str(transcript), now_ts, "/tmp", now_ts),
+    )
+
+    # Respawned watcher reads cursor from DB
+    cursor = _get_saved_cursor("lifecycle")
+    assert cursor == 5
+
+    # Read only new lines
+    new_lines = _read_lines_from(str(transcript), cursor)
+    delta2 = _format_delta(new_lines)
+    assert "message 5" in delta2
+    assert "message 9" in delta2
+    assert "message 0" not in delta2
+    assert "message 4" not in delta2
