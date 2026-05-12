@@ -132,8 +132,14 @@ What qualifies (in order of value):
 What to REJECT:
 - Commands that worked without corrections.
 - Generic CLI/framework knowledge Claude already has.
+- **Built-in error-recovery patterns** Claude handles natively: re-Read
+  after "file modified since read", retry after timeout, re-run after
+  permission denied, etc. These are default behaviors, not discoveries.
 - One-off investigations unlikely to recur.
 - Knowledge derivable from reading the code or CLAUDE.md.
+- Overly broad path globs like `**/*.py` or `**/*.ts` — these fire on
+  every file interaction and become noise. Path triggers should target
+  specific directories or files, not entire languages.
 
 ## Examples
 
