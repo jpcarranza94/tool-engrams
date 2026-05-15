@@ -48,7 +48,7 @@ from ..retrieval.session_state import (
     log_surfaces,
 )
 from ..utils import slugify_cwd
-from ._skip import WHITELIST
+from ._skip import WHITELIST, max_memories_per_call
 
 
 def main() -> int:
@@ -104,6 +104,10 @@ def _run(payload: dict[str, Any]) -> int:
             return 0
 
         fresh.sort(key=lambda c: (-len(c.matched_tokens), -c.final_score))
+
+        # All candidates here are hints (kind="hint" filter at retrieve time);
+        # take the top N by sort order.
+        fresh = fresh[: max_memories_per_call()]
 
         memory_ids = [c.memory_id for c in fresh]
         current_turn = get_session_turn(conn, session_id)

@@ -48,20 +48,32 @@ def _get_memory_summary(db_path: Path) -> str:
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
 
+    # Order: never-verified first, then oldest-verified next. This puts the
+    # most audit-worthy memories at the top of the agent's context so a
+    # truncated reading still covers the work that matters.
     memories = conn.execute(
-        "SELECT m.id, m.name, m.body, m.kind, m.surface_count, m.useful_count "
-        "FROM memories m WHERE m.archived_ts IS NULL ORDER BY m.id"
+        "SELECT m.id, m.name, m.body, m.kind, m.surface_count, m.useful_count, "
+        "       m.scope, m.project_slug, m.created_ts, m.last_verified_ts "
+        "FROM memories m WHERE m.archived_ts IS NULL "
+        "ORDER BY (m.last_verified_ts IS NOT NULL), m.last_verified_ts, m.created_ts"
     ).fetchall()
 
-    lines = [f"Active memories ({len(memories)}):"]
+    lines = [f"Active memories ({len(memories)}) ordered audit-first (never-verified, then oldest-verified):"]
     for m in memories:
         u = usefulness(m["useful_count"], m["surface_count"])
+        scope_str = m["scope"]
+        if m["project_slug"]:
+            scope_str = f"{scope_str}:{m['project_slug']}"
+        verified = m["last_verified_ts"]
+        verified_str = f"verified={verified}" if verified else "verified=never"
         lines.append(
             f"  [{m['id']}] \"{m['name']}\" kind={m['kind']} "
+            f"scope={scope_str} "
             f"surfaces={m['surface_count']} useful={m['useful_count']} "
-            f"usefulness={u:.2f}"
+            f"usefulness={u:.2f} created={m['created_ts']} {verified_str}"
         )
-        lines.append(f"       body: {m['body'][:150]}")
+        # Body truncated to 500 chars; agent can `engram recall --id N` for full text.
+        lines.append(f"       body: {m['body'][:500]}")
 
     surfaces = conn.execute(
         "SELECT ss.memory_id, m.name, ss.session_id, ss.hook "
@@ -134,6 +146,10 @@ def run_consolidation_agent(
         "Read", "Grep", "Glob",
         "Bash(engram *)", "Bash(sqlite3 *)",
         "Bash(wc *)", "Bash(head *)", "Bash(cat *)", "Bash(ls *)",
+        # Read-only git inspection so the agent can compare memory bodies
+        # against current repo state (Task 5 — git-aware staleness audit).
+        "Bash(git log *)", "Bash(git diff *)", "Bash(git show *)",
+        "Bash(git -C *)", "Bash(git rev-parse *)",
     ])
 
     # Build the prompt.

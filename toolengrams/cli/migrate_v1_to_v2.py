@@ -159,11 +159,11 @@ def _scalar(conn: sqlite3.Connection, sql: str) -> int:
 
 
 def _plan_migration(pre_state: dict) -> dict:
-    """Describe what the v6+v7 chain will do, without running it."""
+    """Describe what the v6+v7 chain (plus any later migrations) will do."""
     type_dist = pre_state.get("type_distribution") or {}
     return {
         "from_version": pre_state["version"],
-        "to_version": 7,
+        "to_version": db.SCHEMA_VERSION,
         "steps": [
             "v6: drop memory_associations (Hebbian), rebuild triggers with "
             "(first_token, tokens_json) replacing (tool_name, head_joined, head_length)",

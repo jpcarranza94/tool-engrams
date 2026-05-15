@@ -8,6 +8,7 @@ import time
 
 import pytest
 
+from toolengrams import db
 from toolengrams.cli import migrate_v1_to_v2
 
 
@@ -131,7 +132,7 @@ def test_migrate_runs_cleanly_on_v5_db(tmp_path, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert payload["action"] == "migrated"
     assert payload["from_version"] == 5
-    assert payload["to_version"] == 7
+    assert payload["to_version"] == db.SCHEMA_VERSION
     # memories preserved (2 before, 2 after).
     assert payload["memories_before"] == 2
     assert payload["memories_after"] == 2
@@ -148,7 +149,7 @@ def test_migrated_db_actually_usable(tmp_path):
     conn = sqlite3.connect(str(path))
     conn.row_factory = sqlite3.Row
     version = conn.execute("PRAGMA user_version").fetchone()[0]
-    assert version == 7
+    assert version == db.SCHEMA_VERSION
 
     rows = conn.execute("SELECT kind, name FROM memories ORDER BY id").fetchall()
     assert rows[0]["kind"] == "block"
@@ -198,7 +199,7 @@ def test_dry_run_does_not_modify(tmp_path, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert payload["action"] == "dry_run"
     assert payload["plan"]["from_version"] == 5
-    assert payload["plan"]["to_version"] == 7
+    assert payload["plan"]["to_version"] == db.SCHEMA_VERSION
     assert payload["plan"]["value_map"]["memories.type=feedback → memories.kind=block"] == 1
     assert payload["plan"]["value_map"]["memories.type=reference → memories.kind=hint"] == 1
 
