@@ -27,6 +27,9 @@ WHITELIST: frozenset[str] = frozenset({
 })
 
 DEFAULT_MAX_MEMORIES_PER_CALL = 2
+# Hard ceiling defends against typo overrides like ENGRAM_MAX_MEMORIES_PER_CALL=200
+# silently un-capping the system.
+MAX_MEMORIES_PER_CALL_CEILING = 10
 
 
 def max_memories_per_call() -> int:
@@ -38,7 +41,7 @@ def max_memories_per_call() -> int:
         n = int(raw)
     except ValueError:
         return DEFAULT_MAX_MEMORIES_PER_CALL
-    return max(1, n)
+    return max(1, min(n, MAX_MEMORIES_PER_CALL_CEILING))
 
 # Temp dir basenames that identify non-user (ToolEngrams-internal) sessions.
 # Match by prefix on the cwd basename.

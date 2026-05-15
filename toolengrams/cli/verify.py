@@ -1,23 +1,28 @@
 """Formation CLI: `engram verify` — mark a memory as still accurate.
 
-Used by the nightly consolidation agent after it has checked a memory's
-body against current reality (git log, file contents) and decided the
-memory still holds. Sets memories.last_verified_ts = NOW.
+Used by the nightly consolidation agent after auditing a memory's body against
+current reality (git log, file contents) and deciding the memory still holds.
+Sets memories.last_verified_ts = NOW.
 
 Pairs with `engram forget --delete` which archives memories whose body
 contradicts current reality. Together they let consolidation skip
 recently-verified memories on subsequent runs.
+
+No-op guard: if last_verified_ts is within NOOP_WINDOW_SECONDS, returns
+action=noop and does not write. Prevents FTS-trigger churn from same-second
+duplicate verifies (e.g. agent retries after a transient git error).
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import sys
 import time
 
 from .. import db
 from ..queries import find_memory
+
+NOOP_WINDOW_SECONDS = 60
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -28,18 +33,40 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps({"error": "not_found", "query": args.name}))
             return 1
         if row["archived_ts"] is not None:
-            print(json.dumps({"error": "archived", "memory_id": row["id"], "name": row["name"]}))
-            return 1
+            print(json.dumps({
+                "error": "archived",
+                "memory_id": row["id"],
+                "name": row["name"],
+            }))
+            return 2
+
         now_ts = int(time.time())
-        conn.execute(
-            "UPDATE memories SET last_verified_ts = ? WHERE id = ?",
-            (now_ts, row["id"]),
-        )
+        previous = conn.execute(
+            "SELECT last_verified_ts FROM memories WHERE id = ?",
+            (row["id"],),
+        ).fetchone()["last_verified_ts"]
+
+        if previous is not None and now_ts - previous < NOOP_WINDOW_SECONDS:
+            print(json.dumps({
+                "action": "noop",
+                "reason": "recently_verified",
+                "memory_id": row["id"],
+                "name": row["name"],
+                "previous_last_verified_ts": previous,
+            }))
+            return 0
+
+        with db.transaction(conn):
+            conn.execute(
+                "UPDATE memories SET last_verified_ts = ? WHERE id = ?",
+                (now_ts, row["id"]),
+            )
         print(json.dumps({
             "action": "verified",
             "memory_id": row["id"],
             "name": row["name"],
             "last_verified_ts": now_ts,
+            "previous_last_verified_ts": previous,
         }))
         return 0
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import time
 from pathlib import Path
 
 from toolengrams import db
@@ -70,8 +71,6 @@ def test_v7_db_upgrades_to_v8(tmp_path: Path):
 def test_new_column_defaults_to_null(tmp_path: Path):
     path = tmp_path / "fresh.sqlite"
     conn = db.connect(path)
-    import time
-
     now_ts = int(time.time())
     conn.execute(
         "INSERT INTO memories (name, description, body, kind, scope, project_slug, created_ts) "

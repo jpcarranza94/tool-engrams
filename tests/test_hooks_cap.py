@@ -160,3 +160,34 @@ def test_post_tool_failure_caps_hints(temp_db, monkeypatch):
     ctx = result["hookSpecificOutput"]["additionalContext"]
     present = sum(1 for letter in "ABCD" if f"PHF body {letter}" in ctx)
     assert present == 2
+
+
+def test_post_tool_failure_under_cap_surfaces_all(temp_db, monkeypatch):
+    """Under-cap case: all hints surface and their surface_counts bump correctly."""
+    _seed_hint(temp_db, "phf-hint-X", "PHF body X", ["git", "status"])
+
+    payload = {
+        "session_id": "sess-cap-6",
+        "cwd": "/tmp/x",
+        "hook_event_name": "PostToolUseFailure",
+        "tool_name": "Bash",
+        "tool_input": {"command": "git status"},
+        "tool_use_id": "tu-cap-6",
+        "error": "Exit code 1",
+        "is_interrupt": False,
+    }
+    result = _run_hook(post_tool_failure, payload, monkeypatch)
+    ctx = result["hookSpecificOutput"]["additionalContext"]
+    assert "PHF body X" in ctx
+    row = temp_db.execute(
+        "SELECT surface_count FROM memories WHERE name = 'phf-hint-X'"
+    ).fetchone()
+    assert row["surface_count"] == 1
+
+
+def test_env_override_clamped_to_ceiling(temp_db, monkeypatch):
+    """ENGRAM_MAX_MEMORIES_PER_CALL=200 should be clamped, not honored as-is."""
+    monkeypatch.setenv("ENGRAM_MAX_MEMORIES_PER_CALL", "200")
+    from toolengrams.hooks._skip import MAX_MEMORIES_PER_CALL_CEILING, max_memories_per_call
+
+    assert max_memories_per_call() == MAX_MEMORIES_PER_CALL_CEILING

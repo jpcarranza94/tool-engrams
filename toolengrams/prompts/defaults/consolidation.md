@@ -72,16 +72,18 @@ What does NOT qualify:
 
 Reinforcement decay alone can't catch memories whose *content* contradicts current reality — a memory that says "OPENAI_API_KEY is required in docker-compose.yml" survives just fine in the surfacing scores until the day someone reads it and acts on it incorrectly.
 
-For each **project-scoped memory** in the inventory:
+The memory inventory above is already ordered audit-first: `verified=never` rows come before `verified=<old_ts>` rows. Start at the top and work down. For each **project-scoped memory**:
 
-1. **Skip if recently verified.** Each memory has `verified=<ts>` or `verified=never`. If `verified` is within the last 14 days (1209600s), don't re-audit unless you have a strong reason.
+1. **Skip if recently verified.** If `verified=<ts>` is within the last 14 days, don't re-audit unless you have a strong reason. Move on.
 
-2. **Locate the repo.** The memory's `scope=project:<slug>` field is a Claude Code project slug — slashes replaced with dashes (e.g. `-Users-jpcar-projects-agent-service` → `/Users/jpcar/projects/agent-service`). Slug-to-path reversal is ambiguous when directory names contain dashes (e.g. `tool-engrams`), so when in doubt run `Bash(ls ~/projects/)` and `Bash(ls ~/personal-projects/)` to discover candidate repos, then `Bash(git -C <path> rev-parse --show-toplevel)` to confirm.
+2. **Locate the repo deterministically.** The memory's `scope=project:<slug>` field is a Claude Code project slug — slashes replaced with dashes. Call `Bash(engram resolve-slug <slug>)` which returns `{{"candidates": [path, ...], "best": path}}` (already filtered to paths that exist on disk). Use the `best` field. If the JSON has `"candidates": []`, the repo is gone — **leave the memory alone**. Do NOT archive a memory because you couldn't find its repo; that's the worst failure mode (false positive that deletes user knowledge).
 
-3. **Inspect history since the memory was created.** Run `Bash(git -C <repo> log --since=<created_ts> --oneline -- <relevant-path>)` where `<relevant-path>` is the file or directory the memory body references. Read recent commit messages and skim diffs that could contradict the memory.
+3. **Inspect history since the memory was created.** Run `Bash(git -C <repo> log --since=<created_ts> --oneline --no-merges -- <relevant-path>)` where `<relevant-path>` is the file or directory the memory body references. If `created_ts` is more than ~180 days old, cap the window at 180d to keep context manageable: `--since=$(date -v-180d +%s)` on macOS, `--since="180 days ago"` on Linux. Read recent commit messages and skim diffs that could contradict the memory.
 
-4. **Decide:**
-   - If a diff clearly contradicts the memory body (e.g. memory says "X is required in file Y" but a recent commit removed X from Y), `engram forget --delete "<name>"`.
+4. **Read the full body before judging.** The body shown in the inventory is truncated to 500 chars. If you're about to archive based on a truncation, run `Bash(engram recall --id <N>)` to see the full text first.
+
+5. **Decide:**
+   - If a diff clearly contradicts the memory body (e.g. memory says "X is required in file Y" but a recent commit removed X from Y), `engram forget --delete "<name>"`. Reversible later via `engram forget --restore "<name>"` if you discover you were wrong.
    - If the body still holds (or if you can't find evidence of contradiction in the relevant commits), `engram verify "<name>"` — this stamps `last_verified_ts = NOW` so future runs skip the audit until the staleness horizon elapses.
    - If genuinely uncertain, leave it alone; don't verify or archive on a coin flip.
 
@@ -101,6 +103,7 @@ Your final response MUST end with a structured metrics block in exactly this for
     "surfaces_neutral": <int>,
     "memories_created": <int>,
     "memories_pruned": <int>,
+    "memories_verified": <int>,
     "total_active_after": <int>,
     "quality_score": <float 0.0-1.0>
   }}
@@ -121,9 +124,11 @@ Before the JSON block, include a human-readable report with:
 - `Read` -- read JSONL files
 - `Grep` -- search file contents efficiently
 - `Bash(engram recall)` -- list current memories
-- `Bash(engram recall --id N)` -- detail on one memory
+- `Bash(engram recall --id N)` -- detail on one memory (full body, full triggers)
 - `Bash(engram forget --delete "name")` -- archive a memory
+- `Bash(engram forget --restore "name")` -- undo a previous archive (use if a teammate or a prior run was over-eager)
 - `Bash(engram verify "name")` -- mark a memory's body as still accurate (sets last_verified_ts = now); use after auditing it against git history and finding no contradiction
+- `Bash(engram resolve-slug <slug>)` -- reverse a project slug to candidate repo paths on disk; returns `{{"best": "/path", "candidates": [...]}}` or empty candidates if the repo is gone
 - `Bash(engram remember "body" --trigger "token seq" --kind K --scope S --name "name")` -- create a memory
 - `Bash(engram status)` -- system health
 - `Bash(git log ...)`, `Bash(git diff ...)`, `Bash(git show ...)`, `Bash(git -C <repo> ...)`, `Bash(git rev-parse ...)` -- read-only git inspection for the staleness audit

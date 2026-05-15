@@ -105,7 +105,7 @@ def _run(payload: dict[str, Any]) -> int:
         cap = max_memories_per_call()
         if len(fresh) > cap:
             blocks = [c for c in fresh if c.kind == "block"]
-            hints = [c for c in fresh if c.kind != "block"]
+            hints = [c for c in fresh if c.kind == "hint"]
             remaining = max(cap - len(blocks), 0)
             fresh = blocks + hints[:remaining]
 
