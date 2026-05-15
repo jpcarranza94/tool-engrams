@@ -33,7 +33,7 @@ def _find_engram() -> str:
 # ---------- public API ----------
 
 
-def install_schedule(**kwargs) -> str:
+def install_schedule() -> str:
     """Install the nightly consolidation schedule. Returns path/description."""
     plat = _get_platform()
     if plat == "Darwin":

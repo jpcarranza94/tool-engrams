@@ -156,10 +156,23 @@ def test_scope_global_stores_null_project_slug(temp_db, monkeypatch, capsys):
     assert rows[0]["project_slug"] is None
 
 
-def test_scope_project_defaults_slug_from_cwd(temp_db, monkeypatch, capsys):
-    monkeypatch.setenv("ENGRAM_PROJECT_CWD", "/tmp/fake/project")
-    payload = _run(["use `make build` here"], monkeypatch, capsys=capsys)
+def test_scope_project_defaults_slug_from_cwd_flag(temp_db, monkeypatch, capsys):
+    payload = _run(
+        ["--project-cwd", "/tmp/fake/project", "use `make build` here"],
+        monkeypatch,
+        capsys=capsys,
+    )
     assert payload["memory"]["project_slug"] == "-tmp-fake-project"
+
+
+def test_scope_project_defaults_slug_from_real_cwd(
+    temp_db, monkeypatch, capsys, tmp_path,
+):
+    """Without --project-cwd, fall back to os.getcwd()."""
+    monkeypatch.chdir(tmp_path)
+    payload = _run(["use `make build` here"], monkeypatch, capsys=capsys)
+    expected = str(tmp_path).replace("/", "-")
+    assert payload["memory"]["project_slug"] == expected
 
 
 def test_scope_project_with_override(temp_db, monkeypatch, capsys):

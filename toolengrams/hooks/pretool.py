@@ -45,9 +45,7 @@ from ..retrieval.session_state import (
     log_surfaces,
 )
 from ..utils import slugify_cwd
-
-
-WHITELIST = {"Bash", "Read", "Edit", "Write", "MultiEdit", "Grep", "Glob", "WebFetch", "NotebookEdit"}
+from ._skip import WHITELIST
 
 
 def main() -> int:
@@ -83,30 +81,30 @@ def _run(payload: dict[str, Any]) -> int:
         _emit({})
         return 0
 
-    conn = db.connect()
-    now_ts = now()
+    with db.session() as conn:
+        now_ts = now()
 
-    # Retrieve ALL matching memories (both block and hint).
-    candidates = retrieve_candidates(conn, hint, project_slug, now_ts)
-    if not candidates:
-        _emit({})
-        return 0
+        # Retrieve ALL matching memories (both block and hint).
+        candidates = retrieve_candidates(conn, hint, project_slug, now_ts)
+        if not candidates:
+            _emit({})
+            return 0
 
-    # Session dedup — don't re-show the same memory twice in a session.
-    surfaced_ids = get_already_surfaced(conn, session_id)
-    fresh = [c for c in candidates if c.memory_id not in surfaced_ids]
-    if not fresh:
-        _emit({})
-        return 0
+        # Session dedup — don't re-show the same memory twice in a session.
+        surfaced_ids = get_already_surfaced(conn, session_id)
+        fresh = [c for c in candidates if c.memory_id not in surfaced_ids]
+        if not fresh:
+            _emit({})
+            return 0
 
-    # Sort: longer triggers (more specific) win, then higher final_score.
-    fresh.sort(key=lambda c: (-len(c.matched_tokens), -c.final_score))
+        # Sort: longer triggers (more specific) win, then higher final_score.
+        fresh.sort(key=lambda c: (-len(c.matched_tokens), -c.final_score))
 
-    memory_ids = [c.memory_id for c in fresh]
-    current_turn = get_session_turn(conn, session_id)
-    log_surfaces(conn, session_id, memory_ids, tool_use_id,
-                 "pre_tool_use", current_turn, now_ts)
-    bump_surface_counts(conn, memory_ids, now_ts)
+        memory_ids = [c.memory_id for c in fresh]
+        current_turn = get_session_turn(conn, session_id)
+        log_surfaces(conn, session_id, memory_ids, tool_use_id,
+                     "pre_tool_use", current_turn, now_ts)
+        bump_surface_counts(conn, memory_ids, now_ts)
 
     # Deny if ANY block matches; allow (with context) if only hints.
     has_block = any(c.kind == "block" for c in fresh)

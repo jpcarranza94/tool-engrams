@@ -46,22 +46,3 @@ def find_memory(conn: sqlite3.Connection, name: str, include_archived: bool = Fa
     ).fetchone()
     return row
 
-
-def get_existing_memory_names(conn: sqlite3.Connection) -> list[str]:
-    """Get names of all active memories."""
-    rows = conn.execute(
-        "SELECT name FROM memories WHERE archived_ts IS NULL ORDER BY id"
-    ).fetchall()
-    return [r["name"] for r in rows]
-
-
-def get_existing_memories_summary(conn: sqlite3.Connection) -> str:
-    """Compact summary of active memories for dedup context."""
-    rows = conn.execute(
-        "SELECT name, body FROM memories WHERE archived_ts IS NULL ORDER BY id"
-    ).fetchall()
-    if not rows:
-        return "No existing memories."
-    return "\n".join(f"- {r['name']}: {r['body'][:100]}" for r in rows)
-
-

@@ -20,8 +20,7 @@ def main(argv: list[str] | None = None) -> int:
         print("engram pin: provide a memory name", file=sys.stderr)
         return 2
 
-    conn = db.connect()
-    try:
+    with db.session() as conn:
         row = find_memory(conn, args.name)
         if not row:
             print(json.dumps({"error": "not_found", "query": args.name}))
@@ -37,8 +36,6 @@ def main(argv: list[str] | None = None) -> int:
             "pinned": bool(new_pinned),
         }))
         return 0
-    finally:
-        conn.close()
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:

@@ -89,3 +89,24 @@ def transaction(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
         raise
     else:
         conn.execute("COMMIT")
+
+
+@contextmanager
+def session(path: Path | None = None) -> Iterator[sqlite3.Connection]:
+    """Open a connection, yield it, close on exit. Equivalent to:
+
+        conn = db.connect()
+        try:
+            ...
+        finally:
+            conn.close()
+
+    Use this at every call site that opens-then-closes a connection. Reserve
+    raw `db.connect()` for places that have an unusual lifecycle (the watcher
+    re-using a connection across cron ticks, for example).
+    """
+    conn = connect(path)
+    try:
+        yield conn
+    finally:
+        conn.close()

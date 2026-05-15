@@ -48,10 +48,7 @@ from ..retrieval.session_state import (
     log_surfaces,
 )
 from ..utils import slugify_cwd
-
-
-# Same whitelist as pretool — tools that carry user-facing memory bindings.
-WHITELIST = {"Bash", "Read", "Edit", "Write", "MultiEdit", "Grep", "Glob", "WebFetch", "NotebookEdit"}
+from ._skip import WHITELIST
 
 
 def main() -> int:
@@ -92,27 +89,27 @@ def _run(payload: dict[str, Any]) -> int:
         _emit({})
         return 0
 
-    conn = db.connect()
-    now_ts = now()
+    with db.session() as conn:
+        now_ts = now()
 
-    candidates = retrieve_candidates(conn, hint, project_slug, now_ts, kind="hint")
-    if not candidates:
-        _emit({})
-        return 0
+        candidates = retrieve_candidates(conn, hint, project_slug, now_ts, kind="hint")
+        if not candidates:
+            _emit({})
+            return 0
 
-    surfaced_ids = get_already_surfaced(conn, session_id)
-    fresh = [c for c in candidates if c.memory_id not in surfaced_ids]
-    if not fresh:
-        _emit({})
-        return 0
+        surfaced_ids = get_already_surfaced(conn, session_id)
+        fresh = [c for c in candidates if c.memory_id not in surfaced_ids]
+        if not fresh:
+            _emit({})
+            return 0
 
-    fresh.sort(key=lambda c: (-len(c.matched_tokens), -c.final_score))
+        fresh.sort(key=lambda c: (-len(c.matched_tokens), -c.final_score))
 
-    memory_ids = [c.memory_id for c in fresh]
-    current_turn = get_session_turn(conn, session_id)
-    log_surfaces(conn, session_id, memory_ids, tool_use_id,
-                 "post_tool_use_failure", current_turn, now_ts)
-    bump_surface_counts(conn, memory_ids, now_ts)
+        memory_ids = [c.memory_id for c in fresh]
+        current_turn = get_session_turn(conn, session_id)
+        log_surfaces(conn, session_id, memory_ids, tool_use_id,
+                     "post_tool_use_failure", current_turn, now_ts)
+        bump_surface_counts(conn, memory_ids, now_ts)
 
     _emit({
         "hookSpecificOutput": {

@@ -8,11 +8,11 @@ import time
 from pathlib import Path
 
 from toolengrams import db
+from toolengrams.utils import is_pid_alive
 from toolengrams.watcher import (
     _cleanup,
     _format_delta,
     _get_saved_cursor,
-    _is_pid_alive,
     _is_session_alive,
     _parse_response,
     _read_lines_from,
@@ -252,7 +252,11 @@ def test_parse_response_garbage():
 # ---------- save memory ----------
 
 
-def test_save_memory_sets_cwd(temp_db, capsys):
+def test_save_memory_uses_cwd_for_project_slug(temp_db, capsys):
+    """The watcher passes its work_session cwd to remember via --project-cwd
+    so the resulting memory binds to the user's project slug, not the
+    watcher subprocess's own cwd (which is wherever launchd left it).
+    """
     _save_memory(
         {
             "name": "test-save",
@@ -264,12 +268,12 @@ def test_save_memory_sets_cwd(temp_db, capsys):
         },
         cwd="/tmp/test-project",
     )
-    assert os.environ.get("ENGRAM_PROJECT_CWD") == "/tmp/test-project"
     row = temp_db.execute(
-        "SELECT name, body FROM memories WHERE name = 'test-save'"
+        "SELECT name, body, project_slug FROM memories WHERE name = 'test-save'"
     ).fetchone()
     assert row is not None
     assert "docker build" in row["body"]
+    assert row["project_slug"] == "-tmp-test-project"
 
 
 def test_save_memory_skips_no_triggers(temp_db, capsys):
@@ -310,12 +314,18 @@ def test_save_memory_skips_no_name(temp_db, capsys):
 
 
 def test_is_pid_alive_current_process():
-    assert _is_pid_alive(os.getpid()) is True
+    assert is_pid_alive(os.getpid()) is True
 
 
 def test_is_pid_alive_nonexistent():
     # PID 99999 is extremely unlikely to exist.
-    assert _is_pid_alive(99999) is False
+    assert is_pid_alive(99999) is False
+
+
+def test_is_pid_alive_zero_or_none():
+    # Both falsy PID values must short-circuit to False — neither is a real
+    # process and we don't want to accidentally signal pid 0 (process group).
+    assert is_pid_alive(0) is False
 
 
 # ---------- cursor lifecycle ----------

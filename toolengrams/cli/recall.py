@@ -18,8 +18,7 @@ from ..queries import fts_quote
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
-    conn = db.connect()
-    try:
+    with db.session() as conn:
         if args.stats:
             return _show_stats(conn)
         if args.id:
@@ -27,8 +26,6 @@ def main(argv: list[str] | None = None) -> int:
         if args.query:
             return _search(conn, args.query, args.limit)
         return _list_all(conn, args.limit)
-    finally:
-        conn.close()
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:

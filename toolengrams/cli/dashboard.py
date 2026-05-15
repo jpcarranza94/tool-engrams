@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
 import tempfile
 import time
@@ -12,6 +11,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .. import db
+from ..utils import is_pid_alive
 
 LOG_PATH = Path.home() / ".claude" / "tool-engrams" / "watcher.log"
 
@@ -27,43 +27,33 @@ def _decode_tokens(raw: str | None) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    conn = db.connect()
-    try:
+    with db.session() as conn:
         html = _build_html(conn)
         path = Path(tempfile.gettempdir()) / "engram-dashboard.html"
         path.write_text(html)
         webbrowser.open(f"file://{path}")
         print(f"Dashboard opened: {path}")
         return 0
-    finally:
-        conn.close()
 
 
-def _count_watcher_sessions(conn: sqlite3.Connection) -> tuple[int, int]:
-    """Count watcher sessions: (total in DB, actually alive).
+def _count_alive_watchers(conn: sqlite3.Connection) -> int:
+    """How many watcher_state rows correspond to a live process.
 
-    Checks each watcher PID to distinguish between stale DB rows
-    (session ended but watcher_state not cleaned up) and truly
-    active watchers.
+    Stale rows (PID null or no longer running) are excluded — that's the
+    interesting count for the dashboard: "is anyone watching right now?".
     """
     try:
         rows = conn.execute(
             "SELECT watcher_pid FROM watcher_state"
         ).fetchall()
     except Exception:
-        return 0, 0
+        return 0
 
-    total = len(rows)
     alive = 0
     for row in rows:
-        pid = row["watcher_pid"]
-        if pid:
-            try:
-                os.kill(pid, 0)
-                alive += 1
-            except OSError:
-                pass
-    return total, alive
+        if is_pid_alive(row["watcher_pid"]):
+            alive += 1
+    return alive
 
 
 def _read_watcher_stats() -> dict:
@@ -119,7 +109,7 @@ def _build_html(conn: sqlite3.Connection) -> str:
     archived = [m for m in memories if m["archived_ts"] is not None]
     total_surfaces = sum(m["surface_count"] for m in active)
     total_useful = sum(m["useful_count"] for m in active)
-    watcher_total, watcher_alive = _count_watcher_sessions(conn)
+    watcher_alive = _count_alive_watchers(conn)
     watcher_stats = _read_watcher_stats()
 
     now_ts = int(time.time())

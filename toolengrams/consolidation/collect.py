@@ -2,17 +2,29 @@
 
 from __future__ import annotations
 
-import os
+import re
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 from pathlib import Path
 
 
 CLAUDE_PROJECTS_DIR = Path.home() / ".claude" / "projects"
 
-# Skip sessions from these cwd prefixes — they're ToolEngrams' own
-# observer/consolidation sessions, not real user work.
-_SKIP_SLUGS = {"engram-observe-", "engram-consolidate-", "engram-experiment-"}
+# A project slug is `cwd.replace("/", "-")` (see utils.slugify_cwd).
+# Our internal temp dirs use `tempfile.mkdtemp(prefix="engram-{role}-")`,
+# which produces a basename like `engram-consolidate-Z3K9q1` (alphanumeric
+# random suffix, no further dashes). After slugification, this trails the
+# slug. Match the suffix anchored at end-of-string, with the random part
+# constrained to non-dash chars so we don't accidentally swallow a deeper
+# project path that happens to contain "engram-consolidate" in the middle.
+_INTERNAL_PROJECT_RE = re.compile(
+    r"engram-(?:observe|consolidate|experiment)-[A-Za-z0-9_]+$"
+)
+
+
+def _is_internal_project(project_slug: str) -> bool:
+    """True if the slug looks like one of our own temp-dir sessions."""
+    return bool(_INTERNAL_PROJECT_RE.search(project_slug))
 
 
 @dataclass(slots=True)
@@ -40,8 +52,7 @@ def collect_sessions(
         project_slug = project_dir.name
 
         # Skip ToolEngrams' own sessions (observer, consolidation, experiments).
-        if any(project_slug.endswith(prefix) or prefix in project_slug
-               for prefix in _SKIP_SLUGS):
+        if _is_internal_project(project_slug):
             continue
 
         for jsonl in project_dir.glob("*.jsonl"):

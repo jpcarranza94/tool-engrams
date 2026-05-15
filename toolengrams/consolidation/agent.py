@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sqlite3
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -44,9 +45,8 @@ def _get_memory_summary(db_path: Path) -> str:
     Opens its own connection because the consolidation agent runs in a
     subprocess with only a path, not a shared connection.
     """
-    import sqlite3 as _sqlite3
-    conn = _sqlite3.connect(str(db_path))
-    conn.row_factory = _sqlite3.Row
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
 
     memories = conn.execute(
         "SELECT m.id, m.name, m.body, m.kind, m.surface_count, m.useful_count "
@@ -105,8 +105,6 @@ def _prioritize_sessions(sessions: list[SessionFile]) -> list[SessionFile]:
 class AgentResult:
     report: str
     returncode: int
-    raw_stdout: str
-    raw_stderr: str
     error: str | None = None
 
 
@@ -119,15 +117,12 @@ def run_consolidation_agent(
     claude_bin = _find_claude()
     if not claude_bin:
         return AgentResult(
-            report="", returncode=1, raw_stdout="", raw_stderr="",
+            report="", returncode=1,
             error="claude CLI not found on PATH",
         )
 
     if not sessions:
-        return AgentResult(
-            report="No sessions to review.", returncode=0,
-            raw_stdout="", raw_stderr="",
-        )
+        return AgentResult(report="No sessions to review.", returncode=0)
 
     # Cap sessions to prevent timeout on heavy days.
     sessions = _prioritize_sessions(sessions)
@@ -163,12 +158,12 @@ def run_consolidation_agent(
         )
     except subprocess.TimeoutExpired:
         return AgentResult(
-            report="", returncode=1, raw_stdout="", raw_stderr="",
+            report="", returncode=1,
             error="Consolidation agent timed out (30 min)",
         )
     except Exception as e:
         return AgentResult(
-            report="", returncode=1, raw_stdout="", raw_stderr="",
+            report="", returncode=1,
             error=f"Failed to spawn agent: {e}",
         )
     finally:
@@ -183,8 +178,6 @@ def run_consolidation_agent(
     return AgentResult(
         report=report,
         returncode=proc.returncode,
-        raw_stdout=proc.stdout[:5000],
-        raw_stderr=proc.stderr[:2000],
         error=None if proc.returncode == 0 else f"Agent exited with code {proc.returncode}",
     )
 

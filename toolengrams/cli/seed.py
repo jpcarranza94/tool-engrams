@@ -56,10 +56,9 @@ SEED_MEMORIES = [
 
 
 def main() -> int:
-    conn = db.connect()
     now_ts = int(time.time())
     inserted = 0
-    with db.transaction(conn):
+    with db.session() as conn, db.transaction(conn):
         for m in SEED_MEMORIES:
             existing = conn.execute(
                 "SELECT id FROM memories WHERE name = ?", (m["name"],)

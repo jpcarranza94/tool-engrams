@@ -15,8 +15,7 @@ DB_PATH = Path.home() / ".claude" / "tool-engrams" / "db.sqlite"
 
 
 def main(argv: list[str] | None = None) -> int:
-    conn = db.connect()
-    try:
+    with db.session() as conn:
         now = int(time.time())
         day_ago = now - 86400
 
@@ -73,5 +72,3 @@ def main(argv: list[str] | None = None) -> int:
 
         print(json.dumps(result, indent=2))
         return 0
-    finally:
-        conn.close()

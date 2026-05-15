@@ -80,10 +80,11 @@ def main(argv: list[str] | None = None) -> int:
         }))
         return 1
 
-    conn = db.connect()
-    try:
+    with db.session() as conn:
         candidates = consolidate_vocabulary(conn, candidates)
-        project_slug = _resolve_project_slug(args.scope, args.project_slug)
+        project_slug = _resolve_project_slug(
+            args.scope, args.project_slug, args.project_cwd,
+        )
         existing = find_overlapping_memory(conn, name, all_triggers, project_slug)
 
         common = dict(
@@ -120,8 +121,6 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(json.dumps(payload))
         return 0
-    finally:
-        conn.close()
 
 
 def _validate_and_parse(
@@ -189,6 +188,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
                         help=f"global|project (default {DEFAULT_SCOPE})")
     parser.add_argument("--project-slug", default=None,
                         help="Override the project slug (defaults to slugified cwd for scope=project).")
+    parser.add_argument("--project-cwd", default=None,
+                        help=("Explicit working directory used to compute the project slug "
+                              "for scope=project. Useful when calling from a subprocess "
+                              "(e.g. the watcher) whose own cwd differs from the user's. "
+                              "Falls back to os.getcwd()."))
     parser.add_argument("--pinned", action="store_true",
                         help="Pin this memory so reinforcement doesn't gate it.")
     parser.add_argument("--trigger", action="append", default=None,
@@ -227,12 +231,16 @@ def _synthesize_name(body: str) -> str:
     return body[:_NAME_MAX].strip() or "unnamed memory"
 
 
-def _resolve_project_slug(scope: str, override: str | None) -> str | None:
+def _resolve_project_slug(
+    scope: str,
+    slug_override: str | None,
+    cwd_override: str | None,
+) -> str | None:
     if scope != "project":
         return None
-    if override:
-        return override
-    cwd = os.environ.get("ENGRAM_PROJECT_CWD") or os.getcwd()
+    if slug_override:
+        return slug_override
+    cwd = cwd_override or os.getcwd()
     return slugify_cwd(cwd)
 
 

@@ -10,8 +10,7 @@ from ..consolidation.schedule import is_installed as schedule_is_installed
 
 
 def main(argv: list[str] | None = None) -> int:
-    conn = db.connect()
-    try:
+    with db.session() as conn:
         # Memory counts.
         mem_stats = conn.execute(
             "SELECT "
@@ -54,5 +53,3 @@ def main(argv: list[str] | None = None) -> int:
 
         print(json.dumps(result, indent=2))
         return 0
-    finally:
-        conn.close()

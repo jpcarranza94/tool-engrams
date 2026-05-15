@@ -139,7 +139,11 @@ def _extract_paths(body: str, add) -> None:
         # Also emit a **/<basename> glob so the memory fires from any cwd.
         if "/" in path and not path.startswith("**/"):
             basename = path.rstrip("/").rsplit("/", 1)[-1]
-            if basename and "*" not in basename and "." in basename or len(basename) > 2:
+            if (
+                basename
+                and "*" not in basename
+                and ("." in basename or len(basename) > 2)
+            ):
                 add(FormationCandidate(
                     kind="path_glob",
                     path_pattern=f"**/{basename}",

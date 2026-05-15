@@ -78,8 +78,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # The actual migration is the v6.sql + v7.sql chain applied by db.connect().
     # We just open the DB to trigger it, then re-inspect for the summary.
-    conn = db.connect(target)
-    try:
+    with db.session(target) as conn:
         post_state = _inspect_open(conn)
         summary = {
             "action": "migrated",
@@ -95,8 +94,6 @@ def main(argv: list[str] | None = None) -> int:
         }
         print(json.dumps(summary, indent=2))
         return 0
-    finally:
-        conn.close()
 
 
 def _inspect(path: Path) -> dict:

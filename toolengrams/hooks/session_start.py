@@ -76,18 +76,15 @@ def _maybe_spawn_watcher(payload: dict) -> None:
         spawn_watcher(session_id, transcript_path, cwd)
     elif source == "resume":
         # Check if watcher already exists and is alive.
-        conn = db.connect()
-        try:
+        with db.session() as conn:
             row = conn.execute(
                 "SELECT watcher_pid FROM watcher_state WHERE work_session_id = ?",
                 (session_id,),
             ).fetchone()
-            if row is None:
-                # No watcher — spawn one.
-                transcript_path = derive_transcript_path(session_id, cwd)
-                spawn_watcher(session_id, transcript_path, cwd)
-        finally:
-            conn.close()
+        if row is None:
+            # No watcher — spawn one.
+            transcript_path = derive_transcript_path(session_id, cwd)
+            spawn_watcher(session_id, transcript_path, cwd)
 
 
 def _emit(obj: dict) -> None:

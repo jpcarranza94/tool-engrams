@@ -45,66 +45,59 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     target = Path(args.db).expanduser() if args.db else db.db_path()
-    conn = db.connect(target)
 
-    if args.only_triggerless:
-        rows = conn.execute("""
-            SELECT m.id, m.name, m.body FROM memories m
-            LEFT JOIN triggers t ON t.memory_id = m.id
-            WHERE m.archived_ts IS NULL AND t.id IS NULL
-            GROUP BY m.id
-        """).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT id, name, body FROM memories WHERE archived_ts IS NULL"
-        ).fetchall()
+    with db.session(target) as conn:
+        if args.only_triggerless:
+            rows = conn.execute("""
+                SELECT m.id, m.name, m.body FROM memories m
+                LEFT JOIN triggers t ON t.memory_id = m.id
+                WHERE m.archived_ts IS NULL AND t.id IS NULL
+                GROUP BY m.id
+            """).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT id, name, body FROM memories WHERE archived_ts IS NULL"
+            ).fetchall()
 
-    summary: dict = {
-        "mode": "dry_run" if args.dry_run else "applied",
-        "only_triggerless": args.only_triggerless,
-        "total_memories_considered": len(rows),
-        "rebuilt": 0,
-        "no_triggers_extracted": 0,
-        "extracted_triggers": [],
-    }
+        summary: dict = {
+            "mode": "dry_run" if args.dry_run else "applied",
+            "only_triggerless": args.only_triggerless,
+            "total_memories_considered": len(rows),
+            "rebuilt": 0,
+            "no_triggers_extracted": 0,
+            "extracted_triggers": [],
+        }
 
-    with db.transaction(conn):
-        for row in rows:
-            mid = row["id"]
-            body = row["body"] or ""
-            candidates = extract_candidates(body)
-            if not candidates:
-                summary["no_triggers_extracted"] += 1
-                continue
+        with db.transaction(conn):
+            for row in rows:
+                mid = row["id"]
+                body = row["body"] or ""
+                candidates = extract_candidates(body)
+                if not candidates:
+                    summary["no_triggers_extracted"] += 1
+                    continue
 
-            if not args.dry_run:
-                # Wipe existing triggers (even if this memory already has some) —
-                # we're re-deriving from the body as source of truth.
-                conn.execute("DELETE FROM triggers WHERE memory_id = ?", (mid,))
-                insert_candidate_triggers(conn, mid, candidates)
+                if not args.dry_run:
+                    # Wipe existing triggers (even if this memory already has some) —
+                    # we're re-deriving from the body as source of truth.
+                    conn.execute("DELETE FROM triggers WHERE memory_id = ?", (mid,))
+                    insert_candidate_triggers(conn, mid, candidates)
 
-            summary["rebuilt"] += 1
-            summary["extracted_triggers"].append({
-                "id": mid,
-                "name": row["name"],
-                "triggers": [
-                    {
-                        "kind": c.kind,
-                        "tokens": list(c.tokens) if c.tokens else None,
-                        "path_pattern": c.path_pattern,
-                        "source": c.source,
-                    }
-                    for c in candidates
-                ],
-            })
+                summary["rebuilt"] += 1
+                summary["extracted_triggers"].append({
+                    "id": mid,
+                    "name": row["name"],
+                    "triggers": [
+                        {
+                            "kind": c.kind,
+                            "tokens": list(c.tokens) if c.tokens else None,
+                            "path_pattern": c.path_pattern,
+                            "source": c.source,
+                        }
+                        for c in candidates
+                    ],
+                })
 
-    if args.dry_run:
-        # Roll back any writes we might have queued (we didn't actually write,
-        # but the transaction wrapper would commit — explicit rollback is safer).
-        # Actually the branch above already guards with `if not args.dry_run`.
-        pass
-
-    conn.close()
     print(json.dumps(summary, indent=2))
     return 0
 

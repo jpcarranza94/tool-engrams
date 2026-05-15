@@ -31,7 +31,9 @@ Five components talk to Claude Code via its hook API:
         │              │                     │ spawns
         │              │                     ▼
         │              │          ┌─────────────────────┐
-        │              │          │ watcher  (Haiku)    │
+        │              │          │ watcher (claude -p, │
+        │              │          │ default: opus,      │
+        │              │          │ $ENGRAM_WATCHER_MODEL)
         │              │          │ every 5 min, forms  │
         │              │          │ memories from the   │
         │              │          │ transcript delta    │
@@ -57,7 +59,7 @@ Every component reads/writes the same SQLite DB. No network, no LLM on the hot p
 | **PreToolUse hook** | `toolengrams/hooks/pretool.py` | Before every whitelisted tool call | Looks up `block`-kind memories; denies the call + injects body on match |
 | **PostToolUse hook** | `toolengrams/hooks/post_tool.py` | After tool success (exit 0 or semantically-OK non-zero) | Reinforcement bookkeeping: bump `useful_count` for memories that surfaced, increment session turn counter |
 | **PostToolUseFailure hook** | `toolengrams/hooks/post_tool_failure.py` | After tool failure (exit ≠ 0 / structural error) | Looks up `hint`-kind memories; injects body as `additionalContext` (non-blocking) |
-| **Watcher** | `toolengrams/watcher.py` | Persistent background Haiku; wakes every 5 min | Reads JSONL transcript delta, calls `engram remember` for new patterns |
+| **Watcher** | `toolengrams/watcher.py` | Persistent background `claude -p` (model via `$ENGRAM_WATCHER_MODEL`, default opus); wakes every 5 min | Reads JSONL transcript delta, calls `engram remember` for new patterns |
 | **Consolidation** | `toolengrams/consolidation/agent.py` | Nightly (launchd/cron) | Opus agent reviews yesterday's sessions — prunes noise, discovers missed patterns, deduplicates |
 
 ## Surfacing pipeline
@@ -148,7 +150,7 @@ Memories are born three ways, in decreasing automation:
 
 | Source | Code | Where triggers come from |
 |---|---|---|
-| **Watcher** (Haiku background) | `toolengrams/watcher.py` + `toolengrams/prompts/defaults/watcher.md` | LLM extracts a small JSON object `{name, body, kind, scope, triggers, paths}` and calls `engram remember`. The Haiku schema enforces the shape. |
+| **Watcher** (background `claude -p`) | `toolengrams/watcher.py` + `toolengrams/prompts/defaults/watcher.md` | LLM (default opus, override via `$ENGRAM_WATCHER_MODEL`) extracts a small JSON object `{name, body, kind, scope, triggers, paths}` and calls `engram remember`. The JSON schema enforces the shape. |
 | **Consolidation** (Opus nightly) | `toolengrams/consolidation/agent.py` + `toolengrams/prompts/defaults/consolidation.md` | Opus issues `engram remember / forget` commands directly after reviewing yesterday's sessions. |
 | **Manual** | `toolengrams/cli/remember.py` | `--trigger "<tokens>"` flag, or extracted from body via `formation/candidates.py` (backticked shell snippets, paths, URLs). |
 
@@ -219,10 +221,10 @@ toolengrams/
 ├── schema.sql         ← complete v_latest snapshot for fresh DBs
 ├── db.py              ← connection + migration runner
 ├── models.py          ← dataclasses (Memory, Trigger, Candidate, …)
-└── watcher.py         ← persistent Haiku lifecycle
+└── watcher.py         ← persistent watcher lifecycle (claude -p, model configurable)
 ```
 
-The hot-path (hooks) has **no external dependencies** — stdlib + sqlite3 only. LLMs run only in `watcher.py` (Haiku) and `consolidation/agent.py` (Opus), both out-of-band from the tool-call path.
+The hot-path (hooks) has **no external dependencies** — stdlib + sqlite3 only. LLMs run only in `watcher.py` (model via `$ENGRAM_WATCHER_MODEL`, default opus) and `consolidation/agent.py` (Opus), both out-of-band from the tool-call path.
 
 ## Install
 
@@ -278,6 +280,15 @@ engram rebuild-triggers           Re-extract triggers from bodies (post-migratio
 - **session_turns** — per-session tool-call counter.
 - **consolidation_runs** — nightly run log with quality metrics.
 - **watcher_state** — active watcher processes (PID, transcript cursor).
+
+## Configuration
+
+| Env var | Default | Effect |
+|---|---|---|
+| `ENGRAM_DB` | `~/.claude/tool-engrams/db.sqlite` | SQLite DB path |
+| `ENGRAM_WATCHER_MODEL` | `opus` | Model passed to `claude -p` for the watcher (e.g. `haiku` for ~20× cost reduction at the cost of more parse errors) |
+| `ENGRAM_WATCHER_PROMPT_PATH` | unset | Override the watcher's prompt file (see below) |
+| `ENGRAM_CONSOLIDATION_PROMPT_PATH` | unset | Override the consolidation agent's prompt file |
 
 ## Configurable prompts
 

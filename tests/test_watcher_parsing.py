@@ -1,20 +1,43 @@
 """Unit tests for watcher parsing + delta capping.
 
 These cover the three bugs found by the 2026-04-23 live-session audit:
-  1. Parser failed on fenced-JSON Haiku responses (silently dropped memories).
+  1. Parser failed on fenced-JSON model responses (silently dropped memories).
   2. Dormant sessions ballooned the delta into hundreds of KB on first wake.
 """
 
 from __future__ import annotations
 
 import json
+import os
 
 from toolengrams.watcher import (
+    DEFAULT_WATCHER_MODEL,
     MAX_DELTA_CHARS,
     _cap_delta,
     _candidate_json_strings,
     _parse_response,
+    _watcher_model,
 )
+
+
+# ---------- _watcher_model ----------
+
+
+def test_watcher_model_default(monkeypatch):
+    monkeypatch.delenv("ENGRAM_WATCHER_MODEL", raising=False)
+    assert _watcher_model() == DEFAULT_WATCHER_MODEL == "opus"
+
+
+def test_watcher_model_env_override(monkeypatch):
+    monkeypatch.setenv("ENGRAM_WATCHER_MODEL", "haiku")
+    assert _watcher_model() == "haiku"
+
+
+def test_watcher_model_resolves_at_call_time(monkeypatch):
+    monkeypatch.setenv("ENGRAM_WATCHER_MODEL", "haiku")
+    assert _watcher_model() == "haiku"
+    monkeypatch.setenv("ENGRAM_WATCHER_MODEL", "sonnet")
+    assert _watcher_model() == "sonnet"
 
 
 def _wrap_claude_json(result_text: str) -> str:

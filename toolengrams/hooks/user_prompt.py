@@ -15,12 +15,19 @@ Output: {} (no injection)
 from __future__ import annotations
 
 import json
-import os
 import sys
+import time
 
 from .. import db
-from ..watcher import derive_transcript_path, spawn_watcher
+from ..utils import is_pid_alive
+from ..watcher import WATCHER_INTERVAL, derive_transcript_path, spawn_watcher
 from ._skip import is_internal_cwd
+
+# How long since the watcher's last cron tick before we treat it as dead
+# even if its PID is still around (zombie / stuck on `time.sleep`-after-fork).
+# Two intervals is the right shape: one missed tick is normal jitter; two
+# means something is genuinely wrong.
+_STALE_TICK_GRACE_SEC = WATCHER_INTERVAL * 2
 
 
 def main() -> int:
@@ -53,33 +60,39 @@ def _ensure_watcher_alive(session_id: str, cwd: str) -> None:
     # Skip ToolEngrams' own subprocess sessions (consolidation agent, etc.).
     # Without this, the consolidation agent's `claude -p` subprocess would
     # cause its own UserPromptSubmit hook to spawn a watcher on its temp
-    # transcript — heavy irrelevant deltas + wasted Haiku calls.
+    # transcript — heavy irrelevant deltas + wasted model calls.
     if is_internal_cwd(cwd):
         return
 
-    conn = db.connect()
-    try:
+    with db.session() as conn:
         row = conn.execute(
-            "SELECT watcher_pid, transcript_path FROM watcher_state "
-            "WHERE work_session_id = ?",
+            "SELECT watcher_pid, transcript_path, last_checked_ts "
+            "FROM watcher_state WHERE work_session_id = ?",
             (session_id,),
         ).fetchone()
-        if row is not None and row["watcher_pid"] and _is_pid_alive(row["watcher_pid"]):
-            return  # watcher is fine
-        # Watcher either never existed or died — spawn one.
-        transcript_path = (row["transcript_path"] if row else None) or derive_transcript_path(session_id, cwd)
-        spawn_watcher(session_id, transcript_path, cwd)
-    finally:
-        conn.close()
+    if _is_watcher_healthy(row):
+        return
+    # Watcher either never existed, died, or is stuck — spawn a fresh one.
+    transcript_path = (row["transcript_path"] if row else None) or derive_transcript_path(session_id, cwd)
+    spawn_watcher(session_id, transcript_path, cwd)
 
 
-def _is_pid_alive(pid: int) -> bool:
-    """Check if a process is still running."""
-    try:
-        os.kill(pid, 0)
-        return True
-    except OSError:
+def _is_watcher_healthy(row) -> bool:
+    """A watcher is healthy iff its PID is alive AND its last tick is recent.
+
+    The last_checked_ts check catches zombies: PID still exists but the
+    process is wedged (e.g. blocked on a never-returning subprocess.run, or
+    the cron loop hung mid-iteration). If we don't see a recent heartbeat,
+    treat it as dead and let spawn_watcher replace it.
+    """
+    if row is None:
         return False
+    if not is_pid_alive(row["watcher_pid"]):
+        return False
+    last_checked = row["last_checked_ts"] or 0
+    if last_checked and time.time() - last_checked > _STALE_TICK_GRACE_SEC:
+        return False
+    return True
 
 
 def _emit(obj: dict) -> None:

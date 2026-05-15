@@ -23,8 +23,7 @@ from ..reinforcement.counters import archive, restore, soft_demote
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
-    conn = db.connect()
-    try:
+    with db.session() as conn:
         if args.topic:
             return _forget_topic(conn, args.topic, args.delete)
         if args.restore:
@@ -33,8 +32,6 @@ def main(argv: list[str] | None = None) -> int:
             print("engram forget: provide a memory name, --topic, or --restore", file=sys.stderr)
             return 2
         return _forget_one(conn, args.name, args.delete)
-    finally:
-        conn.close()
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:

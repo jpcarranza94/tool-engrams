@@ -90,6 +90,28 @@ def test_path_with_trailing_punctuation_is_stripped():
     assert "/var/log/system.log" in globs
 
 
+def test_basename_glob_emitted_when_basename_has_dot_or_long_name():
+    """The fixed guard emits the basename glob for normal filenames."""
+    c = extract_candidates("Edit /repo/src/config.py and /repo/Makefile.native.")
+    globs = _globs(c)
+    assert "**/config.py" in globs
+    assert "**/Makefile.native" in globs
+
+
+def test_basename_glob_skipped_for_short_no_dot_basename():
+    """Boundary: 1-2 char basenames with no dot don't deserve a fan-out glob.
+
+    This pins down the corrected precedence in _extract_paths:
+        basename and "*" not in basename and ("." in basename or len > 2)
+    The buggy version was `(...and...) or len > 2`, which fired on almost
+    every basename — including 2-char ones — defeating the length guard.
+    """
+    c = extract_candidates("Look at /tmp/bc for the data.")
+    globs = _globs(c)
+    assert "/tmp/bc" in globs
+    assert "**/bc" not in globs
+
+
 # ---------- URL extraction ----------
 
 

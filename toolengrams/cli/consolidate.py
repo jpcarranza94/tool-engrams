@@ -17,6 +17,7 @@ from datetime import date, timedelta
 from .. import db
 from ..consolidation.agent import run_consolidation_agent
 from ..consolidation.collect import collect_sessions
+from ..consolidation.schedule import install_schedule, uninstall_schedule
 
 
 # Session surfaces older than this are cleaned up.
@@ -27,20 +28,17 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
 
     if args.install_schedule:
-        from ..consolidation.schedule import install_schedule
-        path = install_schedule(use_agent=True)
+        path = install_schedule()
         print(json.dumps({"action": "schedule_installed", "plist_path": path}))
         return 0
     if args.uninstall_schedule:
-        from ..consolidation.schedule import uninstall_schedule
         removed = uninstall_schedule()
         print(json.dumps({"action": "schedule_uninstalled", "was_installed": removed}))
         return 0
 
     target = _resolve_date(args)
-    conn = db.connect()
 
-    try:
+    with db.session() as conn:
         # Idempotency.
         if not args.force:
             existing = conn.execute(
@@ -122,8 +120,6 @@ def main(argv: list[str] | None = None) -> int:
             print(result.report or "Agent produced no report.")
 
         return 0 if not result.error else 1
-    finally:
-        conn.close()
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:

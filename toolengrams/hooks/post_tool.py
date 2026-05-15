@@ -47,8 +47,7 @@ def _run(payload: dict[str, Any]) -> int:
         return 0
 
     now_ts = int(time.time())
-    conn = db.connect()
-    try:
+    with db.session() as conn:
         if not is_error:
             memory_ids = get_tool_call_surfaces(
                 conn, session_id, tool_use_id, "pre_tool_use",
@@ -56,8 +55,6 @@ def _run(payload: dict[str, Any]) -> int:
             bump_useful_counts(conn, memory_ids)
 
         increment_session_turn(conn, session_id, now_ts)
-    finally:
-        conn.close()
 
     _emit({})
     return 0
