@@ -19,7 +19,8 @@ CREATE TABLE IF NOT EXISTS memories (
     surface_count    INTEGER NOT NULL DEFAULT 0,
     useful_count     INTEGER NOT NULL DEFAULT 0,
     pinned           INTEGER NOT NULL DEFAULT 0,
-    archived_ts      INTEGER
+    archived_ts      INTEGER,
+    last_verified_ts INTEGER DEFAULT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_memories_scope

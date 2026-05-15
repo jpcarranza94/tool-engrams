@@ -9,9 +9,15 @@
   - `WHITELIST` is the set of tool names whose calls carry user-facing memory
     bindings — shared by pretool.py and post_tool_failure.py so we never
     drift on which tools surface memories.
+
+  - `max_memories_per_call()` returns the per-call cap on injected memories.
+    Char-bounded truncation downstream still kicks in, but a hard count cap
+    prevents a noisy first-token bucket from spraying Claude's context.
 """
 
 from __future__ import annotations
+
+import os
 
 # Tools whose pre/post-failure events trigger memory surfacing. New tools
 # added to Claude Code that should bind memories go here, not in two places.
@@ -19,6 +25,20 @@ WHITELIST: frozenset[str] = frozenset({
     "Bash", "Read", "Edit", "Write", "MultiEdit", "Grep", "Glob",
     "WebFetch", "NotebookEdit",
 })
+
+DEFAULT_MAX_MEMORIES_PER_CALL = 2
+
+
+def max_memories_per_call() -> int:
+    """Per-call ceiling on surfaced memories. Override via $ENGRAM_MAX_MEMORIES_PER_CALL."""
+    raw = os.environ.get("ENGRAM_MAX_MEMORIES_PER_CALL")
+    if raw is None:
+        return DEFAULT_MAX_MEMORIES_PER_CALL
+    try:
+        n = int(raw)
+    except ValueError:
+        return DEFAULT_MAX_MEMORIES_PER_CALL
+    return max(1, n)
 
 # Temp dir basenames that identify non-user (ToolEngrams-internal) sessions.
 # Match by prefix on the cwd basename.

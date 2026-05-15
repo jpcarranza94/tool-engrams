@@ -24,6 +24,7 @@ from .cli import (
     remember,
     seed,
     status,
+    verify,
 )
 from .hooks import (
     post_tool,
@@ -39,6 +40,7 @@ from .hooks import (
 _SELF_PARSING = {
     "remember": remember.main,
     "forget": forget.main,
+    "verify": verify.main,
     "pin": pin.main,
     "recall": recall.main,
     "consolidate": consolidate.main,
@@ -71,6 +73,7 @@ def main(argv: list[str] | None = None) -> int:
     # Listed so --help shows them, but dispatch goes through _SELF_PARSING above.
     sub.add_parser("remember", help="Extract triggers from body text and insert a memory", add_help=False)
     sub.add_parser("forget", help="Soft-demote or archive a memory", add_help=False)
+    sub.add_parser("verify", help="Mark a memory as still accurate (last_verified_ts = now)", add_help=False)
     sub.add_parser("pin", help="Pin/unpin a memory", add_help=False)
     sub.add_parser("recall", help="Browse and search the memory store", add_help=False)
     sub.add_parser("consolidate", help="Nightly consolidation — replay and prune", add_help=False)
