@@ -49,6 +49,10 @@ CREATE TABLE IF NOT EXISTS session_surfaces (
     hook             TEXT NOT NULL,
     tool_use_id      TEXT,
     turn_at_surface  INTEGER,
+    first_token      TEXT,
+    outcome          TEXT
+        CHECK (outcome IS NULL OR outcome IN ('helpful', 'unused', 'noise'))
+        DEFAULT NULL,
     PRIMARY KEY (session_id, memory_id, surfaced_ts)
 );
 
@@ -60,6 +64,10 @@ CREATE INDEX IF NOT EXISTS idx_session_surfaces_ts
 
 CREATE INDEX IF NOT EXISTS idx_session_surfaces_turn
     ON session_surfaces(session_id, turn_at_surface);
+
+CREATE INDEX IF NOT EXISTS idx_session_surfaces_failure_token
+    ON session_surfaces(session_id, hook, first_token)
+    WHERE hook = 'post_tool_use_failure' AND outcome IS NULL;
 
 -- Per-session tool-call counter.
 CREATE TABLE IF NOT EXISTS session_turns (

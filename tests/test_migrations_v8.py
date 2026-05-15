@@ -19,13 +19,14 @@ def test_fresh_db_has_last_verified_ts(tmp_path: Path):
     conn.close()
 
 
-def test_v7_db_upgrades_to_v8(tmp_path: Path):
-    # Build a v7 DB manually by applying the schema then forcing user_version=7.
+def test_v7_db_upgrades_through_all_pending(tmp_path: Path):
+    """A simulated v7 DB upgrades cleanly through every pending migration."""
     path = tmp_path / "v7.sqlite"
     raw = sqlite3.connect(str(path))
     raw.executescript(db.SCHEMA_PATH.read_text())
-    # Strip the new column to simulate a real v7 DB without it.
+    # Strip post-v7 columns/indices to simulate a real v7 DB.
     raw.executescript("""
+        DROP INDEX IF EXISTS idx_session_surfaces_failure_token;
         ALTER TABLE memories RENAME TO memories_tmp;
         CREATE TABLE memories (
             id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -48,21 +49,41 @@ def test_v7_db_upgrades_to_v8(tmp_path: Path):
                    pinned, archived_ts
             FROM memories_tmp;
         DROP TABLE memories_tmp;
+
+        ALTER TABLE session_surfaces RENAME TO session_surfaces_tmp;
+        CREATE TABLE session_surfaces (
+            session_id       TEXT NOT NULL,
+            memory_id        INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+            surfaced_ts      INTEGER NOT NULL,
+            hook             TEXT NOT NULL,
+            tool_use_id      TEXT,
+            turn_at_surface  INTEGER,
+            PRIMARY KEY (session_id, memory_id, surfaced_ts)
+        );
+        INSERT INTO session_surfaces
+            SELECT session_id, memory_id, surfaced_ts, hook, tool_use_id, turn_at_surface
+            FROM session_surfaces_tmp;
+        DROP TABLE session_surfaces_tmp;
     """)
     raw.execute("PRAGMA user_version = 7")
     raw.commit()
     raw.close()
 
-    # Sanity: column doesn't exist yet on this simulated v7 DB.
     raw = sqlite3.connect(str(path))
     cols_before = {r[1] for r in raw.execute("PRAGMA table_info(memories)").fetchall()}
     assert "last_verified_ts" not in cols_before
+    surf_cols_before = {r[1] for r in raw.execute("PRAGMA table_info(session_surfaces)").fetchall()}
+    assert "first_token" not in surf_cols_before
+    assert "outcome" not in surf_cols_before
     raw.close()
 
-    # Open via db.connect → migration runs.
+    # Open via db.connect → migrations v8 + v9 run in sequence.
     conn = db.connect(path)
     cols_after = {r[1] for r in conn.execute("PRAGMA table_info(memories)").fetchall()}
     assert "last_verified_ts" in cols_after
+    surf_cols_after = {r[1] for r in conn.execute("PRAGMA table_info(session_surfaces)").fetchall()}
+    assert "first_token" in surf_cols_after
+    assert "outcome" in surf_cols_after
     version = conn.execute("PRAGMA user_version").fetchone()[0]
     assert version == db.SCHEMA_VERSION
     conn.close()

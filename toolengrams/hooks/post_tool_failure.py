@@ -111,8 +111,10 @@ def _run(payload: dict[str, Any]) -> int:
 
         memory_ids = [c.memory_id for c in fresh]
         current_turn = get_session_turn(conn, session_id)
+        first_token = hint.tokens[0] if hint.tokens else None
         log_surfaces(conn, session_id, memory_ids, tool_use_id,
-                     "post_tool_use_failure", current_turn, now_ts)
+                     "post_tool_use_failure", current_turn, now_ts,
+                     first_token=first_token)
         bump_surface_counts(conn, memory_ids, now_ts)
 
     _emit({

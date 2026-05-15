@@ -27,9 +27,16 @@ Use Grep to find "PreToolUse", "PostToolUseFailure", and "[memory:" in the JSONL
 
 This is equally important as discovery. Look for:
 - **Noisy memories** -- high surface_count, low useful_count. If a memory fires often without helping, it's noise.
+- **Memories flagged 'unused' or 'noise'** -- query `session_surfaces.outcome` for negative judgments accumulated since the last consolidation run. A memory with multiple `outcome='unused'` rows (Claude actively rejected the hint) or `outcome='noise'` rows (a prior consolidation marked it) is a strong prune candidate, often stronger than usefulness ratio alone. Use SQL like `SELECT memory_id, COUNT(*) FROM session_surfaces WHERE outcome IN ('unused','noise') GROUP BY memory_id`.
 - **Duplicate memories** -- two memories with overlapping triggers and similar content. Keep the better-scoped one, forget the other.
-- **Stale memories** -- facts that are no longer true (infrastructure moved, APIs changed, repos restructured).
+- **Stale memories** -- facts that are no longer true (infrastructure moved, APIs changed, repos restructured). See Task 5 for the git-aware audit.
 - **Generic knowledge** -- memories that describe things Claude already knows (standard CLI flags, common framework commands, obvious patterns). These just add latency without changing behavior.
+
+When you decide a memory is noise (regardless of how you concluded it), set its surface outcomes to `'noise'` retrospectively so future consolidation runs can spot the pattern:
+```
+UPDATE session_surfaces SET outcome = 'noise' WHERE memory_id = <N> AND outcome IS NULL;
+```
+This is a `Bash(sqlite3 ...)` operation, not an engram CLI command — surfaced for completeness.
 
 ### 3. Discover new memories (HIGH BAR)
 
@@ -128,6 +135,7 @@ Before the JSON block, include a human-readable report with:
 - `Bash(engram forget --delete "name")` -- archive a memory
 - `Bash(engram forget --restore "name")` -- undo a previous archive (use if a teammate or a prior run was over-eager)
 - `Bash(engram verify "name")` -- mark a memory's body as still accurate (sets last_verified_ts = now); use after auditing it against git history and finding no contradiction
+- `Bash(engram skip "name" --session-id <S>)` -- mark a memory's most recent unmarked surface as outcome='unused' in a specific session. Useful for retrospectively flagging surfaces that you judged unhelpful while reviewing session transcripts.
 - `Bash(engram resolve-slug <slug>)` -- reverse a project slug to candidate repo paths on disk; returns `{{"best": "/path", "candidates": [...]}}` or empty candidates if the repo is gone
 - `Bash(engram remember "body" --trigger "token seq" --kind K --scope S --name "name")` -- create a memory
 - `Bash(engram status)` -- system health
