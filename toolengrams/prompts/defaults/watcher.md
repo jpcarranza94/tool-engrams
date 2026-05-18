@@ -171,11 +171,11 @@ Example 1 (block -- clear correction, prevents the error):
   "name": "jira-staging-qc-slash-format",
   "body": "Without this memory, Claude would use 'In staging QC' causing 'invalid transition state'. The correct Jira state is 'In Staging/QC' with forward slash.",
   "kind": "block",
-  "scope": "project",
+  "scope": "global",
   "triggers": ["jira issue move"],
   "paths": []
 }}]}}
-Note: "jira issue move" is ONE string → one trigger with 3 tokens.
+Note: "jira issue move" is ONE string → one trigger with 3 tokens. scope=global because Jira state names are an org-wide convention — Claude needs this from any cwd, not only when working in one repo.
 
 Example 2 (block -- multiple alternative triggers):
 {{"action": "create", "memories": [{{

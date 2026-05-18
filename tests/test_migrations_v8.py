@@ -64,6 +64,31 @@ def test_v7_db_upgrades_through_all_pending(tmp_path: Path):
             SELECT session_id, memory_id, surfaced_ts, hook, tool_use_id, turn_at_surface
             FROM session_surfaces_tmp;
         DROP TABLE session_surfaces_tmp;
+
+        ALTER TABLE consolidation_runs RENAME TO consolidation_runs_tmp;
+        CREATE TABLE consolidation_runs (
+            id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_date               TEXT NOT NULL UNIQUE,
+            started_ts             INTEGER NOT NULL,
+            completed_ts           INTEGER,
+            sessions_scanned       INTEGER NOT NULL DEFAULT 0,
+            episodes_evaluated     INTEGER NOT NULL DEFAULT 0,
+            memories_strengthened  INTEGER NOT NULL DEFAULT 0,
+            memories_weakened      INTEGER NOT NULL DEFAULT 0,
+            memories_archived      INTEGER NOT NULL DEFAULT 0,
+            memories_discovered    INTEGER NOT NULL DEFAULT 0,
+            quality_score          REAL,
+            surfaces_helpful       INTEGER NOT NULL DEFAULT 0,
+            surfaces_noise         INTEGER NOT NULL DEFAULT 0,
+            report                 TEXT
+        );
+        INSERT INTO consolidation_runs
+            SELECT id, run_date, started_ts, completed_ts, sessions_scanned,
+                   episodes_evaluated, memories_strengthened, memories_weakened,
+                   memories_archived, memories_discovered, quality_score,
+                   surfaces_helpful, surfaces_noise, report
+            FROM consolidation_runs_tmp;
+        DROP TABLE consolidation_runs_tmp;
     """)
     raw.execute("PRAGMA user_version = 7")
     raw.commit()
