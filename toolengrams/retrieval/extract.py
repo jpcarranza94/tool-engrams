@@ -70,32 +70,74 @@ def _extract_from_bash(tool_input: dict[str, Any], hint: ExtractedTriggerHint) -
             hint.paths.append(match)
 
 
-# Delimiters inside a single shell token whose parts are usually treated as
-# separate semantic atoms by humans writing triggers. Splitting on these at
-# extract time lets a trigger like [ssh, 35.165.82.51] match a call
-# `ssh ubuntu@35.165.82.51 …` whose shlex token is `ubuntu@35.165.82.51`.
-# Kept narrow — we don't split on `/` (paths go through path_glob), nor `=`
-# (breaks common flags like --foo=bar that a user might type verbatim).
-_EXPAND_DELIMS = ("@",)
-
-
 def _expand_compound_tokens(tokens: list[str]) -> list[str]:
-    """Return `tokens` plus the delimiter-split parts of each token.
+    """Return `tokens` plus the parts of each compound token that humans
+    typically treat as separate semantic atoms.
 
-    Preserves order and original tokens. For `ubuntu@35.165.82.51`, the
-    returned list contains the original AND `ubuntu`, `35.165.82.51` inline.
-    This keeps subsequence matching semantics intact while widening what
-    parts-of-compound-tokens can match.
+    Preserves order and original tokens; just adds peeled-off parts inline
+    so subsequence matching can hit either the original or the part.
+
+    Three compound shapes are unpacked:
+
+    1. ``--flag=value`` → also yields ``--flag`` and ``value`` separately.
+       This is the headline fix: triggers like ``["aws","logs","tail","--start-time"]``
+       used to never match real calls because shlex keeps
+       ``--start-time=2026-01-01`` as one token.
+
+    2. URLs (``http://...``, ``https://...``) → also yields the host
+       and optionally the first path segment. Triggers like
+       ``["curl","jenkins.ergeon.in"]`` used to never match real calls
+       because shlex keeps the entire ``https://jenkins.ergeon.in/api/v1``
+       as one token.
+
+    3. ``user@host`` → also yields ``user`` and ``host`` separately.
+       Pre-existing behavior; preserved.
+
+    We don't split on ``/`` (paths go through path_glob).
     """
     out: list[str] = []
     for tok in tokens:
         out.append(tok)
-        for d in _EXPAND_DELIMS:
-            if d in tok:
-                for part in tok.split(d):
-                    if part and part not in out:
-                        out.append(part)
-                break
+        for part in _compound_parts(tok):
+            if part and part not in out:
+                out.append(part)
+    return out
+
+
+def _compound_parts(tok: str) -> list[str]:
+    """Extra atoms to surface alongside `tok` for subsequence matching."""
+    # URL host (handle before flag/at — URL hosts can legitimately contain @/=).
+    lower = tok.lower()
+    if lower.startswith(("http://", "https://")):
+        return _url_parts(tok)
+    # Flag with value: --foo=bar → ["--foo", "bar"]; -X=Y likewise.
+    if tok.startswith("-") and "=" in tok:
+        flag, _, val = tok.partition("=")
+        parts: list[str] = []
+        if flag:
+            parts.append(flag)
+        if val:
+            parts.append(val)
+        return parts
+    # user@host or ec2-user@1.2.3.4 → ["user", "host"]
+    if "@" in tok:
+        return [p for p in tok.split("@") if p]
+    return []
+
+
+def _url_parts(tok: str) -> list[str]:
+    """Strip scheme, extract host + first path segment from a URL token."""
+    after_scheme = tok.split("://", 1)[1] if "://" in tok else tok
+    # Drop query / fragment before splitting on '/'.
+    after_scheme = after_scheme.split("?", 1)[0].split("#", 1)[0]
+    segments = [s for s in after_scheme.split("/") if s]
+    if not segments:
+        return []
+    out = [segments[0]]  # host
+    # First path segment too — lets triggers like ["curl", "session"] match
+    # ``curl http://localhost:4096/session``.
+    if len(segments) > 1:
+        out.append(segments[1])
     return out
 
 
