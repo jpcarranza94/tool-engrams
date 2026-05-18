@@ -27,9 +27,16 @@ Use Grep to find "PreToolUse", "PostToolUseFailure", and "[memory:" in the JSONL
 
 This is equally important as discovery. Look for:
 - **Noisy memories** -- high surface_count, low useful_count. If a memory fires often without helping, it's noise.
+- **Memories flagged 'unused' or 'noise'** -- query `session_surfaces.outcome` for negative judgments accumulated since the last consolidation run. A memory with multiple `outcome='unused'` rows (Claude actively rejected the hint) or `outcome='noise'` rows (a prior consolidation marked it) is a strong prune candidate, often stronger than usefulness ratio alone. Use SQL like `SELECT memory_id, COUNT(*) FROM session_surfaces WHERE outcome IN ('unused','noise') GROUP BY memory_id`.
 - **Duplicate memories** -- two memories with overlapping triggers and similar content. Keep the better-scoped one, forget the other.
-- **Stale memories** -- facts that are no longer true (infrastructure moved, APIs changed, repos restructured).
+- **Stale memories** -- facts that are no longer true (infrastructure moved, APIs changed, repos restructured). See Task 5 for the git-aware audit.
 - **Generic knowledge** -- memories that describe things Claude already knows (standard CLI flags, common framework commands, obvious patterns). These just add latency without changing behavior.
+
+When you decide a memory is noise (regardless of how you concluded it), retroactively mark its surfaces so future consolidation runs can spot the pattern:
+
+`Bash(engram mark-noise "<name>")` — marks ALL unmarked surfaces of the memory across every session as `outcome='noise'`. Use `--session-id <S>` to scope to a single session. Prefer this over bare `Bash(sqlite3 UPDATE …)` so the CHECK constraint stays enforced centrally.
+
+Note: `outcome='helpful'` is only ever set by automatic reinforcement on success — block memories live on the PreToolUse track and deny the call before there's a success/failure arc, so they never accumulate `outcome='helpful'`. Don't read absence of helpful outcomes on a block as a prune signal; use surface_count / useful_count instead.
 
 ### 3. Discover new memories (HIGH BAR)
 
@@ -128,6 +135,8 @@ Before the JSON block, include a human-readable report with:
 - `Bash(engram forget --delete "name")` -- archive a memory
 - `Bash(engram forget --restore "name")` -- undo a previous archive (use if a teammate or a prior run was over-eager)
 - `Bash(engram verify "name")` -- mark a memory's body as still accurate (sets last_verified_ts = now); use after auditing it against git history and finding no contradiction
+- `Bash(engram skip "name" --session-id <S>)` -- mark a memory's most recent unmarked surface as outcome='unused' in a specific session. Useful for retrospectively flagging surfaces that you judged unhelpful while reviewing session transcripts.
+- `Bash(engram mark-noise "name")` -- retroactively label a memory's unmarked surfaces as outcome='noise'. Add `--session-id <S>` to scope to one session. Use when concluding a memory is noise during consolidation rather than running raw `Bash(sqlite3 UPDATE …)` SQL.
 - `Bash(engram resolve-slug <slug>)` -- reverse a project slug to candidate repo paths on disk; returns `{{"best": "/path", "candidates": [...]}}` or empty candidates if the repo is gone
 - `Bash(engram remember "body" --trigger "token seq" --kind K --scope S --name "name")` -- create a memory
 - `Bash(engram status)` -- system health

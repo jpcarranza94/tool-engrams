@@ -16,6 +16,7 @@ from .cli import (
     consolidate,
     dashboard,
     forget,
+    mark_noise,
     migrate_v1_to_v2,
     monitor,
     pin,
@@ -24,6 +25,7 @@ from .cli import (
     remember,
     resolve_slug,
     seed,
+    skip,
     status,
     verify,
 )
@@ -42,6 +44,8 @@ _SELF_PARSING = {
     "remember": remember.main,
     "forget": forget.main,
     "verify": verify.main,
+    "skip": skip.main,
+    "mark-noise": mark_noise.main,
     "resolve-slug": resolve_slug.main,
     "pin": pin.main,
     "recall": recall.main,
@@ -76,6 +80,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("remember", help="Extract triggers from body text and insert a memory", add_help=False)
     sub.add_parser("forget", help="Soft-demote or archive a memory", add_help=False)
     sub.add_parser("verify", help="Mark a memory as still accurate (last_verified_ts = now)", add_help=False)
+    sub.add_parser("skip", help="Mark the most recent surface of a memory as unused (negative signal)", add_help=False)
+    sub.add_parser("mark-noise", help="Retroactively mark unmarked surfaces of a memory as noise", add_help=False)
     sub.add_parser("resolve-slug", help="Reverse a Claude Code project slug to candidate paths", add_help=False)
     sub.add_parser("pin", help="Pin/unpin a memory", add_help=False)
     sub.add_parser("recall", help="Browse and search the memory store", add_help=False)
