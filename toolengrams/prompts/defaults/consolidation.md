@@ -28,7 +28,10 @@ Use Grep to find "PreToolUse", "PostToolUseFailure", and "[memory:" in the JSONL
 This is equally important as discovery. Look for:
 - **Noisy memories** -- high surface_count, low useful_count. If a memory fires often without helping, it's noise.
 - **Memories flagged 'unused' or 'noise'** -- query `session_surfaces.outcome` for negative judgments accumulated since the last consolidation run. A memory with multiple `outcome='unused'` rows (Claude actively rejected the hint) or `outcome='noise'` rows (a prior consolidation marked it) is a strong prune candidate, often stronger than usefulness ratio alone. Use SQL like `SELECT memory_id, COUNT(*) FROM session_surfaces WHERE outcome IN ('unused','noise') GROUP BY memory_id`.
-- **Duplicate memories** -- two memories with overlapping triggers and similar content. Keep the better-scoped one, forget the other.
+- **Duplicate memories** -- two memories with overlapping triggers and similar content. When deciding which to keep:
+  - **Prefer reach over specificity.** A `global`-scoped memory with a short trigger (e.g. `["jira","issue","move"]`) fires from any cwd; a `project`-scoped memory only fires when the user's cwd matches *exactly* (no parent-prefix matching). Don't archive the broad-global memory in favor of a narrower project-scoped one — even if the project-scoped one looks "more specific," it will silently fail to fire when the user runs the same command from a parent dir, a sibling repo, or a subdirectory.
+  - **Check that the surviving trigger can actually match real calls.** Triggers like `["jira","issue","move","SYS"]` look correct but never fire because `SYS` doesn't equal `SYS-6899` under token-equality subsequence matching. Before archiving the alternative, verify the survivor has at least one trigger that has actually fired (`surface_count > 0`) — if neither has surfaced, prefer the one whose tokens match how the command is actually typed.
+  - **Scope-promote when archiving narrow memories.** If you're about to archive a project-scoped duplicate of a global one, first ask: does the body genuinely depend on the repo? If not, the project version was mis-scoped at formation time; record the body as a global memory under a fresh name and then archive both project copies.
 - **Stale memories** -- facts that are no longer true (infrastructure moved, APIs changed, repos restructured). See Task 5 for the git-aware audit.
 - **Generic knowledge** -- memories that describe things Claude already knows (standard CLI flags, common framework commands, obvious patterns). These just add latency without changing behavior.
 
@@ -52,7 +55,7 @@ What qualifies (in order of value):
 
 3. **Non-obvious tool patterns** -- a command that required trial-and-error, an API with surprising flags, a workaround. Things not in --help output. kind=hint.
 
-4. **Project-specific context that binds to a tool** -- "this repo's test command uses REUSE_DB=1", "deploy requires cd into frontend/ first". kind=hint, scope=project.
+4. **Project-specific context that binds to a tool** -- "this repo's test command uses REUSE_DB=1", "deploy requires cd into frontend/ first". kind=hint, scope=project. **Default is global.** Pick project only when the body would be wrong outside this exact repo. Org-wide workflow rules (Jira state names, GitHub conventions, deploy procedures shared across services) are global, even if observed during work on one project — the cwd filter is exact-string match, so a project-scoped memory silently fails to fire from any other cwd.
 
 5. **Code-area conventions** -- rules that apply to files matching a pattern. Use --path with a glob ("**/billing/*.py"). Only if the rule is NON-OBVIOUS from reading the code.
 
@@ -72,7 +75,7 @@ What does NOT qualify:
   - Use --trigger to specify the required token sequence (repeatable). Match is subsequence so "git push --force" fires on "git push -v --force origin main". Triggers must be 2+ tokens unless the first token is itself highly specific.
   - Use --path for file path globs (e.g. --path "**/billing/*.py")
   - kind=block denies the call at PreToolUse (rare); kind=hint injects context at PostToolUseFailure (default)
-  - scope=project for repo-specific patterns (default), scope=global ONLY for universal tool knowledge
+  - **scope=global is the default.** scope=project ONLY for patterns whose body would be wrong/misleading outside this exact repo. The cwd filter is exact-string match — a project-scoped memory bound to `/path/foo` won't fire from `/path/foo/sub` or any sibling. When in doubt, global.
 - NEVER include API keys, passwords, tokens, secrets, or connection strings
 
 ### 5. Git-aware staleness audit

@@ -25,8 +25,17 @@ Each memory you create has these fields:
 - **body**: starts with "Without this memory, Claude would..." then describes
   the pattern. Max 250 chars. Must be specific and actionable.
 - **kind**: determines WHEN and HOW the memory surfaces (see "Two kinds" below)
-- **scope**: "project" (only surfaces in this repo) or "global" (surfaces
-  everywhere). Default to "project" unless the knowledge is universal.
+- **scope**: "global" (surfaces from any cwd) or "project" (surfaces ONLY when
+  the user's cwd EXACTLY matches the repo where this session ran). **Default
+  to "global".** Pick "project" only if the body would be wrong or misleading
+  in any other repo — e.g. "in *this* repo, tests run with `REUSE_DB=1`",
+  "the deploy script *in this repo* expects an env file at X". Org-wide
+  workflow rules (Jira state names, GitHub conventions, deploy procedures
+  shared across services) are NOT project-specific even if you observed them
+  during work on one project. The cwd filter is **exact-string match** —
+  a project-scoped memory bound to `/Users/jpcar/projects/foo` will NOT
+  fire from `/Users/jpcar/projects/foo/subdir` nor from a sibling repo.
+  When in doubt, "global" is the safer default.
 - **triggers**: array of command-prefix STRINGS (see "Triggers" below).
   Each string is a COMPLETE multi-word trigger phrase like "jira issue move"
   or "git push --force". Do NOT split tokens into separate array elements —
@@ -84,11 +93,25 @@ Multiple triggers in the array means multiple ALTERNATIVE patterns:
 
 Rules:
 - **First token MUST be the literal command name** (e.g. `ssh`, `bq`,
-  `git`, `ergdb`, `kubectl`).
+  `git`, `ergdb`, `kubectl`). Not a flag, not a path, not an env-var
+  assignment. The formation layer rejects malformed first tokens.
 - Each trigger string must have 2+ words. Never a single word like
   "git" or "python3" — too broad, fires on everything.
 - Think about surfacing frequency: overly specific triggers may never
   fire. `"llama-server"` is better than `"llama-server -ctk q8_0"`.
+- **Token matching is EXACT, not prefix.** A trigger token `SYS` will
+  NOT match a call with `SYS-6899` in it — those are different tokens.
+  If the body's example uses a ticket ID like `SYS-1234`, write the
+  trigger as `"jira issue move"` (without the ID prefix) so it fires
+  on any ticket, not just literal `SYS`.
+- **Flag-with-value forms are handled automatically.** A trigger token
+  `--start-time` will match both `--start-time 2026-01-01` (separate
+  tokens) and `--start-time=2026-01-01` (one shlex token) — the system
+  splits `--flag=value` at extract time. Write triggers as the bare
+  flag without the `=value`.
+- **URL host triggers are handled automatically.** A trigger token
+  `jenkins.ergeon.in` will match `curl https://jenkins.ergeon.in/api/...`
+  because the URL host is peeled off. Write the host bare, no scheme.
 
 ## Path memories (file-bound knowledge)
 
