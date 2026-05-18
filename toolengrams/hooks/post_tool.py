@@ -3,12 +3,18 @@
 Bumps useful_count for memories that were surfaced on this tool call and
 increments the per-session turn counter.
 
+Two reinforcement paths, both wrapped in a single transaction so the
+useful_count bump and the surface-row outcome marker land together. A
+crash between them would leave the next same-first_token success
+double-crediting the same prior failure surface.
+
 Output: {} (no injection).
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import sys
 import time
 from typing import Any
@@ -17,12 +23,15 @@ from .. import db
 from ..reinforcement.counters import bump_useful_counts
 from ..retrieval.extract import extract_hints
 from ..retrieval.session_state import (
+    HOOK_POST_TOOL_USE_FAILURE,
+    HOOK_PRE_TOOL_USE,
     get_prior_failure_surfaces,
     get_tool_call_surfaces,
     increment_session_turn,
     mark_surface_outcome,
 )
-from ._skip import WHITELIST
+
+logger = logging.getLogger("engram.post_tool")
 
 
 def main() -> int:
@@ -53,24 +62,25 @@ def _run(payload: dict[str, Any]) -> int:
     now_ts = int(time.time())
     with db.session() as conn:
         if not is_error:
-            # (1) Pre-tool surfaces from this exact call: bump useful_count
-            #     and mark the surface row 'helpful'.
-            pre_ids = get_tool_call_surfaces(
-                conn, session_id, tool_use_id, "pre_tool_use",
-            )
-            if pre_ids:
-                bump_useful_counts(conn, pre_ids)
-                mark_surface_outcome(
-                    conn, session_id, pre_ids, "helpful",
-                    hook="pre_tool_use",
+            with db.transaction(conn):
+                # (1) Pre-tool surfaces from this exact call: bump useful_count
+                #     and mark the surface row 'helpful'.
+                pre_ids = get_tool_call_surfaces(
+                    conn, session_id, tool_use_id, HOOK_PRE_TOOL_USE,
                 )
+                if pre_ids:
+                    bump_useful_counts(conn, pre_ids)
+                    mark_surface_outcome(
+                        conn, session_id, pre_ids, "helpful",
+                        hook=HOOK_PRE_TOOL_USE,
+                    )
 
-            # (2) Prior failure surfaces in this session with matching
-            #     first_token: same-shape call now succeeded, so credit the
-            #     hint. Only whitelisted tools (others have no useful
-            #     first_token extraction).
-            tool_name = payload.get("tool_name") or ""
-            if tool_name in WHITELIST:
+                # (2) Prior failure surfaces in this session with matching
+                #     first_token: same-shape call now succeeded, so credit
+                #     the hint. Non-whitelisted tools just produce empty
+                #     hint.tokens, so the `if first_token:` short-circuits
+                #     naturally — no explicit WHITELIST check needed.
+                tool_name = payload.get("tool_name") or ""
                 hint = extract_hints(tool_name, payload.get("tool_input") or {})
                 first_token = hint.tokens[0] if hint.tokens else None
                 if first_token:
@@ -81,8 +91,12 @@ def _run(payload: dict[str, Any]) -> int:
                         bump_useful_counts(conn, failure_ids)
                         mark_surface_outcome(
                             conn, session_id, failure_ids, "helpful",
-                            hook="post_tool_use_failure",
+                            hook=HOOK_POST_TOOL_USE_FAILURE,
                             first_token=first_token,
+                        )
+                        logger.info(
+                            "credited failure surfaces session=%s first_token=%s memory_ids=%s",
+                            session_id, first_token, failure_ids,
                         )
 
         increment_session_turn(conn, session_id, now_ts)

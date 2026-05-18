@@ -43,6 +43,7 @@ from ..reinforcement.counters import bump_surface_counts
 from ..retrieval.extract import extract_hints
 from ..retrieval.rank import now, retrieve_candidates
 from ..retrieval.session_state import (
+    HOOK_POST_TOOL_USE_FAILURE,
     get_already_surfaced,
     get_session_turn,
     log_surfaces,
@@ -113,7 +114,7 @@ def _run(payload: dict[str, Any]) -> int:
         current_turn = get_session_turn(conn, session_id)
         first_token = hint.tokens[0] if hint.tokens else None
         log_surfaces(conn, session_id, memory_ids, tool_use_id,
-                     "post_tool_use_failure", current_turn, now_ts,
+                     HOOK_POST_TOOL_USE_FAILURE, current_turn, now_ts,
                      first_token=first_token)
         bump_surface_counts(conn, memory_ids, now_ts)
 
