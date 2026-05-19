@@ -171,11 +171,11 @@ Example 1 (block -- clear correction, prevents the error):
   "name": "jira-staging-qc-slash-format",
   "body": "Without this memory, Claude would use 'In staging QC' causing 'invalid transition state'. The correct Jira state is 'In Staging/QC' with forward slash.",
   "kind": "block",
-  "scope": "project",
+  "scope": "global",
   "triggers": ["jira issue move"],
   "paths": []
 }}]}}
-Note: "jira issue move" is ONE string → one trigger with 3 tokens.
+Note: "jira issue move" is ONE string → one trigger with 3 tokens. scope=global because Jira state names are an org-wide convention — Claude needs this from any cwd, not only when working in one repo.
 
 Example 2 (block -- multiple alternative triggers):
 {{"action": "create", "memories": [{{
@@ -193,11 +193,11 @@ Example 3 (hint -- conditional, depends on context):
   "name": "llama-server-kv-cache-oom-fix",
   "body": "Without this memory, Claude would OOM running 26B+ models with 128K context. Use -ctk q8_0 -ctv q8_0 to quantize KV cache, reducing from ~10GB to ~2GB.",
   "kind": "hint",
-  "scope": "project",
+  "scope": "global",
   "triggers": ["llama-server -c"],
   "paths": []
 }}]}}
-Note: "llama-server -c" fires when context size is specified.
+Note: "llama-server -c" fires when context size is specified. scope=global because llama.cpp KV-cache tuning is a model-runtime fact — true in any cwd, not specific to one repo.
 
 Example 4 (path -- code-area convention):
 {{"action": "create", "memories": [{{
@@ -208,6 +208,7 @@ Example 4 (path -- code-area convention):
   "triggers": [],
   "paths": ["**/deploy.sh", "**/env/*.gpg"]
 }}]}}
+Note: scope=project is correct here because the body describes a convention specific to *this* repo's deploy script + GPG files. Path-glob memories are usually project-bound: an `**/deploy.sh` pattern matches whatever `deploy.sh` exists in the current repo, and the rule typically wouldn't transfer to a different project's `deploy.sh`. Keep scope=project for path-bound conventions; flip to global only if the rule genuinely applies to *every* file matching the glob across all repos.
 
 Example 5 (path -- architectural knowledge):
 {{"action": "create", "memories": [{{

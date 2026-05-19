@@ -6,7 +6,7 @@ import time
 
 from toolengrams.formation.candidates import FormationCandidate
 from toolengrams.formation.triggers import (
-    _first_token_looks_like_cli,
+    first_token_looks_like_cli,
     insert_candidate_triggers,
 )
 
@@ -22,24 +22,24 @@ def _seed_memory(conn) -> int:
 
 
 def test_valid_first_tokens_pass():
-    assert _first_token_looks_like_cli("git")
-    assert _first_token_looks_like_cli("aws")
-    assert _first_token_looks_like_cli("python3")
-    assert _first_token_looks_like_cli("openai.com")  # WebFetch host
-    assert _first_token_looks_like_cli("ergeon-cli")  # hyphenated CLI name
-    assert _first_token_looks_like_cli("_internal")
-    assert _first_token_looks_like_cli("jira.ergeon.in")
+    assert first_token_looks_like_cli("git")
+    assert first_token_looks_like_cli("aws")
+    assert first_token_looks_like_cli("python3")
+    assert first_token_looks_like_cli("openai.com")  # WebFetch host
+    assert first_token_looks_like_cli("ergeon-cli")  # hyphenated CLI name
+    assert first_token_looks_like_cli("_internal")
+    assert first_token_looks_like_cli("jira.ergeon.in")
 
 
 def test_invalid_first_tokens_rejected():
-    assert not _first_token_looks_like_cli("--start-time")  # flag
-    assert not _first_token_looks_like_cli("/opt/agent-service/.env")  # absolute path
-    assert not _first_token_looks_like_cli(".claude/skills/")  # path fragment
-    assert not _first_token_looks_like_cli("STAGING_FOO=")  # env-var assignment
-    assert not _first_token_looks_like_cli("STAGING_FOO=bar")
-    assert not _first_token_looks_like_cli("with spaces")
-    assert not _first_token_looks_like_cli("")
-    assert not _first_token_looks_like_cli(None)
+    assert not first_token_looks_like_cli("--start-time")  # flag
+    assert not first_token_looks_like_cli("/opt/agent-service/.env")  # absolute path
+    assert not first_token_looks_like_cli(".claude/skills/")  # path fragment
+    assert not first_token_looks_like_cli("STAGING_FOO=")  # env-var assignment
+    assert not first_token_looks_like_cli("STAGING_FOO=bar")
+    assert not first_token_looks_like_cli("with spaces")
+    assert not first_token_looks_like_cli("")
+    assert not first_token_looks_like_cli(None)
 
 
 def test_insert_drops_malformed_and_keeps_valid(temp_db, capsys):

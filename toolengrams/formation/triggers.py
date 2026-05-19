@@ -7,7 +7,7 @@ Both dedup.py and cli/remember.py import from here. Storage shape:
 Validates each candidate at the chokepoint — invalid trigger shapes that
 can never match a real tool call (e.g. first_token = "STAGING_FOO=" or
 "/abs/path") are dropped with a warning to stderr. See
-`_first_token_looks_like_cli` for the predicate.
+`first_token_looks_like_cli` for the predicate.
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ from .candidates import FormationCandidate
 _VALID_FIRST_TOKEN_RE = re.compile(r"^[A-Za-z_][\w.-]*$")
 
 
-def _first_token_looks_like_cli(first_token: str | None) -> bool:
+def first_token_looks_like_cli(first_token: str | None) -> bool:
     """Predicate used by insert_candidate_triggers to reject malformed triggers.
 
     Real shell calls always start with a token matching this shape (a command
@@ -54,7 +54,7 @@ def insert_candidate_triggers(
     """Write candidates as rows in the triggers table. Returns the insert count.
 
     Drops candidates whose first_token is structurally impossible (see
-    `_first_token_looks_like_cli`). Emits one stderr line per drop so the
+    `first_token_looks_like_cli`). Emits one stderr line per drop so the
     watcher or user can spot bad output.
     """
     n = 0
@@ -63,7 +63,7 @@ def insert_candidate_triggers(
             tokens = tuple(c.tokens)
             if not tokens:
                 continue
-            if not _first_token_looks_like_cli(tokens[0]):
+            if not first_token_looks_like_cli(tokens[0]):
                 print(
                     f"engram: rejected trigger for memory {memory_id} — "
                     f"first_token {tokens[0]!r} is not a valid shell command head "

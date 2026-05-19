@@ -93,8 +93,9 @@ def main(argv: list[str] | None = None) -> int:
             "(run_date, started_ts, completed_ts, sessions_scanned, "
             "episodes_evaluated, memories_strengthened, memories_weakened, "
             "memories_archived, memories_discovered, report, "
-            "quality_score, surfaces_helpful, surfaces_noise) "
-            "VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)",
+            "quality_score, surfaces_helpful, surfaces_noise, "
+            "memories_verified) "
+            "VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 target.isoformat(), now_ts, now_ts, len(sessions),
                 metrics.get("surfaces_evaluated", 0),
@@ -105,6 +106,7 @@ def main(argv: list[str] | None = None) -> int:
                 metrics.get("quality_score"),
                 metrics.get("surfaces_helpful", 0),
                 metrics.get("surfaces_noise", 0),
+                metrics.get("memories_verified", 0),
             ),
         )
 

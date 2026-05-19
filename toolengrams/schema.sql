@@ -91,6 +91,7 @@ CREATE TABLE IF NOT EXISTS consolidation_runs (
     quality_score          REAL,
     surfaces_helpful       INTEGER NOT NULL DEFAULT 0,
     surfaces_noise         INTEGER NOT NULL DEFAULT 0,
+    memories_verified      INTEGER NOT NULL DEFAULT 0,
     report                 TEXT
 );
 
