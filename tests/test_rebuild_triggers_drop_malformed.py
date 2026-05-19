@@ -40,7 +40,7 @@ def test_drops_malformed_keeps_valid(temp_db, capsys):
     out = json.loads(capsys.readouterr().out)
     assert out["malformed_triggers_found"] == 2
     assert out["trigger_rows_dropped"] == 2
-    assert out["memories_orphaned"] == 0
+    assert out["memories_left_triggerless"] == 0
 
     rows = temp_db.execute(
         "SELECT first_token FROM triggers WHERE memory_id = ? ORDER BY first_token",
@@ -76,7 +76,7 @@ def test_rebuilds_from_body_when_orphaned(temp_db, capsys):
     assert rc == 0
     out = json.loads(capsys.readouterr().out)
     assert out["malformed_triggers_found"] == 1
-    assert out["memories_orphaned"] == 1
+    assert out["memories_left_triggerless"] == 1
     assert out["memories_rebuilt_from_body"] == 1
 
     rows = temp_db.execute(
@@ -94,9 +94,9 @@ def test_orphaned_with_no_body_extraction_reported(temp_db, capsys):
     rc = rebuild_triggers.main(["--drop-malformed"])
     assert rc == 0
     out = json.loads(capsys.readouterr().out)
-    assert out["memories_orphaned"] == 1
+    assert out["memories_left_triggerless"] == 1
     assert out["memories_rebuilt_from_body"] == 0
-    assert any(m["id"] == mid for m in out["memories_still_orphaned"])
+    assert any(m["id"] == mid for m in out["memories_still_triggerless"])
 
 
 def test_no_malformed_returns_clean(temp_db, capsys):
@@ -126,3 +126,56 @@ def test_does_not_touch_path_glob_rows(temp_db, capsys):
     ).fetchall()
     assert rows[0]["kind"] == "path_glob"
     assert rows[0]["path_pattern"] == "**/*.py"
+
+
+def test_mixed_path_glob_and_malformed_token_subseq(temp_db, capsys):
+    """Memory with malformed token_subseq + healthy path_glob: the malformed
+    row is dropped but the memory is NOT counted as triggerless because the
+    path_glob still works. Load-bearing reason for the path_glob exclusion in
+    the cleanup SELECT.
+    """
+    mid = _seed_memory(temp_db, "mixed-flavor", body="No backticks here.")
+    _seed_trigger(temp_db, mid, "STAGING_FOO=", ["STAGING_FOO="])
+    temp_db.execute(
+        "INSERT INTO triggers (memory_id, kind, path_pattern) "
+        "VALUES (?, 'path_glob', '**/billing/*.py')",
+        (mid,),
+    )
+
+    rc = rebuild_triggers.main(["--drop-malformed"])
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["malformed_triggers_found"] == 1
+    assert out["trigger_rows_dropped"] == 1
+    # NOT triggerless — path_glob still binds the memory.
+    assert out["memories_left_triggerless"] == 0
+    assert out["memories_rebuilt_from_body"] == 0
+    assert out["memories_still_triggerless"] == []
+
+    rows = temp_db.execute(
+        "SELECT kind, first_token, path_pattern FROM triggers WHERE memory_id = ? "
+        "ORDER BY kind",
+        (mid,),
+    ).fetchall()
+    # Only the path_glob row survives.
+    assert len(rows) == 1
+    assert rows[0]["kind"] == "path_glob"
+    assert rows[0]["path_pattern"] == "**/billing/*.py"
+
+
+def test_stderr_logs_each_drop(temp_db, capsys):
+    """Each dropped trigger emits a stderr line so audit grep'ing across
+    formation and cleanup paths works uniformly."""
+    mid = _seed_memory(temp_db, "audit-trail")
+    _seed_trigger(temp_db, mid, "STAGING_FOO=", ["STAGING_FOO="])
+    _seed_trigger(temp_db, mid, "/abs/path", ["/abs/path"])
+    _seed_trigger(temp_db, mid, "git", ["git", "push"])  # valid, no warning
+
+    rc = rebuild_triggers.main(["--drop-malformed"])
+    assert rc == 0
+    captured = capsys.readouterr()
+    err_lines = [ln for ln in captured.err.splitlines() if ln.startswith("engram:")]
+    assert len(err_lines) == 2
+    assert any("STAGING_FOO=" in ln for ln in err_lines)
+    assert any("/abs/path" in ln for ln in err_lines)
+    assert all("git" not in ln for ln in err_lines)
