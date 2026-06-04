@@ -1,4 +1,9 @@
-"""Unit tests for the SessionStart handler — formation guidance injection + watcher spawn."""
+"""Unit tests for the SessionStart handler — formation guidance + session tracking.
+
+SessionStart no longer spawns a persistent watcher process; it just registers
+the session in watcher_state (via tick.ensure_row) so the event-driven ticks
+have a cursor to track.
+"""
 
 from __future__ import annotations
 
@@ -7,7 +12,6 @@ import json
 import sys
 from unittest.mock import patch
 
-from toolengrams import db
 from toolengrams.hooks import session_start
 
 
@@ -22,7 +26,7 @@ def _run(payload: dict, monkeypatch) -> dict:
 
 
 def test_session_start_emits_guidance(monkeypatch):
-    with patch.object(session_start, "spawn_watcher"):
+    with patch.object(session_start.tick, "ensure_row"):
         result = _run(
             {"session_id": "s1", "cwd": "/tmp/foo", "hook_event_name": "SessionStart", "source": "startup"},
             monkeypatch,
@@ -33,7 +37,7 @@ def test_session_start_emits_guidance(monkeypatch):
 
 
 def test_guidance_mentions_manual_commands(monkeypatch):
-    with patch.object(session_start, "spawn_watcher"):
+    with patch.object(session_start.tick, "ensure_row"):
         result = _run(
             {"session_id": "s2", "cwd": "/tmp/foo", "hook_event_name": "SessionStart", "source": "startup"},
             monkeypatch,
@@ -43,56 +47,27 @@ def test_guidance_mentions_manual_commands(monkeypatch):
     assert "engram recall" in ctx
 
 
-def test_session_start_spawns_watcher_on_startup(temp_db, monkeypatch):
-    """SessionStart with source=startup should spawn a watcher and create a watcher_state row."""
-    spawned = []
-
-    def mock_spawn(session_id, transcript_path, cwd):
-        spawned.append((session_id, transcript_path, cwd))
-        # Simulate what real spawn_watcher does: insert a row.
-        import time
-        now_ts = int(time.time())
-        conn = db.connect()
-        try:
-            conn.execute(
-                "INSERT OR REPLACE INTO watcher_state "
-                "(work_session_id, watcher_pid, transcript_path, "
-                " last_line_read, last_checked_ts, cwd, created_ts) "
-                "VALUES (?, ?, ?, 0, ?, ?, ?)",
-                (session_id, 12345, transcript_path, now_ts, cwd, now_ts),
-            )
-        finally:
-            conn.close()
-
-    with patch.object(session_start, "spawn_watcher", side_effect=mock_spawn):
-        _run(
-            {"session_id": "watcher-test", "cwd": "/tmp/myproject", "source": "startup"},
-            monkeypatch,
-        )
-
-    assert len(spawned) == 1
-    assert spawned[0][0] == "watcher-test"
-    assert "/tmp/myproject" in spawned[0][2]
-
-    # Verify watcher_state row was created.
+def test_session_start_tracks_real_session(temp_db, monkeypatch):
+    """A real session gets a watcher_state row (cursor=0), no process spawned."""
+    _run(
+        {"session_id": "track-test", "cwd": "/Users/jpcar/projects/my-app", "source": "startup"},
+        monkeypatch,
+    )
     row = temp_db.execute(
-        "SELECT * FROM watcher_state WHERE work_session_id = 'watcher-test'"
+        "SELECT * FROM watcher_state WHERE work_session_id = 'track-test'"
     ).fetchone()
     assert row is not None
-    assert row["watcher_pid"] == 12345
+    assert row["last_line_read"] == 0
+    assert row["watcher_pid"] is None  # no persistent process
+    assert "my-app" in row["transcript_path"]
 
 
-def test_session_start_spawns_watcher_on_clear(monkeypatch):
-    """SessionStart with source=clear should spawn a watcher (session continues)."""
-    spawned = []
-
-    def mock_spawn(session_id, transcript_path, cwd):
-        spawned.append(True)
-
-    with patch.object(session_start, "spawn_watcher", side_effect=mock_spawn):
-        _run(
-            {"session_id": "s-clear", "cwd": "/tmp/foo", "source": "clear"},
-            monkeypatch,
-        )
-
-    assert len(spawned) == 1
+def test_session_start_skips_tracking_for_internal_cwd(temp_db, monkeypatch):
+    _run(
+        {"session_id": "int-test", "cwd": "/tmp/engram-consolidate-xyz", "source": "startup"},
+        monkeypatch,
+    )
+    row = temp_db.execute(
+        "SELECT * FROM watcher_state WHERE work_session_id = 'int-test'"
+    ).fetchone()
+    assert row is None

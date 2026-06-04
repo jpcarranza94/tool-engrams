@@ -23,8 +23,12 @@ def test_v9_db_upgrades_to_v10_default_zero(tmp_path: Path):
     path = tmp_path / "v9.sqlite"
     raw = sqlite3.connect(str(path))
     raw.executescript(db.SCHEMA_PATH.read_text())
-    # Strip the v10 column to simulate a real v9 DB.
+    # Strip the v10 column to simulate a real v9 DB (and the v11 watcher_state
+    # columns, since the current schema.sql already carries them).
     raw.executescript("""
+        ALTER TABLE watcher_state DROP COLUMN armed;
+        ALTER TABLE watcher_state DROP COLUMN last_tick_ts;
+        ALTER TABLE watcher_state DROP COLUMN fail_streak;
         ALTER TABLE consolidation_runs RENAME TO consolidation_runs_tmp;
         CREATE TABLE consolidation_runs (
             id                     INTEGER PRIMARY KEY AUTOINCREMENT,

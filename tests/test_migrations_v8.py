@@ -27,6 +27,9 @@ def test_v7_db_upgrades_through_all_pending(tmp_path: Path):
     # Strip post-v7 columns/indices to simulate a real v7 DB.
     raw.executescript("""
         DROP INDEX IF EXISTS idx_session_surfaces_failure_token;
+        ALTER TABLE watcher_state DROP COLUMN armed;
+        ALTER TABLE watcher_state DROP COLUMN last_tick_ts;
+        ALTER TABLE watcher_state DROP COLUMN fail_streak;
         ALTER TABLE memories RENAME TO memories_tmp;
         CREATE TABLE memories (
             id               INTEGER PRIMARY KEY AUTOINCREMENT,

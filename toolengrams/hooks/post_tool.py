@@ -30,6 +30,9 @@ from ..retrieval.session_state import (
     increment_session_turn,
     mark_surface_outcome,
 )
+from ..utils import is_watcher_child
+from ..watcher import derive_transcript_path, tick
+from ._skip import is_internal_cwd
 
 logger = logging.getLogger("engram.post_tool")
 
@@ -60,6 +63,7 @@ def _run(payload: dict[str, Any]) -> int:
         return 0
 
     now_ts = int(time.time())
+    recovered = False  # a prior failure with this first_token just succeeded
     with db.session() as conn:
         if not is_error:
             with db.transaction(conn):
@@ -88,6 +92,7 @@ def _run(payload: dict[str, Any]) -> int:
                         conn, session_id, first_token,
                     )
                     if failure_ids:
+                        recovered = True
                         bump_useful_counts(conn, failure_ids)
                         mark_surface_outcome(
                             conn, session_id, failure_ids, "helpful",
@@ -100,6 +105,15 @@ def _run(payload: dict[str, Any]) -> int:
                         )
 
         increment_session_turn(conn, session_id, now_ts)
+
+    # Fast-path trigger: a failure→success pair just completed, so an error→fix
+    # episode is provably present. Fire a watcher tick now (outside the txn, so
+    # the Popen never holds the DB) instead of waiting for the next Stop.
+    if recovered and not is_watcher_child():
+        cwd = payload.get("cwd") or ""
+        if cwd and not is_internal_cwd(cwd):
+            tpath = payload.get("transcript_path") or derive_transcript_path(session_id, cwd)
+            tick.trigger(session_id, tpath, cwd, reason="recovery")
 
     _emit({})
     return 0

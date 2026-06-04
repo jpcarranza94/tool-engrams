@@ -1,11 +1,15 @@
-"""Watcher process lifecycle + cron loop + DB cursor management.
+"""Watcher cursor/log helpers + the (deprecated) 5-minute poll loop.
 
-This is the long-running side of the watcher: spawning the detached
-subprocess, persisting its progress to `watcher_state`, the per-tick read /
-delta-format / model-call / save loop, and graceful SIGTERM cleanup.
+The watcher is now EVENT-DRIVEN — see `tick.py`, fired by the Stop / flush /
+post_tool / user_prompt hooks. This module keeps the shared helpers those ticks
+reuse (`_get_saved_cursor`, `_update_state`, `_log`, `derive_transcript_path`,
+`_retry_decision`, `MAX_FORM_RETRIES`, `REPO_ROOT`, `PYTHON_BIN`).
 
-Pure transcript parsing lives in transcript_format.py; the model invocation
-lives in agent.py. This module wires them to the DB.
+`watcher_main` / `spawn_watcher` (the long-running 5-minute `claude -p` poll)
+are DEPRECATED and no longer spawned by any hook. They're retained for now so
+the `engram watcher` subcommand and its tests still resolve; slated for removal
+once the event-driven path has soaked. Pure transcript parsing lives in
+transcript_format.py; the model invocation in agent.py.
 """
 
 from __future__ import annotations

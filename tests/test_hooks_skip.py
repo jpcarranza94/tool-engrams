@@ -1,4 +1,9 @@
-"""Unit tests for the shared hook skip helper + its two callers."""
+"""Unit tests for the shared hook skip helper + its two callers.
+
+SessionStart now tracks a session (tick.ensure_row); UserPromptSubmit fires a
+watcher tick only on a likely correction. Both still skip internal cwds and
+watcher-child processes.
+"""
 
 from __future__ import annotations
 
@@ -40,7 +45,7 @@ def test_do_not_skip_trailing_slash_is_handled():
     assert is_internal_cwd("/tmp/engram-consolidate-xyz/")
 
 
-# ---------- session_start respects the skip ----------
+# ---------- session_start: tracks real sessions, skips internal/child ----------
 
 
 def _run_session_start(payload: dict, monkeypatch) -> dict:
@@ -54,48 +59,37 @@ def _run_session_start(payload: dict, monkeypatch) -> dict:
 
 
 def test_session_start_skips_consolidate_temp_cwd(monkeypatch):
-    with patch.object(session_start, "spawn_watcher") as mock:
+    with patch.object(session_start.tick, "ensure_row") as mock:
         _run_session_start(
-            {
-                "session_id": "s-consolidate",
-                "cwd": "/private/var/folders/q7/abc/T/engram-consolidate-xyz",
-                "source": "startup",
-            },
+            {"session_id": "s-consolidate",
+             "cwd": "/private/var/folders/q7/abc/T/engram-consolidate-xyz",
+             "source": "startup"},
             monkeypatch,
         )
     mock.assert_not_called()
 
 
-def test_session_start_still_spawns_for_real_user_cwd(monkeypatch):
-    with patch.object(session_start, "spawn_watcher") as mock:
+def test_session_start_tracks_real_user_cwd(monkeypatch):
+    with patch.object(session_start.tick, "ensure_row") as mock:
         _run_session_start(
-            {
-                "session_id": "s-real",
-                "cwd": "/Users/jpcar/projects/my-app",
-                "source": "startup",
-            },
+            {"session_id": "s-real", "cwd": "/Users/jpcar/projects/my-app", "source": "startup"},
             monkeypatch,
         )
     mock.assert_called_once()
 
 
 def test_session_start_skips_when_watcher_child(monkeypatch):
-    """Recursion guard: a `claude` launched by the watcher (ENGRAM_IN_WATCHER=1)
-    must never spawn another watcher, even from a real user cwd."""
+    """A watcher-launched `claude` must not register/trigger watchers."""
     monkeypatch.setenv("ENGRAM_IN_WATCHER", "1")
-    with patch.object(session_start, "spawn_watcher") as mock:
+    with patch.object(session_start.tick, "ensure_row") as mock:
         _run_session_start(
-            {
-                "session_id": "s-watcher-child",
-                "cwd": "/Users/jpcar/projects/my-app",
-                "source": "startup",
-            },
+            {"session_id": "s-wc", "cwd": "/Users/jpcar/projects/my-app", "source": "startup"},
             monkeypatch,
         )
     mock.assert_not_called()
 
 
-# ---------- user_prompt respects the skip ----------
+# ---------- user_prompt: tick on correction, otherwise just track ----------
 
 
 def _run_user_prompt(payload: dict, monkeypatch):
@@ -105,95 +99,51 @@ def _run_user_prompt(payload: dict, monkeypatch):
     return user_prompt.main()
 
 
-def test_user_prompt_skips_consolidate_temp_cwd(temp_db, monkeypatch):
-    with patch.object(user_prompt, "spawn_watcher") as mock:
+def test_user_prompt_triggers_tick_on_correction(monkeypatch):
+    with patch.object(user_prompt.tick, "ensure_row"), \
+         patch.object(user_prompt.tick, "trigger") as trig:
         _run_user_prompt(
-            {
-                "session_id": "s-consolidate",
-                "cwd": "/tmp/engram-consolidate-xyz",
-            },
+            {"session_id": "s1", "cwd": "/Users/jpcar/projects/x",
+             "transcript_path": "/t.jsonl",
+             "prompt": "no, use --force-with-lease instead"},
             monkeypatch,
         )
-    mock.assert_not_called()
+    trig.assert_called_once()
 
 
-def test_user_prompt_still_spawns_for_real_user_cwd_when_no_watcher(temp_db, monkeypatch):
-    with patch.object(user_prompt, "spawn_watcher") as mock, \
-         patch.object(user_prompt, "is_pid_alive", return_value=False):
+def test_user_prompt_no_tick_on_normal_prompt(monkeypatch):
+    with patch.object(user_prompt.tick, "ensure_row") as ens, \
+         patch.object(user_prompt.tick, "trigger") as trig:
         _run_user_prompt(
-            {
-                "session_id": "s-real",
-                "cwd": "/Users/jpcar/projects/my-app",
-            },
+            {"session_id": "s1", "cwd": "/Users/jpcar/projects/x",
+             "transcript_path": "/t.jsonl",
+             "prompt": "please add a feature to the dashboard"},
             monkeypatch,
         )
-    mock.assert_called_once()
+    ens.assert_called_once()   # session still tracked
+    trig.assert_not_called()   # but no tick — Stop will handle normal formation
 
 
-def test_user_prompt_skips_when_watcher_child(temp_db, monkeypatch):
-    """Recursion guard on the respawn path too."""
+def test_user_prompt_skips_internal_cwd(monkeypatch):
+    with patch.object(user_prompt.tick, "ensure_row") as ens, \
+         patch.object(user_prompt.tick, "trigger") as trig:
+        _run_user_prompt(
+            {"session_id": "s1", "cwd": "/tmp/engram-consolidate-xyz",
+             "prompt": "no, that's wrong"},
+            monkeypatch,
+        )
+    ens.assert_not_called()
+    trig.assert_not_called()
+
+
+def test_user_prompt_skips_when_watcher_child(monkeypatch):
     monkeypatch.setenv("ENGRAM_IN_WATCHER", "1")
-    with patch.object(user_prompt, "spawn_watcher") as mock, \
-         patch.object(user_prompt, "is_pid_alive", return_value=False):
+    with patch.object(user_prompt.tick, "ensure_row") as ens, \
+         patch.object(user_prompt.tick, "trigger") as trig:
         _run_user_prompt(
-            {"session_id": "s-watcher-child", "cwd": "/Users/jpcar/projects/my-app"},
+            {"session_id": "s1", "cwd": "/Users/jpcar/projects/x",
+             "prompt": "no, that's wrong"},
             monkeypatch,
         )
-    mock.assert_not_called()
-
-
-def test_user_prompt_respawns_when_watcher_pid_alive_but_stale(
-    temp_db, monkeypatch,
-):
-    """A wedged watcher: PID is alive but it hasn't ticked in a long time.
-    The liveness check must catch this and respawn — otherwise the user
-    silently goes without memory formation for the rest of the session.
-    """
-    import time as _time
-    from toolengrams import db as _db
-
-    # Insert a stale watcher_state row: PID will report alive (we mock that),
-    # but last_checked_ts is older than 2× WATCHER_INTERVAL.
-    long_ago = int(_time.time()) - (user_prompt.WATCHER_INTERVAL * 3)
-    with _db.session() as conn:
-        conn.execute(
-            "INSERT INTO watcher_state "
-            "(work_session_id, watcher_pid, transcript_path, "
-            " last_line_read, last_checked_ts, cwd, created_ts) "
-            "VALUES (?, 12345, '/tmp/x.jsonl', 0, ?, '/cwd', ?)",
-            ("s-zombie", long_ago, long_ago),
-        )
-
-    with patch.object(user_prompt, "spawn_watcher") as mock, \
-         patch.object(user_prompt, "is_pid_alive", return_value=True):
-        _run_user_prompt(
-            {"session_id": "s-zombie", "cwd": "/Users/jpcar/projects/x"},
-            monkeypatch,
-        )
-    mock.assert_called_once()
-
-
-def test_user_prompt_keeps_watcher_when_pid_alive_and_recent(
-    temp_db, monkeypatch,
-):
-    """Healthy watcher: PID alive, last_checked_ts recent — no respawn."""
-    import time as _time
-    from toolengrams import db as _db
-
-    recent = int(_time.time()) - 10  # well within grace
-    with _db.session() as conn:
-        conn.execute(
-            "INSERT INTO watcher_state "
-            "(work_session_id, watcher_pid, transcript_path, "
-            " last_line_read, last_checked_ts, cwd, created_ts) "
-            "VALUES (?, 12345, '/tmp/x.jsonl', 0, ?, '/cwd', ?)",
-            ("s-healthy", recent, recent),
-        )
-
-    with patch.object(user_prompt, "spawn_watcher") as mock, \
-         patch.object(user_prompt, "is_pid_alive", return_value=True):
-        _run_user_prompt(
-            {"session_id": "s-healthy", "cwd": "/Users/jpcar/projects/x"},
-            monkeypatch,
-        )
-    mock.assert_not_called()
+    ens.assert_not_called()
+    trig.assert_not_called()

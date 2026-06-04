@@ -48,7 +48,8 @@ from ..retrieval.session_state import (
     get_session_turn,
     log_surfaces,
 )
-from ..utils import slugify_cwd
+from ..utils import is_watcher_child, slugify_cwd
+from ..watcher import tick
 from ._skip import WHITELIST, max_memories_per_call
 
 
@@ -73,6 +74,14 @@ def _run(payload: dict[str, Any]) -> int:
     if payload.get("is_interrupt"):
         _emit({})
         return 0
+
+    # Arm the event-driven watcher: a real tool failure means an error→fix
+    # episode may be forming, so the next turn-boundary tick should run even if
+    # that turn shows no tool_use lines. Independent of whether a hint surfaces.
+    if not is_watcher_child():
+        sid = payload.get("session_id") or ""
+        if sid:
+            tick.arm(sid, payload.get("transcript_path") or "", payload.get("cwd") or "")
 
     tool_name = payload.get("tool_name") or ""
     if tool_name not in WHITELIST:

@@ -20,6 +20,9 @@ def _build_v8_db(path: Path) -> None:
     raw.executescript(db.SCHEMA_PATH.read_text())
     raw.executescript("""
         DROP INDEX IF EXISTS idx_session_surfaces_failure_token;
+        ALTER TABLE watcher_state DROP COLUMN armed;
+        ALTER TABLE watcher_state DROP COLUMN last_tick_ts;
+        ALTER TABLE watcher_state DROP COLUMN fail_streak;
         ALTER TABLE session_surfaces RENAME TO session_surfaces_tmp;
         CREATE TABLE session_surfaces (
             session_id       TEXT NOT NULL,
