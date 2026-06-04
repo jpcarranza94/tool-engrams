@@ -173,6 +173,18 @@ def watcher_main(session_id: str, transcript_path: str, cwd: str) -> int:
                         f"after {MAX_FORM_RETRIES} attempts"
                     )
                 last_line += len(new_lines)
+            elif watcher_session_id is not None:
+                # Holding this window for a retry: restart from a CLEAN claude
+                # session. A parse failure means a bad turn (e.g. a
+                # conversational reply that didn't match the schema) is already
+                # in this session's --resume history; re-feeding the same delta
+                # into it would bias the retry toward repeating the mistake.
+                # Dropping the id forces the next attempt through _claude_p_new.
+                watcher_session_id = None
+            # _update_state runs UNCONDITIONALLY (not only when advancing) so
+            # last_checked_ts keeps bumping during a retry hold — otherwise a
+            # held window would look like a stalled watcher to the user_prompt
+            # zombie check and get killed mid-retry.
             _update_state(session_id, watcher_session_id, last_line)
     except Exception as e:
         _log(f"CRASH session={session_id} error={e}")

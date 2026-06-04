@@ -40,6 +40,15 @@ pytest tests/e2e/ -m e2e     # E2E tests (spawns claude -p, slow)
 - PreToolUse latency budget: single-digit ms for DB queries
 - Prompts live in `toolengrams/prompts/`, not inline in command files
 
+## Watcher tunables (env)
+
+Read at spawn time, so changes apply to newly-spawned watchers (the running ones hold their spawn-time env until they respawn):
+
+- `$ENGRAM_WATCHER_MODEL` — model for the watcher's `claude -p` (default `opus`).
+- `$ENGRAM_WATCHER_TIMEOUT` — per-call `claude -p` timeout in seconds (default `120`).
+
+`MAX_FORM_RETRIES` (lifecycle.py) bounds how many ticks a failed transcript window is retried before the watcher gives up and advances past it; it is a correctness bound, not an env knob.
+
 ## DB location
 
 `~/.claude/tool-engrams/db.sqlite` (override with `$ENGRAM_DB`). Schema in `toolengrams/schema.sql`, migrations in `toolengrams/migrations/`.

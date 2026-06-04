@@ -46,6 +46,10 @@ def _clip_ends(text: str, limit: int) -> str:
     with the actual cause, so preserve both ends and elide the middle."""
     if len(text) <= limit:
         return text
+    # The elision marker itself is ~12 chars; for a tiny limit a head+tail split
+    # would inflate the result past the input, so just hard-truncate the head.
+    if limit < 24:
+        return text[: max(limit, 0)]
     head = limit * 2 // 3
     tail = limit - head
     return f"{text[:head]}…[+{len(text) - limit} chars]…{text[-tail:]}"
