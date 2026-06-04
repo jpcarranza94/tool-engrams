@@ -79,6 +79,22 @@ def test_session_start_still_spawns_for_real_user_cwd(monkeypatch):
     mock.assert_called_once()
 
 
+def test_session_start_skips_when_watcher_child(monkeypatch):
+    """Recursion guard: a `claude` launched by the watcher (ENGRAM_IN_WATCHER=1)
+    must never spawn another watcher, even from a real user cwd."""
+    monkeypatch.setenv("ENGRAM_IN_WATCHER", "1")
+    with patch.object(session_start, "spawn_watcher") as mock:
+        _run_session_start(
+            {
+                "session_id": "s-watcher-child",
+                "cwd": "/Users/jpcar/projects/my-app",
+                "source": "startup",
+            },
+            monkeypatch,
+        )
+    mock.assert_not_called()
+
+
 # ---------- user_prompt respects the skip ----------
 
 
@@ -112,6 +128,18 @@ def test_user_prompt_still_spawns_for_real_user_cwd_when_no_watcher(temp_db, mon
             monkeypatch,
         )
     mock.assert_called_once()
+
+
+def test_user_prompt_skips_when_watcher_child(temp_db, monkeypatch):
+    """Recursion guard on the respawn path too."""
+    monkeypatch.setenv("ENGRAM_IN_WATCHER", "1")
+    with patch.object(user_prompt, "spawn_watcher") as mock, \
+         patch.object(user_prompt, "is_pid_alive", return_value=False):
+        _run_user_prompt(
+            {"session_id": "s-watcher-child", "cwd": "/Users/jpcar/projects/my-app"},
+            monkeypatch,
+        )
+    mock.assert_not_called()
 
 
 def test_user_prompt_respawns_when_watcher_pid_alive_but_stale(

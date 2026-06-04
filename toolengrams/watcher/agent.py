@@ -25,6 +25,13 @@ CLAUDE_BIN = shutil.which("claude")
 
 DEFAULT_WATCHER_MODEL = "opus"
 
+# Per-call wall-clock budget for the watcher's `claude -p`. The original 60s
+# was too tight: on a busy 5-min window the delta is large and opus is slow, so
+# the call timed out and the whole window's lines were dropped, never retried
+# (lifecycle advances the cursor on error). 120s gives headroom; tune via
+# $ENGRAM_WATCHER_TIMEOUT without restarting.
+DEFAULT_WATCHER_TIMEOUT = 120
+
 # JSON schema for constrained decoding.
 WATCHER_SCHEMA = json.dumps({
     "type": "object",
@@ -62,6 +69,21 @@ def _watcher_model() -> str:
     return os.environ.get("ENGRAM_WATCHER_MODEL", DEFAULT_WATCHER_MODEL)
 
 
+def _watcher_timeout() -> int:
+    """Resolve the per-call timeout (seconds) for the watcher's `claude -p`.
+
+    Read from $ENGRAM_WATCHER_TIMEOUT each call so it can be tuned without
+    restarting the watcher. Falls back to DEFAULT_WATCHER_TIMEOUT on a missing
+    or non-positive / non-integer value.
+    """
+    raw = os.environ.get("ENGRAM_WATCHER_TIMEOUT", "")
+    try:
+        val = int(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_WATCHER_TIMEOUT
+    return val if val > 0 else DEFAULT_WATCHER_TIMEOUT
+
+
 def _build_initial_prompt(cwd: str) -> str:
     return f"{build_watcher_prompt()}\n\nProject: {cwd}\n\n--- Session activity ---\n\n"
 
@@ -84,7 +106,7 @@ def _claude_p_new(message: str, schema: str) -> str:
         ],
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=_watcher_timeout(),
     )
     return proc.stdout
 
@@ -106,7 +128,7 @@ def _claude_p_resume(session_id: str, message: str, schema: str) -> str:
         ],
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=_watcher_timeout(),
     )
     return proc.stdout
 

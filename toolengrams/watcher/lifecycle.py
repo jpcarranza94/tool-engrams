@@ -19,7 +19,7 @@ from pathlib import Path
 
 from .. import db
 from ..prompts.watcher import WATCHER_SUBSEQUENT_HEADER
-from ..utils import slugify_cwd
+from ..utils import WATCHER_CHILD_ENV, slugify_cwd
 from .agent import (
     CLAUDE_BIN,
     WATCHER_SCHEMA,
@@ -43,6 +43,30 @@ PYTHON_BIN = sys.executable
 
 WATCHER_INTERVAL = 300  # 5 minutes
 SESSION_TIMEOUT = DEFAULT_SESSION_TIMEOUT_MIN  # minutes of inactivity before exit
+
+# How many consecutive failed attempts on the SAME transcript window before we
+# give up and advance past it. A failure (model exception/timeout, or an
+# unparseable response) used to advance the cursor immediately, silently
+# dropping that window forever. Instead we HOLD the cursor and retry next tick
+# — recovering transient failures (529 overload, a one-off timeout, empty
+# stdout). The cap stops a genuinely poison window from wedging the watcher.
+MAX_FORM_RETRIES = 3
+
+
+def _retry_decision(failed: bool, fail_streak: int, max_attempts: int) -> tuple[bool, int]:
+    """Decide whether to advance the cursor after a tick.
+
+    Returns (advance_cursor, new_fail_streak).
+      - success            → advance, reset streak to 0.
+      - failure, streak<max → HOLD (don't advance), bump streak (retry window).
+      - failure, streak>=max → give up: advance past the window, reset streak.
+    """
+    if not failed:
+        return True, 0
+    streak = fail_streak + 1
+    if streak >= max_attempts:
+        return True, 0
+    return False, streak
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -70,6 +94,7 @@ def watcher_main(session_id: str, transcript_path: str, cwd: str) -> int:
     # persists last_line_read across restarts). Fresh sessions start at 0.
     watcher_session_id = None
     last_line = _get_saved_cursor(session_id)
+    fail_streak = 0  # consecutive failed attempts on the current window
 
     try:
         while True:
@@ -97,6 +122,8 @@ def watcher_main(session_id: str, transcript_path: str, cwd: str) -> int:
                 continue
 
             # Call the watcher model.
+            failed = False
+            attempt = fail_streak + 1
             try:
                 if watcher_session_id is None:
                     message = _build_initial_prompt(cwd) + delta
@@ -106,29 +133,46 @@ def watcher_main(session_id: str, transcript_path: str, cwd: str) -> int:
                     message = WATCHER_SUBSEQUENT_HEADER + delta
                     stdout = _claude_p_resume(watcher_session_id, message, WATCHER_SCHEMA)
             except Exception as e:
-                _log(f"MODEL-ERROR session={session_id} error={e}")
+                _log(
+                    f"MODEL-ERROR session={session_id} "
+                    f"delta_chars={len(delta)} attempt={attempt} error={e}"
+                )
+                failed = True
+
+            # Parse + save (only if the call itself succeeded).
+            if not failed:
+                response = _parse_response(stdout)
+                action = (response or {}).get("action") or "parse_error"
+                if action == "create":
+                    for mem in response.get("memories", []):
+                        try:
+                            _save_memory(mem, cwd)
+                            _log(f"SAVE session={session_id} name={mem.get('name', '?')}")
+                        except Exception as e:
+                            _log(f"SAVE-ERROR session={session_id} error={e}")
+                elif action == "parse_error":
+                    # Log enough of the raw stdout to diagnose what went wrong.
+                    stdout_preview = (stdout or "")[:300].replace("\n", "\\n")
+                    _log(
+                        f"MODEL-PARSE_ERROR session={session_id} attempt={attempt} "
+                        f"lines={len(new_lines)} stdout={stdout_preview}"
+                    )
+                    failed = True
+                else:
+                    _log(f"MODEL-{action.upper()} session={session_id} lines={len(new_lines)}")
+
+            # Cursor-advance decision. On failure we HOLD the cursor and retry
+            # the same window next tick (recovers transient 529 / timeout /
+            # empty stdout); after MAX_FORM_RETRIES we give up and advance past
+            # it so a poison window can't wedge the watcher forever.
+            advance, fail_streak = _retry_decision(failed, fail_streak, MAX_FORM_RETRIES)
+            if advance:
+                if failed:
+                    _log(
+                        f"SKIP-GIVEUP session={session_id} lines={len(new_lines)} "
+                        f"after {MAX_FORM_RETRIES} attempts"
+                    )
                 last_line += len(new_lines)
-                _update_state(session_id, watcher_session_id, last_line)
-                continue
-
-            # Parse + save.
-            response = _parse_response(stdout)
-            action = (response or {}).get("action") or "parse_error"
-            if action == "create":
-                for mem in response.get("memories", []):
-                    try:
-                        _save_memory(mem, cwd)
-                        _log(f"SAVE session={session_id} name={mem.get('name', '?')}")
-                    except Exception as e:
-                        _log(f"SAVE-ERROR session={session_id} error={e}")
-            elif action == "parse_error":
-                # Log enough of the raw stdout to diagnose what went wrong.
-                stdout_preview = (stdout or "")[:300].replace("\n", "\\n")
-                _log(f"MODEL-PARSE_ERROR session={session_id} lines={len(new_lines)} stdout={stdout_preview}")
-            else:
-                _log(f"MODEL-{action.upper()} session={session_id} lines={len(new_lines)}")
-
-            last_line += len(new_lines)
             _update_state(session_id, watcher_session_id, last_line)
     except Exception as e:
         _log(f"CRASH session={session_id} error={e}")
@@ -149,6 +193,9 @@ def spawn_watcher(session_id: str, transcript_path: str, cwd: str) -> None:
     try:
         env = os.environ.copy()
         env["PYTHONPATH"] = str(REPO_ROOT)
+        # Mark this subprocess (and any `claude` it launches) as watcher-owned
+        # so its hooks refuse to recursively spawn another watcher.
+        env[WATCHER_CHILD_ENV] = "1"
 
         proc = subprocess.Popen(
             [PYTHON_BIN, "-m", "toolengrams", "watcher",

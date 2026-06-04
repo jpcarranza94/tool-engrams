@@ -19,7 +19,7 @@ import sys
 import time
 
 from .. import db
-from ..utils import is_pid_alive
+from ..utils import is_pid_alive, is_watcher_child
 from ..watcher import WATCHER_INTERVAL, derive_transcript_path, spawn_watcher
 from ._skip import is_internal_cwd
 
@@ -55,6 +55,11 @@ def main() -> int:
 def _ensure_watcher_alive(session_id: str, cwd: str) -> None:
     """If watcher is dead or was never started, spawn it."""
     if not cwd:
+        return
+
+    # Never let a watcher-launched `claude` spawn another watcher (recursion
+    # guard, independent of --bare).
+    if is_watcher_child():
         return
 
     # Skip ToolEngrams' own subprocess sessions (consolidation agent, etc.).
