@@ -8,8 +8,6 @@ are tail-trimmed so dormant sessions don't blow the model's context budget.
 from __future__ import annotations
 
 import json
-import time
-from pathlib import Path
 
 # JSONL line types to skip during delta formatting.
 _SKIP_TYPES = {"queue-operation", "attachment", "last-prompt"}
@@ -63,21 +61,6 @@ def _read_lines_from(path: str, start_line: int) -> list[str]:
         return lines[start_line:]
     except (FileNotFoundError, OSError):
         return []
-
-
-DEFAULT_SESSION_TIMEOUT_MIN = 30
-
-
-def _is_session_alive(
-    transcript_path: str,
-    timeout_minutes: int = DEFAULT_SESSION_TIMEOUT_MIN,
-) -> bool:
-    """Check if the transcript file has been modified recently."""
-    try:
-        mtime = Path(transcript_path).stat().st_mtime
-        return (time.time() - mtime) < (timeout_minutes * 60)
-    except (FileNotFoundError, OSError):
-        return False
 
 
 def _format_delta(lines: list[str]) -> str:

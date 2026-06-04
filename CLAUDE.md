@@ -11,7 +11,7 @@ ToolEngrams is a tool-bound memory system for Claude Code. Memories bind to comm
   - `prompts/` — all prompt text in one place (session_start, pretool, watcher, consolidation)
   - `consolidation/` — nightly agent (collect sessions, spawn Opus review, launchd schedule)
   - `migrations/` — SQL migration files (auto-discovered by db.py)
-  - `watcher/` — event-driven memory formation. `tick.py` is the core (one read→gate→`claude -p`→save per event); `lifecycle.py` holds shared cursor/log helpers (and the deprecated 5-min poll); `agent.py` the `claude -p` calls; `transcript_format.py` the JSONL→text delta. Model via `$ENGRAM_WATCHER_MODEL` (default `opus`).
+  - `watcher/` — event-driven memory formation. `tick.py` is the core (one read→gate→`claude -p`→save per event, plus coalesce policy + the SessionStart idle-sweep); `state.py` is the single seam over the `watcher_state` table (cursor / armed / fail_streak / last_tick_ts, plus `sweep_idle`); `agent.py` the `claude -p` calls; `transcript_format.py` the JSONL→text delta; `log.py` the shared log sink. Model via `$ENGRAM_WATCHER_MODEL` (default `opus`).
   - `triggers.py` — trigger persistence (shared by remember, dedup)
   - `formation.py` — pure trigger extraction from memory body text (no DB writes)
 - `skills/` — Claude Code skill files (symlinked to ~/.claude/skills/)
@@ -22,7 +22,7 @@ ToolEngrams is a tool-bound memory system for Claude Code. Memories bind to comm
 
 1. **PreToolUse hook** (`pretool.py`) — fires before every whitelisted tool call. Queries SQLite for memories whose trigger prefix matches the command. Feedback memories deny (block) the call; reference memories allow with context.
 2. **PostToolUse hook** (`post_tool.py`) — bumps useful_count on success.
-3. **Watcher** (`watcher/tick.py`) — event-driven memory formation. Hooks fire a detached `engram watcher-tick` per meaningful event: **Stop** (turn boundary — the primary trigger), **PostToolUse** failure→success (recovery fast-path), **UserPromptSubmit** on a likely correction, and **SessionEnd/PreCompact** (flush). Each tick reads the JSONL transcript delta since its cursor, gates out pure-chat turns (unless armed by a prior failure), calls `claude -p --resume` (model via `$ENGRAM_WATCHER_MODEL`), and saves. Ticks are serialized per session by a file lock and coalesced by `$ENGRAM_TICK_COALESCE_SEC`. State (cursor / armed / fail_streak / last_tick_ts) lives in `watcher_state`. (The old 5-min `claude -p` poll in `lifecycle.py:watcher_main` is deprecated and no longer spawned.)
+3. **Watcher** (`watcher/tick.py`) — event-driven memory formation. Hooks fire a detached `engram watcher-tick` per meaningful event: **Stop** (turn boundary — the primary trigger), **PostToolUse** failure→success (recovery fast-path), **UserPromptSubmit** on a likely correction, and **SessionEnd/PreCompact** (flush). Each tick reads the JSONL transcript delta since its cursor, gates out pure-chat turns (unless armed by a prior failure), calls `claude -p --resume` (model via `$ENGRAM_WATCHER_MODEL`), and saves. Ticks are serialized per session by a file lock and coalesced by `$ENGRAM_TICK_COALESCE_SEC`. State (cursor / armed / fail_streak / last_tick_ts) lives in `watcher_state`, accessed only through `watcher/state.py`. **Tail recovery:** if a session dies before its final Stop/flush, the next **SessionStart** runs an idle-sweep (`state.sweep_idle`) that re-fires a flush tick for any tracked session with unread lines and an old last tick.
 4. **Consolidation** (`consolidation/agent.py`) — nightly Opus agent that reviews the day's sessions.
 
 ## Running tests
@@ -47,8 +47,9 @@ Read per tick (each tick is a fresh process), so changes apply to the next event
 - `$ENGRAM_WATCHER_MODEL` — model for the watcher's `claude -p` (default `opus`).
 - `$ENGRAM_WATCHER_TIMEOUT` — per-call `claude -p` timeout in seconds (default `120`).
 - `$ENGRAM_TICK_COALESCE_SEC` — min seconds between ticks for one session; a burst of triggers coalesces into one model call (default `45`; flush triggers ignore it).
+- `$ENGRAM_IDLE_SWEEP_SEC` — how old a tracked session's last tick must be before the SessionStart idle-sweep treats its unread tail as abandoned and re-fires a flush tick (default `1800`).
 
-`MAX_FORM_RETRIES` (lifecycle.py) bounds how many ticks a failed transcript window is retried (cursor held, `fail_streak` persisted in `watcher_state`) before giving up and advancing past it; it is a correctness bound, not an env knob.
+`MAX_FORM_RETRIES` (tick.py) bounds how many ticks a failed transcript window is retried (cursor held, `fail_streak` persisted in `watcher_state`) before giving up and advancing past it; it is a correctness bound, not an env knob.
 
 ## DB location
 

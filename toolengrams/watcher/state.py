@@ -1,0 +1,181 @@
+"""watcher_state persistence — the single seam over the watcher_state table.
+
+Every read/write of a session's tick cursor and retry/arm state goes through
+here. The event-driven tick (`tick.py`) and the SessionStart idle-sweep are the
+only callers; no raw `watcher_state` SQL lives outside this module.
+
+The shape a tick reads and commits is `TickState`. The state the old in-process
+poll kept in local variables (cursor / armed / fail_streak / last_tick_ts) now
+lives in columns so it survives across the independent per-event tick processes.
+"""
+
+from __future__ import annotations
+
+import time
+from dataclasses import dataclass
+from pathlib import Path
+
+from .. import db
+from ..utils import slugify_cwd
+from .log import _log
+
+# `seconds_since_tick` returns this when a session has never ticked (or on
+# error) so the coalesce gate always lets the next tick through (fail-open:
+# better an extra tick than a missed one).
+_NEVER = 10 ** 9
+
+
+@dataclass
+class TickState:
+    """The per-session state one tick reads and commits."""
+
+    last_line_read: int
+    watcher_session_id: str | None
+    armed: bool
+    fail_streak: int
+
+
+@dataclass
+class IdleSession:
+    """A tracked session with unread transcript lines and an old last tick —
+    a candidate for a flush tick (tail recovery)."""
+
+    session_id: str
+    transcript_path: str
+    cwd: str
+
+
+def derive_transcript_path(session_id: str, cwd: str) -> str:
+    """Derive the JSONL transcript path from session_id and cwd."""
+    slug = slugify_cwd(cwd)
+    return str(Path.home() / ".claude" / "projects" / slug / f"{session_id}.jsonl")
+
+
+def ensure_row(session_id: str, transcript_path: str, cwd: str) -> None:
+    """Create the watcher_state row if missing (idempotent). Called by
+    SessionStart and defensively by the tick so ticks are self-sufficient."""
+    try:
+        now_ts = int(time.time())
+        with db.session() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO watcher_state "
+                "(work_session_id, transcript_path, last_line_read, "
+                " last_checked_ts, cwd, created_ts) VALUES (?, ?, 0, ?, ?, ?)",
+                (session_id, transcript_path, now_ts, cwd, now_ts),
+            )
+    except Exception:
+        pass
+
+
+def read(session_id: str) -> TickState:
+    """Read the tick state for a session. Missing row → fresh zero state."""
+    with db.session() as conn:
+        row = conn.execute(
+            "SELECT last_line_read, watcher_session_id, armed, fail_streak "
+            "FROM watcher_state WHERE work_session_id = ?",
+            (session_id,),
+        ).fetchone()
+    if row is None:
+        return TickState(last_line_read=0, watcher_session_id=None,
+                         armed=False, fail_streak=0)
+    return TickState(
+        last_line_read=row["last_line_read"],
+        watcher_session_id=row["watcher_session_id"],
+        armed=bool(row["armed"]),
+        fail_streak=row["fail_streak"],
+    )
+
+
+def commit_tick(session_id: str, *, watcher_session_id: str | None,
+                last_line: int, armed: int, fail_streak: int) -> None:
+    """Persist the outcome of one tick: cursor + retry/arm state + timestamps.
+
+    Bumps `last_tick_ts` (and `last_checked_ts`) unconditionally so the coalesce
+    gate and the idle-sweep see the tick happened, even on a no-op window."""
+    now_ts = int(time.time())
+    with db.session() as conn:
+        conn.execute(
+            "UPDATE watcher_state SET watcher_session_id = ?, last_line_read = ?, "
+            "armed = ?, fail_streak = ?, last_tick_ts = ?, last_checked_ts = ? "
+            "WHERE work_session_id = ?",
+            (watcher_session_id, last_line, armed, fail_streak, now_ts, now_ts, session_id),
+        )
+
+
+def arm(session_id: str) -> None:
+    """Mark a session armed (a tool failure happened): the next turn-boundary
+    tick runs the model even if that turn had no tool lines.
+
+    arm is the highest-value formation signal, so a write failure is logged
+    rather than swallowed silently."""
+    try:
+        with db.session() as conn:
+            conn.execute(
+                "UPDATE watcher_state SET armed = 1 WHERE work_session_id = ?",
+                (session_id,),
+            )
+    except Exception as e:
+        _log(f"ARM-ERROR session={session_id} error={e}")
+
+
+def seconds_since_tick(session_id: str) -> int:
+    """Seconds since this session's last tick. Returns a large sentinel if the
+    session never ticked or on any error — so the coalesce gate (policy lives in
+    tick.py) always lets the next tick through."""
+    try:
+        now_ts = int(time.time())
+        with db.session() as conn:
+            row = conn.execute(
+                "SELECT last_tick_ts FROM watcher_state WHERE work_session_id = ?",
+                (session_id,),
+            ).fetchone()
+        last = (row["last_tick_ts"] if row else 0) or 0
+        return now_ts - last if last > 0 else _NEVER
+    except Exception:
+        return _NEVER
+
+
+def sweep_idle(idle_sec: int, exclude_session_id: str = "") -> list[IdleSession]:
+    """Tracked sessions that ticked at least once, whose transcript still has
+    unread lines, and whose last tick is older than `idle_sec`.
+
+    This is the backstop for a tail lost when a session died (hard kill, crash,
+    OOM) before its final Stop/flush fired: the coalesce window or the missing
+    SessionEnd left `<idle_sec>` of activity unprocessed and nothing re-triggers
+    it (a new session = new cursor row). A `last_tick_ts` of 0 means the session
+    never produced a completed turn, so there is no tail to recover — those are
+    excluded by the `last_tick_ts > 0` filter."""
+    out: list[IdleSession] = []
+    try:
+        cutoff = int(time.time()) - idle_sec
+        with db.session() as conn:
+            rows = conn.execute(
+                "SELECT work_session_id, transcript_path, cwd, last_line_read "
+                "FROM watcher_state "
+                "WHERE last_tick_ts > 0 AND last_tick_ts < ? "
+                "  AND transcript_path != '' AND work_session_id != ?",
+                (cutoff, exclude_session_id),
+            ).fetchall()
+        for row in rows:
+            if _has_unread_lines(row["transcript_path"], row["last_line_read"]):
+                out.append(IdleSession(
+                    session_id=row["work_session_id"],
+                    transcript_path=row["transcript_path"],
+                    cwd=row["cwd"] or "",
+                ))
+    except Exception as e:
+        _log(f"SWEEP-ERROR error={e}")
+    return out
+
+
+def _has_unread_lines(transcript_path: str, cursor: int) -> bool:
+    """True if the transcript has at least one line past `cursor`. Short-circuits
+    on the first unread line so it never reads a whole transcript."""
+    try:
+        with open(transcript_path) as f:
+            for i, _ in enumerate(f):
+                if i >= cursor:
+                    return True
+        return False
+    except OSError:
+        return False

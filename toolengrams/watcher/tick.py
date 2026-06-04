@@ -6,14 +6,19 @@ detected failure→success, a user correction). One tick = read the transcript
 delta since the cursor → gate → call the watcher model → save → advance.
 
 State that the old in-process loop kept in local variables now lives in
-`watcher_state` (armed / last_tick_ts / fail_streak), so it survives across the
-independent per-event tick processes.
+`watcher_state` (cursor / armed / fail_streak / last_tick_ts), behind the
+`state` module, so it survives across the independent per-event tick processes.
 
 Concurrency: ticks for the same session are serialized by a non-blocking file
 lock. If a tick is already running, a newly-fired one exits immediately — the
 in-flight tick reads to the current EOF, and the next event re-triggers if more
 arrived. This is what prevents two ticks racing the cursor or double-resuming
 the same `claude` session.
+
+Tail recovery: a session can die (hard kill, crash) before its final Stop/flush
+fires, leaving the last window unprocessed. `sweep_idle_sessions` (run from
+SessionStart) re-fires a flush tick for any tracked session with unread lines
+and an old last tick.
 """
 
 from __future__ import annotations
@@ -22,13 +27,12 @@ import fcntl
 import os
 import subprocess
 import sys
-import time
 from contextlib import contextmanager
 from pathlib import Path
 
-from .. import db
 from ..prompts.watcher import WATCHER_SUBSEQUENT_HEADER
 from ..utils import WATCHER_CHILD_ENV
+from . import state
 from .agent import (
     CLAUDE_BIN,
     WATCHER_SCHEMA,
@@ -39,21 +43,47 @@ from .agent import (
     _parse_response,
     _save_memory,
 )
-from .lifecycle import (
-    LOG_PATH,
-    MAX_FORM_RETRIES,
-    PYTHON_BIN,
-    REPO_ROOT,
-    _log,
-    _retry_decision,
-)
+from .log import LOG_PATH, _log
+from .state import ensure_row
 from .transcript_format import _format_delta, _read_lines_from
+
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+PYTHON_BIN = sys.executable
+
+# How many consecutive failed attempts on the SAME transcript window before we
+# give up and advance past it. A failure (model exception/timeout, or an
+# unparseable response) HOLDS the cursor and retries next tick — recovering
+# transient failures (529 overload, a one-off timeout, empty stdout). The cap
+# stops a genuinely poison window from wedging the watcher. `fail_streak` is
+# persisted in watcher_state, so the retry count carries across tick processes.
+MAX_FORM_RETRIES = 3
 
 # Minimum seconds between ticks for one session. A burst of triggers (rapid
 # turns, a failure + the next Stop) coalesces into a single model call over the
 # accumulated delta. This is a debounce, NOT a poll: no events → no tick. Flush
 # triggers (session end / compaction) ignore it. Tunable via env.
 DEFAULT_TICK_COALESCE_SEC = 45
+
+# A tracked session whose last tick is older than this (and which still has
+# unread lines) is treated as abandoned, and its tail is recovered by a flush
+# tick at the next SessionStart. Tunable via env.
+DEFAULT_IDLE_SWEEP_SEC = 1800
+
+
+def _retry_decision(failed: bool, fail_streak: int, max_attempts: int) -> tuple[bool, int]:
+    """Decide whether to advance the cursor after a tick.
+
+    Returns (advance_cursor, new_fail_streak).
+      - success            → advance, reset streak to 0.
+      - failure, streak<max → HOLD (don't advance), bump streak (retry window).
+      - failure, streak>=max → give up: advance past the window, reset streak.
+    """
+    if not failed:
+        return True, 0
+    streak = fail_streak + 1
+    if streak >= max_attempts:
+        return True, 0
+    return False, streak
 
 
 def _coalesce_sec() -> int:
@@ -65,57 +95,35 @@ def _coalesce_sec() -> int:
     return val if val >= 0 else DEFAULT_TICK_COALESCE_SEC
 
 
-# ---------- hook-side helpers (cheap; run inside the hook process) ----------
-
-
-def ensure_row(session_id: str, transcript_path: str, cwd: str) -> None:
-    """Create the watcher_state row if missing (idempotent). Called by
-    SessionStart and defensively by arm()/run_tick so ticks are self-sufficient."""
+def _idle_sweep_sec() -> int:
+    raw = os.environ.get("ENGRAM_IDLE_SWEEP_SEC", "")
     try:
-        now_ts = int(time.time())
-        with db.session() as conn:
-            conn.execute(
-                "INSERT OR IGNORE INTO watcher_state "
-                "(work_session_id, transcript_path, last_line_read, "
-                " last_checked_ts, cwd, created_ts) VALUES (?, ?, 0, ?, ?, ?)",
-                (session_id, transcript_path, now_ts, cwd, now_ts),
-            )
-    except Exception:
-        pass
+        val = int(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_IDLE_SWEEP_SEC
+    return val if val > 0 else DEFAULT_IDLE_SWEEP_SEC
+
+
+# ---------- hook-side helpers (cheap; run inside the hook process) ----------
 
 
 def arm(session_id: str, transcript_path: str = "", cwd: str = "") -> None:
     """Mark the session 'armed' (a tool failure happened). The next turn-
     boundary tick will run the model even if that turn had no tool_use lines,
-    so an error→fix episode is never gated out."""
-    try:
-        if transcript_path:
-            ensure_row(session_id, transcript_path, cwd)
-        with db.session() as conn:
-            conn.execute(
-                "UPDATE watcher_state SET armed = 1 WHERE work_session_id = ?",
-                (session_id,),
-            )
-    except Exception:
-        pass
+    so an error→fix episode is never gated out. Ensures the row first so an
+    arm before any SessionStart tracking still sticks."""
+    if transcript_path:
+        ensure_row(session_id, transcript_path, cwd)
+    state.arm(session_id)
 
 
 def should_spawn(session_id: str, flush: bool) -> bool:
     """Coalesce gate (hook side): skip spawning a tick if one ran very recently,
-    unless this is a flush. Cheap single-row read."""
+    unless this is a flush. The policy lives here; the data (seconds since the
+    last tick) comes from the state store."""
     if flush:
         return True
-    try:
-        now_ts = int(time.time())
-        with db.session() as conn:
-            row = conn.execute(
-                "SELECT last_tick_ts FROM watcher_state WHERE work_session_id = ?",
-                (session_id,),
-            ).fetchone()
-        last = (row["last_tick_ts"] if row else 0) or 0
-        return (now_ts - last) >= _coalesce_sec()
-    except Exception:
-        return True  # fail-open: better an extra tick than a missed one
+    return state.seconds_since_tick(session_id) >= _coalesce_sec()
 
 
 def spawn_tick(session_id: str, transcript_path: str, cwd: str, flush: bool = False) -> None:
@@ -146,6 +154,20 @@ def trigger(session_id: str, transcript_path: str, cwd: str,
         return
     if should_spawn(session_id, flush):
         spawn_tick(session_id, transcript_path, cwd, flush=flush)
+    else:
+        _log(f"TICK-COALESCED session={session_id} reason={reason}")
+
+
+def sweep_idle_sessions(current_session_id: str) -> int:
+    """Backstop for lost tails: re-fire a flush tick for every tracked session
+    (other than the current one) with unread lines and an old last tick. Run
+    from SessionStart. Returns the number of sessions re-triggered."""
+    idle = state.sweep_idle(_idle_sweep_sec(), exclude_session_id=current_session_id)
+    for s in idle:
+        spawn_tick(s.session_id, s.transcript_path, s.cwd, flush=True)
+    if idle:
+        _log(f"IDLE-SWEEP recovered={len(idle)} from_session={current_session_id}")
+    return len(idle)
 
 
 # ---------- tick body (runs in the detached process) ----------
@@ -181,31 +203,6 @@ def _tick_lock(session_id: str):
         f.close()
 
 
-def _read_tick_state(session_id: str) -> dict:
-    with db.session() as conn:
-        row = conn.execute(
-            "SELECT last_line_read, watcher_session_id, armed, fail_streak "
-            "FROM watcher_state WHERE work_session_id = ?",
-            (session_id,),
-        ).fetchone()
-    if row is None:
-        return {"last_line_read": 0, "watcher_session_id": None,
-                "armed": 0, "fail_streak": 0}
-    return dict(row)
-
-
-def _commit_tick(session_id: str, watcher_session_id, last_line: int,
-                 armed: int, fail_streak: int) -> None:
-    now_ts = int(time.time())
-    with db.session() as conn:
-        conn.execute(
-            "UPDATE watcher_state SET watcher_session_id = ?, last_line_read = ?, "
-            "armed = ?, fail_streak = ?, last_tick_ts = ?, last_checked_ts = ? "
-            "WHERE work_session_id = ?",
-            (watcher_session_id, last_line, armed, fail_streak, now_ts, now_ts, session_id),
-        )
-
-
 def run_tick(session_id: str, transcript_path: str, cwd: str, flush: bool = False) -> int:
     """One event-driven tick. See module docstring."""
     if not CLAUDE_BIN or not session_id:
@@ -214,17 +211,19 @@ def run_tick(session_id: str, transcript_path: str, cwd: str, flush: bool = Fals
 
     with _tick_lock(session_id) as got:
         if not got:
-            return 0  # another tick is in-flight; it covers the latest delta
+            _log(f"TICK-LOCKED session={session_id}")  # another tick covers the delta
+            return 0
 
-        st = _read_tick_state(session_id)
-        last_line = st["last_line_read"]
-        watcher_session_id = st["watcher_session_id"]
-        armed = bool(st["armed"])
-        fail_streak = st["fail_streak"]
+        st = state.read(session_id)
+        last_line = st.last_line_read
+        watcher_session_id = st.watcher_session_id
+        armed = st.armed
+        fail_streak = st.fail_streak
 
         new_lines = _read_lines_from(transcript_path, last_line)
         if not new_lines:
-            _commit_tick(session_id, watcher_session_id, last_line, 0, fail_streak)
+            state.commit_tick(session_id, watcher_session_id=watcher_session_id,
+                              last_line=last_line, armed=0, fail_streak=fail_streak)
             return 0
 
         delta = _format_delta(new_lines)
@@ -233,7 +232,8 @@ def run_tick(session_id: str, transcript_path: str, cwd: str, flush: bool = Fals
         # GATE: a pure-chat turn with nothing armed isn't worth a model call.
         # Advance past it (we won't reprocess chat) and clear state.
         if not delta.strip() or (not flush and not armed and not has_activity):
-            _commit_tick(session_id, watcher_session_id, last_line + len(new_lines), 0, 0)
+            state.commit_tick(session_id, watcher_session_id=watcher_session_id,
+                              last_line=last_line + len(new_lines), armed=0, fail_streak=0)
             if delta.strip():
                 _log(f"SKIP-GATE session={session_id} lines={len(new_lines)}")
             return 0
@@ -281,10 +281,11 @@ def run_tick(session_id: str, transcript_path: str, cwd: str, flush: bool = Fals
             last_line += len(new_lines)
         elif watcher_session_id is not None:
             # Retry from a clean session so a bad turn already in --resume
-            # history can't bias the retry (see lifecycle.py note).
+            # history can't bias the retry.
             watcher_session_id = None
         # armed is consumed once we've run a model interaction for this window.
-        _commit_tick(session_id, watcher_session_id, last_line, 0, fail_streak)
+        state.commit_tick(session_id, watcher_session_id=watcher_session_id,
+                          last_line=last_line, armed=0, fail_streak=fail_streak)
     return 0
 
 

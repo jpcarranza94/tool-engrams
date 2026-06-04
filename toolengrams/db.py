@@ -102,8 +102,8 @@ def session(path: Path | None = None) -> Iterator[sqlite3.Connection]:
             conn.close()
 
     Use this at every call site that opens-then-closes a connection. Reserve
-    raw `db.connect()` for places that have an unusual lifecycle (the watcher
-    re-using a connection across cron ticks, for example).
+    raw `db.connect()` for the rare place that needs to hold a connection across
+    an unusual lifecycle (e.g. a long-lived migration runner).
     """
     conn = connect(path)
     try:

@@ -26,7 +26,8 @@ def _run(payload: dict, monkeypatch) -> dict:
 
 
 def test_session_start_emits_guidance(monkeypatch):
-    with patch.object(session_start.tick, "ensure_row"):
+    with patch.object(session_start.tick, "ensure_row"), \
+         patch.object(session_start.tick, "sweep_idle_sessions"):
         result = _run(
             {"session_id": "s1", "cwd": "/tmp/foo", "hook_event_name": "SessionStart", "source": "startup"},
             monkeypatch,
@@ -37,7 +38,8 @@ def test_session_start_emits_guidance(monkeypatch):
 
 
 def test_guidance_mentions_manual_commands(monkeypatch):
-    with patch.object(session_start.tick, "ensure_row"):
+    with patch.object(session_start.tick, "ensure_row"), \
+         patch.object(session_start.tick, "sweep_idle_sessions"):
         result = _run(
             {"session_id": "s2", "cwd": "/tmp/foo", "hook_event_name": "SessionStart", "source": "startup"},
             monkeypatch,

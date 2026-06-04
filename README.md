@@ -223,7 +223,7 @@ toolengrams/
 ├── schema.sql         ← complete v_latest snapshot for fresh DBs
 ├── db.py              ← connection + migration runner
 ├── models.py          ← dataclasses (Memory, Trigger, Candidate, …)
-└── watcher/           ← event-driven formation (tick.py core; agent/lifecycle/transcript_format)
+└── watcher/           ← event-driven formation (tick.py core; agent/state/transcript_format/log)
 ```
 
 The hot-path (hooks) has **no external dependencies** — stdlib + sqlite3 only. LLMs run only in the watcher tick (`watcher/tick.py`, model via `$ENGRAM_WATCHER_MODEL`, default opus) and `consolidation/agent.py` (Opus), both out-of-band from the tool-call path.
@@ -240,10 +240,11 @@ The installer:
 
 1. Installs `toolengrams` (pip editable)
 2. Wires hooks into `~/.claude/settings.json`:
-   - `SessionStart`, `UserPromptSubmit` (watcher lifecycle)
+   - `SessionStart` (session tracking + idle-sweep), `UserPromptSubmit` (watcher tick on correction)
+   - `Stop` (primary watcher tick), `SessionEnd`/`PreCompact` (flush tick)
    - `PreToolUse` (block surfacing)
-   - `PostToolUse` (reinforcement)
-   - `PostToolUseFailure` (hint surfacing)
+   - `PostToolUse` (reinforcement + recovery tick)
+   - `PostToolUseFailure` (hint surfacing + arms the watcher)
 3. Symlinks skills (`/engram-remember`, `/engram-forget`, `/engram-recall`)
 4. Initializes the SQLite DB at `~/.claude/tool-engrams/db.sqlite`
 5. Optionally schedules the nightly consolidation agent

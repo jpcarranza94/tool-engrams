@@ -60,7 +60,12 @@ def main() -> int:
 def _ensure_session_tracked(payload: dict) -> None:
     """Register the session in watcher_state so event-driven ticks have a cursor
     and config to read. No long-running process is spawned — ticks fire from the
-    Stop / SessionEnd / failure→success / user-correction hooks."""
+    Stop / SessionEnd / failure→success / user-correction hooks.
+
+    Also runs the idle-sweep: re-fire a flush tick for any *other* tracked
+    session whose tail was left unprocessed (it died before its final
+    Stop/flush). A new session starting is a cheap, reliable moment to catch up
+    on abandoned ones."""
     # A watcher-launched `claude` must not register/trigger watchers (recursion).
     if is_watcher_child():
         return
@@ -73,6 +78,7 @@ def _ensure_session_tracked(payload: dict) -> None:
         return
     transcript_path = derive_transcript_path(session_id, cwd)
     tick.ensure_row(session_id, transcript_path, cwd)
+    tick.sweep_idle_sessions(session_id)
 
 
 def _emit(obj: dict) -> None:

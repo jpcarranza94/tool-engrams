@@ -5,8 +5,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-# Env var set on the watcher subprocess by spawn_watcher. Any `claude` the
-# watcher launches inherits it, so the SessionStart / UserPromptSubmit hooks
+# Env var set on each detached watcher-tick by spawn_tick. Any `claude` the
+# tick launches inherits it, so the SessionStart / UserPromptSubmit hooks
 # running inside that child can refuse to spawn yet another watcher. This is
 # belt-and-suspenders on top of `--bare`: if `--bare` ever stops suppressing
 # hooks (the May-2026 recursive-spawn burst), this still stops the recursion.

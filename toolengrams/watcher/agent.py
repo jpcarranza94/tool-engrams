@@ -26,9 +26,9 @@ CLAUDE_BIN = shutil.which("claude")
 DEFAULT_WATCHER_MODEL = "opus"
 
 # Per-call wall-clock budget for the watcher's `claude -p`. The original 60s
-# was too tight: on a busy 5-min window the delta is large and opus is slow, so
-# the call timed out and the whole window's lines were dropped, never retried
-# (lifecycle advances the cursor on error). 120s gives headroom; tune via
+# was too tight: on a busy window the delta is large and opus is slow, so the
+# call timed out and the window was dropped. Now the tick HOLDS the cursor and
+# retries on error (see tick._retry_decision); 120s gives headroom. Tune via
 # $ENGRAM_WATCHER_TIMEOUT without restarting.
 DEFAULT_WATCHER_TIMEOUT = 120
 

@@ -54,7 +54,6 @@ _SELF_PARSING = {
     "consolidate": consolidate.main,
     "status": status.main,
     "dashboard": dashboard.main,
-    "watcher": watcher.main,
     "watcher-tick": watcher.tick.main,
     "monitor": monitor.main,
     "migrate-v1-to-v2": migrate_v1_to_v2.main,
@@ -93,7 +92,6 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("consolidate", help="Nightly consolidation — replay and prune", add_help=False)
     sub.add_parser("status", help="Memory health JSON", add_help=False)
     sub.add_parser("dashboard", help="Open HTML dashboard in browser")
-    sub.add_parser("watcher", help="Persistent parallel watcher (background, model via $ENGRAM_WATCHER_MODEL)", add_help=False)
     sub.add_parser("monitor", help="Resource usage and watcher activity", add_help=False)
     sub.add_parser("migrate-v1-to-v2", help="One-shot migration from v1 (design-v8) to v2 (design-v9)", add_help=False)
     sub.add_parser("rebuild-triggers", help="Re-extract triggers from memory bodies (post-migration repair)", add_help=False)
