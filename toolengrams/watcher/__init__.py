@@ -54,6 +54,7 @@ from .transcript_format import (
     _is_session_alive,
     _read_lines_from,
 )
+from . import tick  # noqa: E402  (event-driven tick engine; imported last)
 
 __all__ = [
     # Public API
@@ -61,6 +62,7 @@ __all__ = [
     "derive_transcript_path",
     "main",
     "watcher_main",
+    "tick",
     # Configuration constants
     "CLAUDE_BIN",
     "DEFAULT_WATCHER_MODEL",

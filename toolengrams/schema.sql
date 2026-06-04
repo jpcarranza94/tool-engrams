@@ -95,7 +95,8 @@ CREATE TABLE IF NOT EXISTS consolidation_runs (
     report                 TEXT
 );
 
--- Watcher process state (one row per live work session).
+-- Watcher state (one row per work session). Tracks the transcript cursor and
+-- the event-driven tick state (armed / coalesce / cross-event retry streak).
 CREATE TABLE IF NOT EXISTS watcher_state (
     work_session_id    TEXT PRIMARY KEY,
     watcher_session_id TEXT,
@@ -104,7 +105,10 @@ CREATE TABLE IF NOT EXISTS watcher_state (
     last_line_read     INTEGER NOT NULL DEFAULT 0,
     last_checked_ts    INTEGER NOT NULL,
     cwd                TEXT,
-    created_ts         INTEGER NOT NULL
+    created_ts         INTEGER NOT NULL,
+    armed              INTEGER NOT NULL DEFAULT 0,
+    last_tick_ts       INTEGER NOT NULL DEFAULT 0,
+    fail_streak        INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(

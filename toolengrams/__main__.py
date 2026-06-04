@@ -30,10 +30,12 @@ from .cli import (
     verify,
 )
 from .hooks import (
+    flush,
     post_tool,
     post_tool_failure,
     pretool,
     session_start,
+    stop,
     user_prompt,
 )
 
@@ -53,6 +55,7 @@ _SELF_PARSING = {
     "status": status.main,
     "dashboard": dashboard.main,
     "watcher": watcher.main,
+    "watcher-tick": watcher.tick.main,
     "monitor": monitor.main,
     "migrate-v1-to-v2": migrate_v1_to_v2.main,
     "rebuild-triggers": rebuild_triggers.main,
@@ -72,8 +75,10 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("pretool", help="PreToolUse hook handler (reads JSON on stdin)")
     sub.add_parser("session-start", help="SessionStart hook handler (reads JSON on stdin)")
     sub.add_parser("post-tool", help="PostToolUse hook handler — success reinforcement (reads JSON on stdin)")
-    sub.add_parser("post-tool-failure", help="PostToolUseFailure hook handler — hint injection on tool failure (reads JSON on stdin)")
-    sub.add_parser("user-prompt", help="UserPromptSubmit hook handler — watcher liveness check (reads JSON on stdin)")
+    sub.add_parser("post-tool-failure", help="PostToolUseFailure hook handler — hint injection + arms the watcher (reads JSON on stdin)")
+    sub.add_parser("user-prompt", help="UserPromptSubmit hook handler — fires a watcher tick on a likely correction (reads JSON on stdin)")
+    sub.add_parser("stop", help="Stop hook handler — primary event-driven watcher trigger (reads JSON on stdin)")
+    sub.add_parser("flush", help="SessionEnd/PreCompact hook handler — final watcher flush tick (reads JSON on stdin)")
     sub.add_parser("seed", help="Insert example memories for smoke testing")
 
     # Listed so --help shows them, but dispatch goes through _SELF_PARSING above.
@@ -103,6 +108,8 @@ def main(argv: list[str] | None = None) -> int:
         "post-tool": post_tool.main,
         "post-tool-failure": post_tool_failure.main,
         "user-prompt": user_prompt.main,
+        "stop": stop.main,
+        "flush": flush.main,
         "seed": seed.main,
         "export": _stub_unimpl("export"),
     }

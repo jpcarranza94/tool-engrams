@@ -115,7 +115,7 @@ if not any("engram post-tool-failure" in str(h)
 else:
     print("  PostToolUseFailure hook already present")
 
-# UserPromptSubmit — watcher liveness check
+# UserPromptSubmit — fires a watcher tick on a likely user correction
 if not any("engram user-prompt" in str(h) for h in hooks.get("UserPromptSubmit", [])):
     hooks.setdefault("UserPromptSubmit", []).append({
         "matcher": "",
@@ -128,6 +128,35 @@ if not any("engram user-prompt" in str(h) for h in hooks.get("UserPromptSubmit",
     print("  Added UserPromptSubmit hook")
 else:
     print("  UserPromptSubmit hook already present")
+
+# Stop — primary event-driven watcher trigger (one tick per completed turn)
+if not any("engram stop" in str(h) for h in hooks.get("Stop", [])):
+    hooks.setdefault("Stop", []).append({
+        "matcher": "",
+        "hooks": [{
+            "type": "command",
+            "command": "engram stop",
+            "timeout": 5000,
+        }]
+    })
+    print("  Added Stop hook")
+else:
+    print("  Stop hook already present")
+
+# SessionEnd + PreCompact — final watcher flush tick (process the tail)
+for _event in ("SessionEnd", "PreCompact"):
+    if not any("engram flush" in str(h) for h in hooks.get(_event, [])):
+        hooks.setdefault(_event, []).append({
+            "matcher": "",
+            "hooks": [{
+                "type": "command",
+                "command": "engram flush",
+                "timeout": 5000,
+            }]
+        })
+        print(f"  Added {_event} hook")
+    else:
+        print(f"  {_event} hook already present")
 
 # Permission for engram CLI.
 perms = settings.setdefault("permissions", {}).setdefault("allow", [])

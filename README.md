@@ -2,7 +2,7 @@
 
 **Tool-bound memory for Claude Code.** Agent-facing tools become self-documenting through interaction: Claude fails a call, the system remembers why, and next session (or next month) arrives with that knowledge in hand.
 
-> **Status:** alpha. Breaking changes between versions. No stable users to protect. See `docs/design-v9.md` for the current design.
+> **Status:** alpha. Breaking changes expected; no stable users to protect. See `docs/design-v9.md` for the current design.
 
 ## The problem
 
@@ -24,17 +24,17 @@ Five components talk to Claude Code via its hook API:
          │  tool call  │   hooks pipe JSON     │
          ▼             ▼                       ▼
    ┌──────────┐ ┌──────────────┐  ┌─────────────────────┐
-   │ pretool  │ │  post-tool-  │  │ session-start /     │
-   │ (block)  │ │  failure     │  │ user-prompt         │
-   │          │ │  (hint)      │  │ (watcher lifecycle) │
+   │ pretool  │ │  post-tool-  │  │ stop / flush /      │
+   │ (block)  │ │  failure     │  │ post-tool / prompt  │
+   │          │ │  (hint+arm)  │  │ (tick triggers)     │
    └────┬─────┘ └──────┬───────┘  └──────────┬──────────┘
-        │              │                     │ spawns
+        │              │                     │ fires detached tick
         │              │                     ▼
         │              │          ┌─────────────────────┐
-        │              │          │ watcher (claude -p, │
-        │              │          │ default: opus,      │
+        │              │          │ watcher-tick        │
+        │              │          │ (claude -p --resume,│
         │              │          │ $ENGRAM_WATCHER_MODEL)
-        │              │          │ every 5 min, forms  │
+        │              │          │ per event, forms    │
         │              │          │ memories from the   │
         │              │          │ transcript delta    │
         │              │          └──────────┬──────────┘
@@ -59,7 +59,7 @@ Every component reads/writes the same SQLite DB. No network, no LLM on the hot p
 | **PreToolUse hook** | `toolengrams/hooks/pretool.py` | Before every whitelisted tool call | Looks up `block`-kind memories; denies the call + injects body on match |
 | **PostToolUse hook** | `toolengrams/hooks/post_tool.py` | After tool success (exit 0 or semantically-OK non-zero) | Reinforcement bookkeeping: bump `useful_count` for memories that surfaced, increment session turn counter |
 | **PostToolUseFailure hook** | `toolengrams/hooks/post_tool_failure.py` | After tool failure (exit ≠ 0 / structural error) | Looks up `hint`-kind memories; injects body as `additionalContext` (non-blocking) |
-| **Watcher** | `toolengrams/watcher.py` | Persistent background `claude -p` (model via `$ENGRAM_WATCHER_MODEL`, default opus); wakes every 5 min | Reads JSONL transcript delta, calls `engram remember` for new patterns |
+| **Watcher** | `toolengrams/watcher/tick.py` | Event-driven `claude -p` (model via `$ENGRAM_WATCHER_MODEL`, default opus); a detached tick fires per turn (Stop), recovery, correction, or session-end | Reads JSONL transcript delta, calls `engram remember` for new patterns |
 | **Consolidation** | `toolengrams/consolidation/agent.py` | Nightly (launchd/cron) | Opus agent reviews yesterday's sessions — prunes noise, discovers missed patterns, deduplicates |
 
 ## Surfacing pipeline
@@ -119,7 +119,7 @@ tool call JSON on stdin
 └─────────────────────────┘
 ```
 
-There is **no cluster-level quality gate** in v2. The two-kind model (blocks are user-authored and rare; hints only fire on real failures) makes per-cluster filtering redundant — quality is shaped by the reinforcement loop (below) and by the watcher / consolidation agents pruning noise out-of-band.
+There is **no cluster-level quality gate**. The two-kind model (blocks are user-authored and rare; hints only fire on real failures) makes per-cluster filtering redundant — quality is shaped by the reinforcement loop (below) and by the watcher / consolidation agents pruning noise out-of-band.
 
 ### Why subsequence match
 
@@ -196,8 +196,10 @@ toolengrams/
 │   ├── pretool.py             block-kind surfacing + deny
 │   ├── post_tool.py           success reinforcement
 │   ├── post_tool_failure.py   hint-kind surfacing (non-blocking)
-│   ├── session_start.py       watcher spawn + formation guidance
-│   └── user_prompt.py         watcher liveness check / respawn
+│   ├── session_start.py       session tracking + formation guidance
+│   ├── user_prompt.py         fires a watcher tick on a likely correction
+│   ├── stop.py                primary watcher tick trigger (turn boundary)
+│   └── flush.py               final watcher tick (SessionEnd / PreCompact)
 ├── retrieval/         ← read path (tool call → memories)
 │   ├── extract.py             tool payload → (tokens, paths)
 │   ├── rank.py                candidates, subseq match, score, filter
@@ -221,10 +223,10 @@ toolengrams/
 ├── schema.sql         ← complete v_latest snapshot for fresh DBs
 ├── db.py              ← connection + migration runner
 ├── models.py          ← dataclasses (Memory, Trigger, Candidate, …)
-└── watcher.py         ← persistent watcher lifecycle (claude -p, model configurable)
+└── watcher/           ← event-driven formation (tick.py core; agent/lifecycle/transcript_format)
 ```
 
-The hot-path (hooks) has **no external dependencies** — stdlib + sqlite3 only. LLMs run only in `watcher.py` (model via `$ENGRAM_WATCHER_MODEL`, default opus) and `consolidation/agent.py` (Opus), both out-of-band from the tool-call path.
+The hot-path (hooks) has **no external dependencies** — stdlib + sqlite3 only. LLMs run only in the watcher tick (`watcher/tick.py`, model via `$ENGRAM_WATCHER_MODEL`, default opus) and `consolidation/agent.py` (Opus), both out-of-band from the tool-call path.
 
 ## Install
 
@@ -272,14 +274,14 @@ engram migrate-v1-to-v2           One-shot migration for pre-v2 installs
 engram rebuild-triggers           Re-extract triggers from bodies (post-migration repair)
 ```
 
-## Database schema (v2)
+## Database schema
 
 - **memories** — content, `kind ∈ {block, hint}`, `scope ∈ {global, project}`, reinforcement counters (`surface_count`, `useful_count`, `last_surfaced_ts`, `pinned`, `archived_ts`)
 - **triggers** — `kind ∈ {token_subseq, path_glob}`. `token_subseq` stores `first_token` (indexed) + `tokens_json`. `path_glob` stores an fnmatch pattern.
 - **session_surfaces** — which memories surfaced when, under which hook. Per-session dedup + reinforcement targeting.
 - **session_turns** — per-session tool-call counter.
 - **consolidation_runs** — nightly run log with quality metrics.
-- **watcher_state** — active watcher processes (PID, transcript cursor).
+- **watcher_state** — per-session transcript cursor + event-driven tick state (`armed`, `last_tick_ts`, `fail_streak`).
 
 ## Configuration
 
@@ -287,6 +289,8 @@ engram rebuild-triggers           Re-extract triggers from bodies (post-migratio
 |---|---|---|
 | `ENGRAM_DB` | `~/.claude/tool-engrams/db.sqlite` | SQLite DB path |
 | `ENGRAM_WATCHER_MODEL` | `opus` | Model passed to `claude -p` for the watcher (e.g. `haiku` for ~20× cost reduction at the cost of more parse errors) |
+| `ENGRAM_WATCHER_TIMEOUT` | `120` | Per-call `claude -p` timeout (seconds) for a watcher tick |
+| `ENGRAM_TICK_COALESCE_SEC` | `45` | Min seconds between watcher ticks for one session; a burst of triggers coalesces into one call (flush triggers ignore it) |
 | `ENGRAM_WATCHER_PROMPT_PATH` | unset | Override the watcher's prompt file (see below) |
 | `ENGRAM_CONSOLIDATION_PROMPT_PATH` | unset | Override the consolidation agent's prompt file |
 
@@ -302,12 +306,12 @@ The watcher and consolidation agents use markdown-file prompts you can override 
 
 Variable interpolation uses `str.format` — the consolidation prompt expects `{target_date}`, `{session_list}`, `{memory_summary}`.
 
-## What v2 explicitly doesn't do
+## What this explicitly doesn't do
 
 - **Semantic error detection on exit 0** (query returns empty when it shouldn't). Needs LLM in the hot path; out of scope.
 - **Conversational RAG-style memory.** Different problem; use mem0 or similar.
 - **Destructive-command blocking as the pitch.** Claude Code's permission rules are the right tool for that. Blocks exist as a narrow option, not the headline.
-- **Hebbian co-activation.** Removed in v2 — recall itself needs to be reliable first before a secondary ranking signal is worth maintaining.
+- **Hebbian co-activation.** Removed — recall itself needs to be reliable first before a secondary ranking signal is worth maintaining.
 - **MCP server / non-Claude-Code harnesses.** Maybe later.
 
 ## Testing
