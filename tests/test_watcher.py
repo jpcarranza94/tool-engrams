@@ -10,6 +10,8 @@ from pathlib import Path
 from toolengrams import db
 from toolengrams.utils import is_pid_alive
 from toolengrams.watcher import (
+    lifecycle,
+    watcher_main,
     _cleanup,
     _format_delta,
     _get_saved_cursor,
@@ -463,3 +465,116 @@ def test_full_lifecycle_cursor_continuity(temp_db, tmp_path):
     assert "message 9" in delta2
     assert "message 0" not in delta2
     assert "message 4" not in delta2
+
+
+# ---------- watcher_main loop: retry / hold-cursor wiring ----------
+
+
+class _StopLoop(Exception):
+    """Raised from a stubbed time.sleep to break the watcher's `while True`."""
+
+
+def _user_line(text: str) -> str:
+    return json.dumps(
+        {"type": "message", "message": {"role": "user", "content": text}}
+    ) + "\n"
+
+
+# claude -p stdout envelopes that _parse_response understands.
+_OK_NONE = json.dumps({"structured_output": {"action": "none"}, "session_id": "w1"})
+_JUNK_PROSE = json.dumps({"result": "Sure! Happy to help.", "session_id": "w1"})
+
+
+def _insert_watcher_row(session_id, transcript_path, cwd):
+    now = int(time.time())
+    with db.session() as conn:
+        conn.execute(
+            "INSERT INTO watcher_state (work_session_id, watcher_pid, "
+            "transcript_path, last_line_read, last_checked_ts, cwd, created_ts) "
+            "VALUES (?, 999999, ?, 0, ?, ?, ?)",
+            (session_id, transcript_path, now, cwd, now),
+        )
+
+
+def _read_cursor(session_id):
+    with db.session() as conn:
+        row = conn.execute(
+            "SELECT last_line_read FROM watcher_state WHERE work_session_id = ?",
+            (session_id,),
+        ).fetchone()
+    return row["last_line_read"] if row else None
+
+
+def _wire_loop(monkeypatch, tmp_path, new_fn, resume_fn, sleep_fn):
+    monkeypatch.setattr(lifecycle, "LOG_PATH", tmp_path / "watcher.log")
+    monkeypatch.setattr(lifecycle, "CLAUDE_BIN", "claude")
+    monkeypatch.setattr(lifecycle, "_is_session_alive", lambda *a, **k: True)
+    monkeypatch.setattr(lifecycle, "_claude_p_new", new_fn)
+    monkeypatch.setattr(lifecycle, "_claude_p_resume", resume_fn)
+    monkeypatch.setattr(lifecycle.time, "sleep", sleep_fn)
+
+
+def test_watcher_loop_holds_then_advances_after_giveup(temp_db, tmp_path, monkeypatch):
+    """A persistently failing window is retried in place (cursor HELD) and only
+    advances after MAX_FORM_RETRIES. This is the loop wiring that the unit test
+    of _retry_decision cannot prove on its own."""
+    transcript = tmp_path / "t.jsonl"
+    transcript.write_text(_user_line("do the thing"))  # one-line window
+    _insert_watcher_row("s-giveup", str(transcript), "/tmp")
+
+    calls = {"n": 0}
+
+    def boom(*a, **k):
+        calls["n"] += 1
+        raise RuntimeError("model down")
+
+    sleeps = {"n": 0}
+
+    def fake_sleep(_):
+        sleeps["n"] += 1
+        if sleeps["n"] > lifecycle.MAX_FORM_RETRIES:  # allow MAX ticks, then stop
+            raise _StopLoop()
+
+    _wire_loop(monkeypatch, tmp_path, boom, boom, fake_sleep)
+    rc = watcher_main("s-giveup", str(transcript), "/tmp")
+
+    assert rc == 0
+    # Same 1-line window retried exactly MAX_FORM_RETRIES times (cursor held)...
+    assert calls["n"] == lifecycle.MAX_FORM_RETRIES
+    # ...then advanced past it once we gave up.
+    assert _read_cursor("s-giveup") == 1
+
+
+def test_watcher_loop_resets_session_on_parse_failure_retry(temp_db, tmp_path, monkeypatch):
+    """After a parse failure on a --resume session, the retry must start a FRESH
+    session (_claude_p_new) rather than re-feed the bad turn via _claude_p_resume."""
+    transcript = tmp_path / "t.jsonl"
+    transcript.write_text(_user_line("window one"))
+    _insert_watcher_row("s-reset", str(transcript), "/tmp")
+
+    route = []
+
+    def fake_new(message, schema):
+        route.append("new")
+        return _OK_NONE          # success → advance, sets session_id w1
+
+    def fake_resume(sid, message, schema):
+        route.append("resume")
+        return _JUNK_PROSE       # parse_error → hold + reset session
+
+    sleeps = {"n": 0}
+
+    def fake_sleep(_):
+        sleeps["n"] += 1
+        if sleeps["n"] == 2:     # before tick 2, a new window appears
+            with open(transcript, "a") as f:
+                f.write(_user_line("window two"))
+        if sleeps["n"] > 3:
+            raise _StopLoop()
+
+    _wire_loop(monkeypatch, tmp_path, fake_new, fake_resume, fake_sleep)
+    watcher_main("s-reset", str(transcript), "/tmp")
+
+    # tick1: window1 via new (ok). tick2: window2 via resume (parse-fail → hold +
+    # reset). tick3: window2 RETRIED via new — proving the session was reset.
+    assert route == ["new", "resume", "new"]

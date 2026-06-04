@@ -5,6 +5,18 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+# Env var set on the watcher subprocess by spawn_watcher. Any `claude` the
+# watcher launches inherits it, so the SessionStart / UserPromptSubmit hooks
+# running inside that child can refuse to spawn yet another watcher. This is
+# belt-and-suspenders on top of `--bare`: if `--bare` ever stops suppressing
+# hooks (the May-2026 recursive-spawn burst), this still stops the recursion.
+WATCHER_CHILD_ENV = "ENGRAM_IN_WATCHER"
+
+
+def is_watcher_child() -> bool:
+    """True if this process was spawned by (or inside) the watcher subprocess."""
+    return os.environ.get(WATCHER_CHILD_ENV) == "1"
+
 
 def slugify_cwd(cwd: str) -> str:
     """Match Claude Code's project-slug convention: `/` → `-`."""

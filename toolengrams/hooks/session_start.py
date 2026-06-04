@@ -28,6 +28,7 @@ import sys
 
 from .. import db
 from ..prompts.session_start import FORMATION_GUIDANCE
+from ..utils import is_watcher_child
 from ..watcher import derive_transcript_path, spawn_watcher
 from ._skip import is_internal_cwd
 
@@ -64,6 +65,11 @@ def _maybe_spawn_watcher(payload: dict) -> None:
     cwd = payload.get("cwd", "")
 
     if not session_id or not cwd:
+        return
+
+    # Never let a watcher-launched `claude` spawn another watcher (recursion
+    # guard, independent of --bare).
+    if is_watcher_child():
         return
 
     # Skip non-user sessions (consolidation agent, old observer, etc.)
