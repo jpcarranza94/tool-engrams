@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import json
-import os
 import time
 from pathlib import Path
 
 from .. import db, memory_store
+from ..retrieval import session_state
 
 
 WATCHER_LOG = Path.home() / ".claude" / "tool-engrams" / "watcher.log"
@@ -23,10 +23,7 @@ def main(argv: list[str] | None = None) -> int:
         db_size = DB_PATH.stat().st_size if DB_PATH.exists() else 0
 
         # Surfaces today.
-        surfaces_today = conn.execute(
-            "SELECT COUNT(*) FROM session_surfaces WHERE surfaced_ts > ?",
-            (day_ago,),
-        ).fetchone()[0]
+        surfaces_today = session_state.count_surfaces_since(conn, day_ago)
 
         # Active memories.
         active = memory_store.count_active(conn)

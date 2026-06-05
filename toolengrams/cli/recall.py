@@ -14,6 +14,7 @@ import json
 
 from .. import db, memory_store
 from ..models import Memory, Trigger
+from ..retrieval import session_state
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -59,11 +60,7 @@ def _show_detail(conn, memory_id: int) -> int:
         return 1
 
     triggers = memory_store.triggers_for(conn, memory_id)
-    surfaces = conn.execute(
-        "SELECT session_id, hook, surfaced_ts FROM session_surfaces "
-        "WHERE memory_id = ? ORDER BY surfaced_ts DESC LIMIT 10",
-        (memory_id,),
-    ).fetchall()
+    surfaces = session_state.surfaces_for_memory(conn, memory_id, limit=10)
 
     print(json.dumps({
         "memory": dataclasses.asdict(mem),
