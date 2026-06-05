@@ -16,9 +16,7 @@ import json
 import sys
 import time
 
-from .. import db
-from ..queries import find_memory, fts_quote
-from ..reinforcement.counters import archive, restore, soft_demote
+from .. import db, memory_store
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -51,46 +49,40 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 
 def _forget_one(conn, name: str, hard_delete: bool) -> int:
-    row = find_memory(conn, name)
-    if not row:
+    mem = memory_store.find_by_name(conn, name)
+    if not mem:
         print(json.dumps({"error": "not_found", "query": name}))
         return 1
 
     if hard_delete:
-        archive(conn, row["id"])
+        memory_store.archive(conn, mem.id)
         action = "archived"
     else:
-        soft_demote(conn, row["id"])
+        memory_store.soft_demote(conn, mem.id)
         action = "soft_demoted"
 
     print(json.dumps({
         "action": action,
-        "memory_id": row["id"],
-        "name": row["name"],
+        "memory_id": mem.id,
+        "name": mem.name,
     }))
     return 0
 
 
 def _forget_topic(conn, keyword: str, hard_delete: bool) -> int:
-    rows = conn.execute(
-        "SELECT m.id, m.name FROM memories m "
-        "JOIN memories_fts f ON m.id = f.rowid "
-        "WHERE memories_fts MATCH ? AND m.archived_ts IS NULL",
-        (fts_quote(keyword),),
-    ).fetchall()
-
-    if not rows:
+    mems = memory_store.search(conn, keyword, limit=10000)
+    if not mems:
         print(json.dumps({"error": "no_matches", "topic": keyword}))
         return 1
 
     now_ts = int(time.time())
     affected = []
-    for r in rows:
+    for m in mems:
         if hard_delete:
-            archive(conn, r["id"], now_ts)
+            memory_store.archive(conn, m.id, now_ts)
         else:
-            soft_demote(conn, r["id"])
-        affected.append({"memory_id": r["id"], "name": r["name"]})
+            memory_store.soft_demote(conn, m.id)
+        affected.append({"memory_id": m.id, "name": m.name})
 
     print(json.dumps({
         "action": "archived" if hard_delete else "soft_demoted",
@@ -102,15 +94,15 @@ def _forget_topic(conn, keyword: str, hard_delete: bool) -> int:
 
 
 def _restore(conn, name: str) -> int:
-    row = find_memory(conn, name, include_archived=True)
-    if not row:
+    mem = memory_store.find_by_name(conn, name, include_archived=True)
+    if not mem:
         print(json.dumps({"error": "not_found", "query": name}))
         return 1
 
-    restore(conn, row["id"])
+    memory_store.restore(conn, mem.id)
     print(json.dumps({
         "action": "restored",
-        "memory_id": row["id"],
-        "name": row["name"],
+        "memory_id": mem.id,
+        "name": mem.name,
     }))
     return 0

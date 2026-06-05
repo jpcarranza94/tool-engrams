@@ -20,7 +20,7 @@ import sys
 import time
 from typing import Any
 
-from .. import db
+from .. import db, memory_store
 from ..formation import (
     FormationCandidate,
     consolidate_vocabulary,
@@ -316,13 +316,10 @@ def _insert(
 ) -> int:
     now_ts = int(time.time())
     with db.transaction(conn):
-        cur = conn.execute(
-            "INSERT INTO memories "
-            "(name, description, body, kind, scope, project_slug, created_ts, pinned) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (name, description, body, kind, scope, project_slug, now_ts, 1 if pinned else 0),
+        memory_id = memory_store.insert_memory(
+            conn, name=name, description=description, body=body, kind=kind,
+            scope=scope, project_slug=project_slug, pinned=pinned, created_ts=now_ts,
         )
-        memory_id = int(cur.lastrowid)
         insert_candidate_triggers(conn, memory_id, candidates)
         insert_candidate_triggers(conn, memory_id, extras_to_candidates(extra_triggers))
     return memory_id

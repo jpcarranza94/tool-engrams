@@ -34,9 +34,8 @@ import json
 import sys
 from typing import Any
 
-from .. import db
+from .. import db, memory_store
 from ..prompts.pretool import format_injection
-from ..reinforcement.counters import bump_surface_counts
 from ..retrieval.extract import extract_hints
 from ..retrieval.rank import now, retrieve_candidates
 from ..retrieval.session_state import (
@@ -116,7 +115,7 @@ def _run(payload: dict[str, Any]) -> int:
         log_surfaces(conn, session_id, memory_ids, tool_use_id,
                      HOOK_PRE_TOOL_USE, current_turn, now_ts,
                      first_token=first_token)
-        bump_surface_counts(conn, memory_ids, now_ts)
+        memory_store.bump_surface(conn, memory_ids, now_ts)
 
     # Deny if ANY block matches; allow (with context) if only hints.
     has_block = any(c.kind == "block" for c in fresh)

@@ -22,8 +22,7 @@ import json
 import logging
 import os
 
-from .. import db
-from ..queries import find_memory
+from .. import db, memory_store
 from ..retrieval.session_state import (
     find_latest_active_session,
     get_most_recent_unmarked_surface,
@@ -40,8 +39,8 @@ def main(argv: list[str] | None = None) -> int:
         # marking outcome is meaningless. Surface as not_found to keep the
         # caller's mental model clean (symmetric with `engram verify`'s
         # treatment of non-existent names, plus a clear `error` field).
-        row = find_memory(conn, args.name, include_archived=False)
-        if not row:
+        mem = memory_store.find_by_name(conn, args.name, include_archived=False)
+        if not mem:
             print(json.dumps({"error": "not_found", "query": args.name}))
             return 1
 
@@ -59,13 +58,13 @@ def main(argv: list[str] | None = None) -> int:
             }))
             return 1
 
-        surfaced_ts = get_most_recent_unmarked_surface(conn, session_id, row["id"])
+        surfaced_ts = get_most_recent_unmarked_surface(conn, session_id, mem.id)
         if surfaced_ts is None:
             print(json.dumps({
                 "action": "noop",
                 "reason": "no_unmarked_surface_in_session",
-                "memory_id": row["id"],
-                "name": row["name"],
+                "memory_id": mem.id,
+                "name": mem.name,
                 "session_id": session_id,
                 "resolved_via": resolved_via,
             }))
@@ -73,7 +72,7 @@ def main(argv: list[str] | None = None) -> int:
 
         with db.transaction(conn):
             updated = mark_surface_outcome_by_ts(
-                conn, session_id, row["id"], surfaced_ts, "unused",
+                conn, session_id, mem.id, surfaced_ts, "unused",
             )
         if not updated:
             # Lost a race with another process — surface row got marked between
@@ -81,8 +80,8 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps({
                 "action": "noop",
                 "reason": "race_lost",
-                "memory_id": row["id"],
-                "name": row["name"],
+                "memory_id": mem.id,
+                "name": mem.name,
                 "session_id": session_id,
                 "resolved_via": resolved_via,
             }))
@@ -90,12 +89,12 @@ def main(argv: list[str] | None = None) -> int:
 
         logger.info(
             "marked outcome=unused memory_id=%d session=%s surfaced_ts=%d resolved_via=%s",
-            row["id"], session_id, surfaced_ts, resolved_via,
+            mem.id, session_id, surfaced_ts, resolved_via,
         )
         print(json.dumps({
             "action": "skipped",
-            "memory_id": row["id"],
-            "name": row["name"],
+            "memory_id": mem.id,
+            "name": mem.name,
             "session_id": session_id,
             "surfaced_ts": surfaced_ts,
             "outcome": "unused",

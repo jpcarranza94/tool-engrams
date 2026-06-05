@@ -19,8 +19,7 @@ import argparse
 import json
 import time
 
-from .. import db
-from ..queries import find_memory
+from .. import db, memory_store
 
 NOOP_WINDOW_SECONDS = 60
 
@@ -28,43 +27,37 @@ NOOP_WINDOW_SECONDS = 60
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     with db.session() as conn:
-        row = find_memory(conn, args.name, include_archived=True)
-        if not row:
+        mem = memory_store.find_by_name(conn, args.name, include_archived=True)
+        if not mem:
             print(json.dumps({"error": "not_found", "query": args.name}))
             return 1
-        if row["archived_ts"] is not None:
+        if mem.archived_ts is not None:
             print(json.dumps({
                 "error": "archived",
-                "memory_id": row["id"],
-                "name": row["name"],
+                "memory_id": mem.id,
+                "name": mem.name,
             }))
             return 2
 
         now_ts = int(time.time())
-        previous = conn.execute(
-            "SELECT last_verified_ts FROM memories WHERE id = ?",
-            (row["id"],),
-        ).fetchone()["last_verified_ts"]
+        previous = mem.last_verified_ts
 
         if previous is not None and now_ts - previous < NOOP_WINDOW_SECONDS:
             print(json.dumps({
                 "action": "noop",
                 "reason": "recently_verified",
-                "memory_id": row["id"],
-                "name": row["name"],
+                "memory_id": mem.id,
+                "name": mem.name,
                 "previous_last_verified_ts": previous,
             }))
             return 0
 
         with db.transaction(conn):
-            conn.execute(
-                "UPDATE memories SET last_verified_ts = ? WHERE id = ?",
-                (now_ts, row["id"]),
-            )
+            memory_store.set_verified(conn, mem.id, now_ts)
         print(json.dumps({
             "action": "verified",
-            "memory_id": row["id"],
-            "name": row["name"],
+            "memory_id": mem.id,
+            "name": mem.name,
             "last_verified_ts": now_ts,
             "previous_last_verified_ts": previous,
         }))

@@ -12,12 +12,12 @@ can never match a real tool call (e.g. first_token = "STAGING_FOO=" or
 
 from __future__ import annotations
 
-import json
 import re
 import sqlite3
 import sys
 from typing import Any, Iterable
 
+from .. import memory_store
 from .candidates import FormationCandidate
 
 # A valid Bash first_token shape: letter/underscore start, then word chars,
@@ -71,20 +71,11 @@ def insert_candidate_triggers(
                     file=sys.stderr,
                 )
                 continue
-            conn.execute(
-                "INSERT INTO triggers "
-                "(memory_id, kind, first_token, tokens_json) "
-                "VALUES (?, 'token_subseq', ?, ?)",
-                (memory_id, tokens[0], json.dumps(list(tokens))),
-            )
+            memory_store.add_token_trigger(conn, memory_id, tokens[0], list(tokens))
         elif c.kind == "path_glob":
             if not c.path_pattern:
                 continue
-            conn.execute(
-                "INSERT INTO triggers (memory_id, kind, path_pattern) "
-                "VALUES (?, 'path_glob', ?)",
-                (memory_id, c.path_pattern),
-            )
+            memory_store.add_path_trigger(conn, memory_id, c.path_pattern)
         else:
             continue
         n += 1

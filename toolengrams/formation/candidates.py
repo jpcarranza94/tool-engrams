@@ -18,12 +18,12 @@ itself. `cli/remember.py` wires it to persistence.
 
 from __future__ import annotations
 
-import json
 import re
 import sqlite3
 from dataclasses import dataclass
 from typing import Iterable, Literal
 
+from .. import memory_store
 from ..retrieval.extract import _SUBCOMMAND_TOOLS, _tokenize_bash
 
 CandidateKind = Literal["token_subseq", "path_glob"]
@@ -179,19 +179,9 @@ def consolidate_vocabulary(
     out = list(candidates)
     for c in out:
         if c.kind == "token_subseq":
-            tokens_json = json.dumps(list(c.tokens))
-            row = conn.execute(
-                "SELECT COUNT(DISTINCT memory_id) FROM triggers "
-                "WHERE kind = 'token_subseq' AND tokens_json = ?",
-                (tokens_json,),
-            ).fetchone()
+            c.existing_memories = memory_store.count_token_trigger_owners(conn, list(c.tokens))
         elif c.kind == "path_glob":
-            row = conn.execute(
-                "SELECT COUNT(DISTINCT memory_id) FROM triggers "
-                "WHERE kind = 'path_glob' AND path_pattern = ?",
-                (c.path_pattern,),
-            ).fetchone()
+            c.existing_memories = memory_store.count_path_trigger_owners(conn, c.path_pattern)
         else:
-            row = (0,)
-        c.existing_memories = int(row[0] or 0)
+            c.existing_memories = 0
     return out

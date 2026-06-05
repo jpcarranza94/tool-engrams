@@ -7,7 +7,7 @@ import os
 import time
 from pathlib import Path
 
-from .. import db
+from .. import db, memory_store
 
 
 WATCHER_LOG = Path.home() / ".claude" / "tool-engrams" / "watcher.log"
@@ -29,9 +29,7 @@ def main(argv: list[str] | None = None) -> int:
         ).fetchone()[0]
 
         # Active memories.
-        active = conn.execute(
-            "SELECT COUNT(*) FROM memories WHERE archived_ts IS NULL"
-        ).fetchone()[0]
+        active = memory_store.count_active(conn)
 
         # Active watcher sessions.
         active_watchers = conn.execute(

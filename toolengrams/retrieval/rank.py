@@ -21,6 +21,7 @@ import json
 import sqlite3
 import time
 
+from .. import memory_store
 from ..models import Candidate
 from ..reinforcement.scoring import final_score
 from .extract import ExtractedTriggerHint
@@ -42,26 +43,10 @@ def retrieve_candidates(
     returned — pretool asks for blocks, PostToolUseFailure asks for hints.
     """
     candidates: dict[int, Candidate] = {}
-    kind_sql = " AND m.kind = ?" if kind else ""
-    kind_args = (kind,) if kind else ()
 
     # --- token_subseq matches ---
     if hint.tokens:
-        first = hint.tokens[0]
-        sql = f"""
-            SELECT
-                m.id, m.name, m.body, m.kind, m.scope,
-                m.surface_count, m.useful_count, m.last_surfaced_ts, m.pinned,
-                t.tokens_json
-            FROM triggers t
-            JOIN memories m ON m.id = t.memory_id
-            WHERE t.kind = 'token_subseq'
-              AND t.first_token = ?
-              AND m.archived_ts IS NULL
-              AND (m.scope = 'global' OR m.project_slug = ?)
-              {kind_sql}
-        """
-        rows = conn.execute(sql, (first, project_slug, *kind_args)).fetchall()
+        rows = memory_store.match_token_triggers(conn, hint.tokens[0], project_slug, kind)
         call = tuple(hint.tokens)
         for row in rows:
             stored = _load_tokens(row["tokens_json"])
@@ -72,19 +57,7 @@ def retrieve_candidates(
 
     # --- path_glob matches ---
     if hint.paths:
-        sql = f"""
-            SELECT
-                m.id, m.name, m.body, m.kind, m.scope,
-                m.surface_count, m.useful_count, m.last_surfaced_ts, m.pinned,
-                t.path_pattern
-            FROM triggers t
-            JOIN memories m ON m.id = t.memory_id
-            WHERE t.kind = 'path_glob'
-              AND m.archived_ts IS NULL
-              AND (m.scope = 'global' OR m.project_slug = ?)
-              {kind_sql}
-        """
-        rows = conn.execute(sql, (project_slug, *kind_args)).fetchall()
+        rows = memory_store.match_path_triggers(conn, project_slug, kind)
         for row in rows:
             if _any_path_matches(row["path_pattern"], hint.paths):
                 _merge_path_candidate(candidates, row)

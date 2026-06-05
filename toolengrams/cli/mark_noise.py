@@ -18,8 +18,7 @@ import json
 import logging
 import sqlite3
 
-from .. import db
-from ..queries import find_memory
+from .. import db, memory_store
 
 logger = logging.getLogger("engram.mark_noise")
 
@@ -27,34 +26,34 @@ logger = logging.getLogger("engram.mark_noise")
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     with db.session() as conn:
-        row = find_memory(conn, args.name, include_archived=True)
-        if not row:
+        mem = memory_store.find_by_name(conn, args.name, include_archived=True)
+        if not mem:
             print(json.dumps({"error": "not_found", "query": args.name}))
             return 1
 
         with db.transaction(conn):
             updated = _mark_unmarked_surfaces_noise(
-                conn, row["id"], args.session_id,
+                conn, mem.id, args.session_id,
             )
 
         if updated == 0:
             print(json.dumps({
                 "action": "noop",
                 "reason": "no_unmarked_surfaces",
-                "memory_id": row["id"],
-                "name": row["name"],
+                "memory_id": mem.id,
+                "name": mem.name,
                 "session_id": args.session_id,
             }))
             return 0
 
         logger.info(
             "marked outcome=noise memory_id=%d session=%s rows=%d",
-            row["id"], args.session_id or "*", updated,
+            mem.id, args.session_id or "*", updated,
         )
         print(json.dumps({
             "action": "marked_noise",
-            "memory_id": row["id"],
-            "name": row["name"],
+            "memory_id": mem.id,
+            "name": mem.name,
             "session_id": args.session_id,
             "rows_updated": updated,
         }))

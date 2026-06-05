@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import sqlite3
 import tempfile
 import time
@@ -10,23 +9,13 @@ import webbrowser
 from datetime import datetime
 from pathlib import Path
 
-from .. import db
+from .. import db, memory_store
 
 LOG_PATH = Path.home() / ".claude" / "tool-engrams" / "watcher.log"
 
 # The watcher is no longer a long-lived process, so "active" = a tracked session
 # that ticked within this window, not a live PID.
 ACTIVE_WATCHER_WINDOW_SEC = 900
-
-
-def _decode_tokens(raw: str | None) -> list[str]:
-    if not raw:
-        return []
-    try:
-        parsed = json.loads(raw)
-    except (ValueError, TypeError):
-        return []
-    return [str(x) for x in parsed] if isinstance(parsed, list) else []
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -76,16 +65,8 @@ def _read_watcher_stats() -> dict:
 
 
 def _build_html(conn: sqlite3.Connection) -> str:
-    memories = conn.execute(
-        "SELECT id, name, body, kind, scope, project_slug, "
-        "surface_count, useful_count, pinned, created_ts, last_surfaced_ts, archived_ts "
-        "FROM memories ORDER BY archived_ts IS NOT NULL, id DESC"
-    ).fetchall()
-
-    triggers = conn.execute(
-        "SELECT memory_id, kind, first_token, tokens_json, path_pattern "
-        "FROM triggers ORDER BY memory_id"
-    ).fetchall()
+    memories = memory_store.list_memories(conn, include_archived=True, order="dashboard")
+    triggers = memory_store.all_triggers(conn)
 
     surfaces = conn.execute(
         "SELECT ss.session_id, ss.memory_id, m.name, ss.hook, ss.surfaced_ts "
@@ -103,14 +84,13 @@ def _build_html(conn: sqlite3.Connection) -> str:
     # Group triggers by memory_id.
     triggers_by_mem: dict[int, list] = {}
     for t in triggers:
-        mid = t["memory_id"]
-        triggers_by_mem.setdefault(mid, []).append(t)
+        triggers_by_mem.setdefault(t.memory_id, []).append(t)
 
     # Stats.
-    active = [m for m in memories if m["archived_ts"] is None]
-    archived = [m for m in memories if m["archived_ts"] is not None]
-    total_surfaces = sum(m["surface_count"] for m in active)
-    total_useful = sum(m["useful_count"] for m in active)
+    active = [m for m in memories if m.archived_ts is None]
+    archived = [m for m in memories if m.archived_ts is not None]
+    total_surfaces = sum(m.surface_count for m in active)
+    total_useful = sum(m.useful_count for m in active)
     watcher_alive = _count_active_watchers(conn)
     watcher_stats = _read_watcher_stats()
 
@@ -122,47 +102,46 @@ def _build_html(conn: sqlite3.Connection) -> str:
         return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
 
     def _usefulness(m):
-        return (m["useful_count"] + 1) / (m["surface_count"] + 2)
+        return (m.useful_count + 1) / (m.surface_count + 2)
 
     def _bar(val, max_val):
         pct = min(100, int(val / max(max_val, 1) * 100))
         return f'<div class="bar"><div class="fill" style="width:{pct}%"></div></div>'
 
-    max_surfaces = max((m["surface_count"] for m in active), default=1) or 1
+    max_surfaces = max((m.surface_count for m in active), default=1) or 1
 
     # Build memory rows.
     memory_rows = []
     for m in active:
-        trigs = triggers_by_mem.get(m["id"], [])
+        trigs = triggers_by_mem.get(m.id, [])
         trig_tags = []
         for t in trigs:
-            if t["kind"] == "token_subseq":
-                tokens = _decode_tokens(t["tokens_json"])
-                label = " ".join(tokens) if tokens else (t["first_token"] or "?")
+            if t.kind == "token_subseq":
+                label = " ".join(t.tokens) if t.tokens else (t.first_token or "?")
                 trig_tags.append(f'<span class="tag head">{label}</span>')
-            elif t["kind"] == "path_glob":
-                trig_tags.append(f'<span class="tag path">{t["path_pattern"]}</span>')
+            elif t.kind == "path_glob":
+                trig_tags.append(f'<span class="tag path">{t.path_pattern}</span>')
         trig_html = " ".join(trig_tags) or '<span class="tag none">no triggers</span>'
 
         u = _usefulness(m)
         u_class = "good" if u > 0.5 else "ok" if u > 0.2 else "low"
-        scope_tag = f'<span class="tag scope-{m["scope"]}">{m["scope"]}</span>'
+        scope_tag = f'<span class="tag scope-{m.scope}">{m.scope}</span>'
 
         memory_rows.append(f"""
-        <tr class="memory-row" data-id="{m['id']}">
-            <td class="id">{m['id']}</td>
+        <tr class="memory-row" data-id="{m.id}">
+            <td class="id">{m.id}</td>
             <td>
-                <div class="name">{m['name']}</div>
-                <div class="body">{m['body'][:200]}</div>
+                <div class="name">{m.name}</div>
+                <div class="body">{m.body[:200]}</div>
                 <div class="triggers">{trig_html}</div>
             </td>
-            <td><span class="tag {m['kind']}">{m['kind']}</span></td>
+            <td><span class="tag {m.kind}">{m.kind}</span></td>
             <td>{scope_tag}</td>
-            <td class="num">{m['surface_count']}{_bar(m['surface_count'], max_surfaces)}</td>
-            <td class="num">{m['useful_count']}</td>
+            <td class="num">{m.surface_count}{_bar(m.surface_count, max_surfaces)}</td>
+            <td class="num">{m.useful_count}</td>
             <td class="num"><span class="usefulness {u_class}">{u:.0%}</span></td>
-            <td class="ts">{_ts(m['last_surfaced_ts'])}</td>
-            <td>{"📌" if m['pinned'] else ""}</td>
+            <td class="ts">{_ts(m.last_surfaced_ts)}</td>
+            <td>{"📌" if m.pinned else ""}</td>
         </tr>""")
 
     # Archived rows.
@@ -170,12 +149,12 @@ def _build_html(conn: sqlite3.Connection) -> str:
     for m in archived:
         archived_rows.append(f"""
         <tr class="archived-row">
-            <td class="id">{m['id']}</td>
-            <td><div class="name">{m['name']}</div></td>
-            <td>{m['kind']}</td>
-            <td class="num">{m['surface_count']}</td>
-            <td class="num">{m['useful_count']}</td>
-            <td class="ts">{_ts(m['archived_ts'])}</td>
+            <td class="id">{m.id}</td>
+            <td><div class="name">{m.name}</div></td>
+            <td>{m.kind}</td>
+            <td class="num">{m.surface_count}</td>
+            <td class="num">{m.useful_count}</td>
+            <td class="ts">{_ts(m.archived_ts)}</td>
         </tr>""")
 
     # Surface log rows.
