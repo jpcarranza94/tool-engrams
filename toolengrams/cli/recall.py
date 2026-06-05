@@ -9,11 +9,11 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
-import sys
 
-from .. import db
-from ..queries import fts_quote
+from .. import db, memory_store
+from ..models import Memory, Trigger
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -38,51 +38,27 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 
 def _list_all(conn, limit: int) -> int:
-    rows = conn.execute(
-        "SELECT m.id, m.name, m.kind, m.scope, m.project_slug, "
-        "m.surface_count, m.useful_count, m.pinned, m.created_ts, m.archived_ts "
-        "FROM memories m WHERE m.archived_ts IS NULL "
-        "ORDER BY m.created_ts DESC LIMIT ?",
-        (limit,),
-    ).fetchall()
-    print(json.dumps({"count": len(rows), "memories": [_row_summary(r) for r in rows]}))
+    mems = memory_store.list_memories(conn, order="created")[:limit]
+    print(json.dumps({"count": len(mems), "memories": [_summary(m) for m in mems]}))
     return 0
 
 
 def _search(conn, query: str, limit: int) -> int:
-    fts_query = fts_quote(query)
-    if not fts_query:
+    if not memory_store.fts_quote(query):
         return _list_all(conn, limit)
-
-    rows = conn.execute(
-        "SELECT m.id, m.name, m.kind, m.scope, m.project_slug, "
-        "m.surface_count, m.useful_count, m.pinned, m.created_ts, m.archived_ts "
-        "FROM memories m JOIN memories_fts f ON m.id = f.rowid "
-        "WHERE memories_fts MATCH ? AND m.archived_ts IS NULL "
-        "ORDER BY rank LIMIT ?",
-        (fts_query, limit),
-    ).fetchall()
-    print(json.dumps({"query": query, "count": len(rows), "memories": [_row_summary(r) for r in rows]}))
+    mems = memory_store.search(conn, query, limit)
+    print(json.dumps({"query": query, "count": len(mems),
+                      "memories": [_summary(m) for m in mems]}))
     return 0
 
 
 def _show_detail(conn, memory_id: int) -> int:
-    row = conn.execute(
-        "SELECT id, name, description, body, kind, scope, project_slug, "
-        "surface_count, useful_count, pinned, created_ts, last_surfaced_ts, archived_ts "
-        "FROM memories WHERE id = ?",
-        (memory_id,),
-    ).fetchone()
-    if not row:
+    mem = memory_store.get(conn, memory_id)
+    if not mem:
         print(json.dumps({"error": "not_found", "id": memory_id}))
         return 1
 
-    triggers = conn.execute(
-        "SELECT kind, first_token, tokens_json, path_pattern "
-        "FROM triggers WHERE memory_id = ?",
-        (memory_id,),
-    ).fetchall()
-
+    triggers = memory_store.triggers_for(conn, memory_id)
     surfaces = conn.execute(
         "SELECT session_id, hook, surfaced_ts FROM session_surfaces "
         "WHERE memory_id = ? ORDER BY surfaced_ts DESC LIMIT 10",
@@ -90,53 +66,34 @@ def _show_detail(conn, memory_id: int) -> int:
     ).fetchall()
 
     print(json.dumps({
-        "memory": dict(row),
-        "triggers": [dict(t) for t in triggers],
+        "memory": dataclasses.asdict(mem),
+        "triggers": [_trigger_dict(t) for t in triggers],
         "recent_surfaces": [dict(s) for s in surfaces],
     }))
     return 0
 
 
 def _show_stats(conn) -> int:
-    kind_counts = conn.execute(
-        "SELECT kind, COUNT(*) as count FROM memories "
-        "WHERE archived_ts IS NULL GROUP BY kind"
-    ).fetchall()
-    scope_counts = conn.execute(
-        "SELECT scope, COUNT(*) as count FROM memories "
-        "WHERE archived_ts IS NULL GROUP BY scope"
-    ).fetchall()
-    total = conn.execute(
-        "SELECT COUNT(*) as total, "
-        "SUM(CASE WHEN pinned = 1 THEN 1 ELSE 0 END) as pinned, "
-        "SUM(CASE WHEN archived_ts IS NOT NULL THEN 1 ELSE 0 END) as archived "
-        "FROM memories"
-    ).fetchone()
-    trigger_counts = conn.execute(
-        "SELECT triggers.kind AS kind, COUNT(*) as count FROM triggers "
-        "JOIN memories m ON triggers.memory_id = m.id "
-        "WHERE m.archived_ts IS NULL GROUP BY triggers.kind"
-    ).fetchall()
-
-    print(json.dumps({
-        "total": total["total"],
-        "active": total["total"] - (total["archived"] or 0),
-        "pinned": total["pinned"] or 0,
-        "archived": total["archived"] or 0,
-        "by_kind": {r["kind"]: r["count"] for r in kind_counts},
-        "by_scope": {r["scope"]: r["count"] for r in scope_counts},
-        "triggers_by_kind": {r["kind"]: r["count"] for r in trigger_counts},
-    }))
+    print(json.dumps(memory_store.summary_stats(conn)))
     return 0
 
 
-def _row_summary(row) -> dict:
+def _summary(m: Memory) -> dict:
     return {
-        "id": row["id"],
-        "name": row["name"],
-        "kind": row["kind"],
-        "scope": row["scope"],
-        "surface_count": row["surface_count"],
-        "useful_count": row["useful_count"],
-        "pinned": bool(row["pinned"]),
+        "id": m.id,
+        "name": m.name,
+        "kind": m.kind,
+        "scope": m.scope,
+        "surface_count": m.surface_count,
+        "useful_count": m.useful_count,
+        "pinned": m.pinned,
+    }
+
+
+def _trigger_dict(t: Trigger) -> dict:
+    return {
+        "kind": t.kind,
+        "first_token": t.first_token,
+        "tokens_json": t.tokens_json,
+        "path_pattern": t.path_pattern,
     }

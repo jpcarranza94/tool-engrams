@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import time
 
-from .. import db
+from .. import db, memory_store
 
 
 SEED_MEMORIES = [
@@ -60,26 +60,19 @@ def main() -> int:
     inserted = 0
     with db.session() as conn, db.transaction(conn):
         for m in SEED_MEMORIES:
-            existing = conn.execute(
-                "SELECT id FROM memories WHERE name = ?", (m["name"],)
-            ).fetchone()
-            if existing:
+            if memory_store.name_exists(conn, m["name"]):
                 continue
-            cur = conn.execute(
-                "INSERT INTO memories "
-                "(name, description, body, kind, scope, project_slug, created_ts) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (
-                    m["name"],
-                    m["description"],
-                    m["body"],
-                    m["kind"],
-                    m["scope"],
-                    None if m["scope"] == "global" else m.get("project_slug"),
-                    now_ts,
-                ),
+            mid = memory_store.insert_memory(
+                conn,
+                name=m["name"],
+                description=m["description"],
+                body=m["body"],
+                kind=m["kind"],
+                scope=m["scope"],
+                project_slug=None if m["scope"] == "global" else m.get("project_slug"),
+                pinned=False,
+                created_ts=now_ts,
             )
-            mid = cur.lastrowid
             _insert_triggers(conn, mid, m["triggers"])
             inserted += 1
 
@@ -94,15 +87,6 @@ def _insert_triggers(conn, memory_id: int, triggers: list[dict]) -> None:
             tokens = list(t["tokens"])
             if not tokens:
                 continue
-            conn.execute(
-                "INSERT INTO triggers "
-                "(memory_id, kind, first_token, tokens_json) "
-                "VALUES (?, 'token_subseq', ?, ?)",
-                (memory_id, tokens[0], json.dumps(tokens)),
-            )
+            memory_store.add_token_trigger(conn, memory_id, tokens[0], tokens)
         elif kind == "path_glob":
-            conn.execute(
-                "INSERT INTO triggers (memory_id, kind, path_pattern) "
-                "VALUES (?, 'path_glob', ?)",
-                (memory_id, t["path_pattern"]),
-            )
+            memory_store.add_path_trigger(conn, memory_id, t["path_pattern"])

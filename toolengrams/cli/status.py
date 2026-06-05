@@ -5,29 +5,13 @@ from __future__ import annotations
 import json
 import sys
 
-from .. import db
+from .. import db, memory_store
 from ..consolidation.schedule import is_installed as schedule_is_installed
 
 
 def main(argv: list[str] | None = None) -> int:
     with db.session() as conn:
-        # Memory counts.
-        mem_stats = conn.execute(
-            "SELECT "
-            "  COUNT(*) AS total, "
-            "  SUM(CASE WHEN archived_ts IS NULL THEN 1 ELSE 0 END) AS active, "
-            "  SUM(CASE WHEN archived_ts IS NOT NULL THEN 1 ELSE 0 END) AS archived, "
-            "  SUM(CASE WHEN archived_ts IS NULL THEN surface_count ELSE 0 END) AS total_surfaces, "
-            "  SUM(CASE WHEN archived_ts IS NULL THEN useful_count ELSE 0 END) AS total_useful "
-            "FROM memories"
-        ).fetchone()
-
-        # Trigger counts.
-        trigger_stats = conn.execute(
-            "SELECT t.kind AS kind, COUNT(*) AS count FROM triggers t "
-            "JOIN memories m ON t.memory_id = m.id WHERE m.archived_ts IS NULL "
-            "GROUP BY t.kind"
-        ).fetchall()
+        health = memory_store.health_stats(conn)
 
         # Last consolidation run.
         last_run = conn.execute(
@@ -36,19 +20,16 @@ def main(argv: list[str] | None = None) -> int:
             "FROM consolidation_runs ORDER BY started_ts DESC LIMIT 1"
         ).fetchone()
 
-        # Schedule status.
-        schedule_installed = schedule_is_installed()
-
         result = {
             "memories": {
-                "active": mem_stats["active"] or 0,
-                "archived": mem_stats["archived"] or 0,
-                "total_surfaces": mem_stats["total_surfaces"] or 0,
-                "total_useful": mem_stats["total_useful"] or 0,
+                "active": health["active"],
+                "archived": health["archived"],
+                "total_surfaces": health["total_surfaces"],
+                "total_useful": health["total_useful"],
             },
-            "triggers": {r["kind"]: r["count"] for r in trigger_stats},
+            "triggers": health["triggers_by_kind"],
             "last_consolidation": dict(last_run) if last_run else None,
-            "schedule_installed": schedule_installed,
+            "schedule_installed": schedule_is_installed(),
         }
 
         print(json.dumps(result, indent=2))

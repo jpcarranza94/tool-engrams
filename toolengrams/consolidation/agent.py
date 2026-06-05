@@ -15,6 +15,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from .. import memory_store
 from ..claude_invoke import invoke_claude_agent, parse_claude_json_output, write_agent_settings
 from ..prompts.consolidation import build_consolidation_prompt
 from ..reinforcement.scoring import usefulness
@@ -49,32 +50,26 @@ def _get_memory_summary(db_path: Path) -> str:
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
 
-    # Order: never-verified first, then oldest-verified next. This puts the
-    # most audit-worthy memories at the top of the agent's context so a
-    # truncated reading still covers the work that matters.
-    memories = conn.execute(
-        "SELECT m.id, m.name, m.body, m.kind, m.surface_count, m.useful_count, "
-        "       m.scope, m.project_slug, m.created_ts, m.last_verified_ts "
-        "FROM memories m WHERE m.archived_ts IS NULL "
-        "ORDER BY (m.last_verified_ts IS NOT NULL), m.last_verified_ts, m.created_ts"
-    ).fetchall()
+    # Audit-first ordering (never-verified, then oldest-verified) puts the most
+    # audit-worthy memories at the top of the agent's context so a truncated
+    # reading still covers the work that matters.
+    memories = memory_store.list_memories(conn, order="audit")
 
     lines = [f"Active memories ({len(memories)}) ordered audit-first (never-verified, then oldest-verified):"]
     for m in memories:
-        u = usefulness(m["useful_count"], m["surface_count"])
-        scope_str = m["scope"]
-        if m["project_slug"]:
-            scope_str = f"{scope_str}:{m['project_slug']}"
-        verified = m["last_verified_ts"]
-        verified_str = f"verified={verified}" if verified else "verified=never"
+        u = usefulness(m.useful_count, m.surface_count)
+        scope_str = m.scope
+        if m.project_slug:
+            scope_str = f"{scope_str}:{m.project_slug}"
+        verified_str = f"verified={m.last_verified_ts}" if m.last_verified_ts else "verified=never"
         lines.append(
-            f"  [{m['id']}] \"{m['name']}\" kind={m['kind']} "
+            f"  [{m.id}] \"{m.name}\" kind={m.kind} "
             f"scope={scope_str} "
-            f"surfaces={m['surface_count']} useful={m['useful_count']} "
-            f"usefulness={u:.2f} created={m['created_ts']} {verified_str}"
+            f"surfaces={m.surface_count} useful={m.useful_count} "
+            f"usefulness={u:.2f} created={m.created_ts} {verified_str}"
         )
         # Body truncated to 500 chars; agent can `engram recall --id N` for full text.
-        lines.append(f"       body: {m['body'][:500]}")
+        lines.append(f"       body: {m.body[:500]}")
 
     surfaces = conn.execute(
         "SELECT ss.memory_id, m.name, ss.session_id, ss.hook "

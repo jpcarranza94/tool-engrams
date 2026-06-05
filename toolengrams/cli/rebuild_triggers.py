@@ -17,7 +17,7 @@ import json
 import sys
 from pathlib import Path
 
-from .. import db
+from .. import db, memory_store
 from ..formation.candidates import extract_candidates
 from ..formation.triggers import (
     first_token_looks_like_cli,
@@ -69,31 +69,23 @@ def main(argv: list[str] | None = None) -> int:
             return _drop_malformed(conn, args.dry_run)
 
         if args.only_triggerless:
-            rows = conn.execute("""
-                SELECT m.id, m.name, m.body FROM memories m
-                LEFT JOIN triggers t ON t.memory_id = m.id
-                WHERE m.archived_ts IS NULL AND t.id IS NULL
-                GROUP BY m.id
-            """).fetchall()
+            mems = memory_store.list_triggerless(conn)
         else:
-            rows = conn.execute(
-                "SELECT id, name, body FROM memories WHERE archived_ts IS NULL"
-            ).fetchall()
+            mems = memory_store.list_memories(conn)
 
         summary: dict = {
             "mode": "dry_run" if args.dry_run else "applied",
             "only_triggerless": args.only_triggerless,
-            "total_memories_considered": len(rows),
+            "total_memories_considered": len(mems),
             "rebuilt": 0,
             "no_triggers_extracted": 0,
             "extracted_triggers": [],
         }
 
         with db.transaction(conn):
-            for row in rows:
-                mid = row["id"]
-                body = row["body"] or ""
-                candidates = extract_candidates(body)
+            for m in mems:
+                mid = m.id
+                candidates = extract_candidates(m.body or "")
                 if not candidates:
                     summary["no_triggers_extracted"] += 1
                     continue
@@ -101,13 +93,13 @@ def main(argv: list[str] | None = None) -> int:
                 if not args.dry_run:
                     # Wipe existing triggers (even if this memory already has some) —
                     # we're re-deriving from the body as source of truth.
-                    conn.execute("DELETE FROM triggers WHERE memory_id = ?", (mid,))
+                    memory_store.delete_triggers_for(conn, mid)
                     insert_candidate_triggers(conn, mid, candidates)
 
                 summary["rebuilt"] += 1
                 summary["extracted_triggers"].append({
                     "id": mid,
-                    "name": row["name"],
+                    "name": m.name,
                     "triggers": [
                         {
                             "kind": c.kind,
@@ -133,11 +125,7 @@ def _drop_malformed(conn, dry_run: bool) -> int:
     triggerless — the path_glob still works. The `memories_still_triggerless`
     list flags memories the user may want to fix manually.
     """
-    rows = conn.execute(
-        "SELECT t.id, t.memory_id, t.first_token, t.tokens_json, m.name "
-        "FROM triggers t JOIN memories m ON m.id = t.memory_id "
-        "WHERE t.kind = 'token_subseq' AND m.archived_ts IS NULL"
-    ).fetchall()
+    rows = memory_store.list_active_token_triggers(conn)
 
     bad = [r for r in rows if not first_token_looks_like_cli(r["first_token"])]
 
@@ -161,7 +149,7 @@ def _drop_malformed(conn, dry_run: bool) -> int:
     if not dry_run:
         with db.transaction(conn):
             for r in bad:
-                conn.execute("DELETE FROM triggers WHERE id = ?", (r["id"],))
+                memory_store.delete_trigger(conn, r["id"])
                 # Mirror the stderr trail emitted by insert_candidate_triggers
                 # during normal formation so audit grep'ing works uniformly.
                 print(
@@ -173,23 +161,18 @@ def _drop_malformed(conn, dry_run: bool) -> int:
 
             # Re-derive for memories left with no triggers at all.
             for mid in affected_memory_ids:
-                remaining = conn.execute(
-                    "SELECT COUNT(*) FROM triggers WHERE memory_id = ?", (mid,)
-                ).fetchone()[0]
-                if remaining > 0:
+                if memory_store.count_triggers_for(conn, mid) > 0:
                     continue
                 summary["memories_left_triggerless"] += 1
-                body_row = conn.execute(
-                    "SELECT name, body FROM memories WHERE id = ?", (mid,)
-                ).fetchone()
-                candidates = extract_candidates(body_row["body"])
+                mem = memory_store.get(conn, mid)
+                candidates = extract_candidates(mem.body) if mem else []
                 if candidates:
                     inserted = insert_candidate_triggers(conn, mid, candidates)
                     if inserted:
                         summary["memories_rebuilt_from_body"] += 1
                         continue
                 summary["memories_still_triggerless"].append(
-                    {"id": mid, "name": body_row["name"]}
+                    {"id": mid, "name": mem.name if mem else None}
                 )
     else:
         summary["trigger_rows_dropped"] = len(bad)

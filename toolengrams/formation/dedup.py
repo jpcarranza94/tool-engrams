@@ -14,7 +14,7 @@ import sqlite3
 import time
 from typing import Any
 
-from .. import db
+from .. import db, memory_store
 from .candidates import FormationCandidate
 from .triggers import extras_to_candidates, insert_candidate_triggers
 
@@ -51,13 +51,7 @@ def find_overlapping_memory(
     if not new_tokens and not new_globs:
         return None
 
-    rows = conn.execute(
-        "SELECT m.id, m.name, t.kind, t.tokens_json, t.path_pattern "
-        "FROM memories m JOIN triggers t ON t.memory_id = m.id "
-        "WHERE m.archived_ts IS NULL "
-        "AND (m.scope = 'global' OR m.project_slug = ?)",
-        (project_slug,),
-    ).fetchall()
+    rows = memory_store.overlap_rows(conn, project_slug)
 
     scores: dict[int, dict] = {}
     for row in rows:
@@ -109,12 +103,11 @@ def update_existing_memory(
     """Replace body/name/kind on an existing memory, merge triggers."""
     now_ts = int(time.time())
     with db.transaction(conn):
-        conn.execute(
-            "UPDATE memories SET name = ?, description = ?, body = ?, kind = ?, "
-            "pinned = ?, created_ts = ? WHERE id = ?",
-            (name, description, body, kind, 1 if pinned else 0, now_ts, existing_id),
+        memory_store.update_memory(
+            conn, existing_id, name=name, description=description, body=body,
+            kind=kind, pinned=pinned, created_ts=now_ts,
         )
-        conn.execute("DELETE FROM triggers WHERE memory_id = ?", (existing_id,))
+        memory_store.delete_triggers_for(conn, existing_id)
         insert_candidate_triggers(conn, existing_id, candidates)
         insert_candidate_triggers(conn, existing_id, extras_to_candidates(extra_triggers))
     return existing_id

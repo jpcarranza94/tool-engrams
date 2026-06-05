@@ -223,6 +223,7 @@ toolengrams/
 ├── schema.sql         ← complete v_latest snapshot for fresh DBs
 ├── db.py              ← connection + migration runner
 ├── models.py          ← dataclasses (Memory, Trigger, Candidate, …)
+├── memory_store.py    ← the Memory aggregate seam: all memories/triggers/FTS SQL
 └── watcher/           ← event-driven formation (tick.py core; agent/state/transcript_format/log)
 ```
 

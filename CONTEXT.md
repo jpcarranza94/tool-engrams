@@ -33,6 +33,13 @@ The counting that scores a memory — `useful_count / surface_count`, bumped fro
 post-tool hooks. Distinct from formation (creating memories) and consolidation.
 _Avoid_: scoring (too generic), feedback, learning.
 
+**Memory store**:
+The single persistence seam for the Memory aggregate (`memories` + `triggers` +
+`memories_fts`). Every SQL statement against those tables lives there; reads return
+`Memory` / `Trigger` objects. Sibling seams: the session store (`session_state`) and
+the watcher store (`watcher/state`).
+_Avoid_: DAO, repository, query layer.
+
 ### Watcher
 
 **Watcher**:

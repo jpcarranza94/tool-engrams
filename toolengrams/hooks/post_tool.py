@@ -19,8 +19,7 @@ import sys
 import time
 from typing import Any
 
-from .. import db
-from ..reinforcement.counters import bump_useful_counts
+from .. import db, memory_store
 from ..retrieval.extract import extract_hints
 from ..retrieval.session_state import (
     HOOK_POST_TOOL_USE_FAILURE,
@@ -73,7 +72,7 @@ def _run(payload: dict[str, Any]) -> int:
                     conn, session_id, tool_use_id, HOOK_PRE_TOOL_USE,
                 )
                 if pre_ids:
-                    bump_useful_counts(conn, pre_ids)
+                    memory_store.bump_useful(conn, pre_ids)
                     mark_surface_outcome(
                         conn, session_id, pre_ids, "helpful",
                         hook=HOOK_PRE_TOOL_USE,
@@ -93,7 +92,7 @@ def _run(payload: dict[str, Any]) -> int:
                     )
                     if failure_ids:
                         recovered = True
-                        bump_useful_counts(conn, failure_ids)
+                        memory_store.bump_useful(conn, failure_ids)
                         mark_surface_outcome(
                             conn, session_id, failure_ids, "helpful",
                             hook=HOOK_POST_TOOL_USE_FAILURE,
