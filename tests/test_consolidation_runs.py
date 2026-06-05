@@ -38,3 +38,29 @@ def test_last_and_recent_runs_order_newest_first(temp_db):
 
 def test_last_run_none_when_empty(temp_db):
     assert runs.last_run(temp_db) is None
+
+
+def test_record_run_persists_every_column(temp_db):
+    """Lock the 14-column INSERT mapping (the blast radius): a distinct value per
+    column must land in its own column, with memories_strengthened defaulting 0."""
+    runs.record_run(
+        temp_db,
+        run_date="2026-06-09", started_ts=11, completed_ts=22, sessions_scanned=33,
+        episodes_evaluated=44, memories_weakened=55, memories_archived=66,
+        memories_discovered=77, report="the report", quality_score=0.875,
+        surfaces_helpful=88, surfaces_noise=99, memories_verified=111,
+    )
+    row = temp_db.execute(
+        "SELECT run_date, started_ts, completed_ts, sessions_scanned, episodes_evaluated, "
+        "memories_strengthened, memories_weakened, memories_archived, memories_discovered, "
+        "report, quality_score, surfaces_helpful, surfaces_noise, memories_verified "
+        "FROM consolidation_runs WHERE run_date = '2026-06-09'"
+    ).fetchone()
+    assert dict(row) == {
+        "run_date": "2026-06-09", "started_ts": 11, "completed_ts": 22,
+        "sessions_scanned": 33, "episodes_evaluated": 44,
+        "memories_strengthened": 0,  # hardcoded default
+        "memories_weakened": 55, "memories_archived": 66, "memories_discovered": 77,
+        "report": "the report", "quality_score": 0.875,
+        "surfaces_helpful": 88, "surfaces_noise": 99, "memories_verified": 111,
+    }
