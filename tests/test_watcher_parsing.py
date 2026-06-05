@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 import os
 
+from toolengrams.claude_invoke import ClaudeResult
+from toolengrams.watcher import agent
 from toolengrams.watcher import (
     DEFAULT_WATCHER_MODEL,
     DEFAULT_WATCHER_TIMEOUT,
@@ -112,6 +114,33 @@ def test_retry_decision_full_sequence():
         outcomes.append(advance)
     assert outcomes == [False, False, True]
     assert streak == 0  # reset after giving up
+
+
+# ---------- _run: re-raise a process error so run_tick holds the window ----------
+
+
+def test_run_reraises_on_invoke_error(monkeypatch):
+    """A process failure (timeout/spawn) comes back as ClaudeResult.error from
+    the seam; the watcher wrapper must re-raise it so run_tick treats the window
+    as held-and-retried rather than parsing empty stdout."""
+    monkeypatch.setattr(
+        agent, "invoke_claude_agent",
+        lambda *a, **k: ClaudeResult(stdout="", returncode=1, timed_out=True,
+                                     error="claude -p timed out (120s)"),
+    )
+    try:
+        agent._run("msg", "{}", resume=None)
+        assert False, "expected RuntimeError"
+    except RuntimeError as e:
+        assert "timed out" in str(e)
+
+
+def test_run_returns_stdout_on_success(monkeypatch):
+    monkeypatch.setattr(
+        agent, "invoke_claude_agent",
+        lambda *a, **k: ClaudeResult(stdout='{"result":"ok"}', returncode=0),
+    )
+    assert agent._run("msg", "{}", resume="sid") == '{"result":"ok"}'
 
 
 # ---------- _clip_head / _clip_ends ----------

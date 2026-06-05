@@ -93,7 +93,9 @@ def _claude_p_new(message: str, schema: str) -> str:
     Uses --bare to skip hooks — prevents the watcher's own claude session from
     triggering SessionStart which would spawn another watcher (recursive fork
     bomb). Process failures (timeout/spawn error) raise so run_tick's retry path
-    treats them as a held window.
+    treats them as a held window. Kept thin (a one-liner over `_run`) as the
+    new-vs-resume test seam: run_tick's tests monkeypatch this to assert which
+    path a tick took.
     """
     return _run(message, schema, resume=None)
 
@@ -101,12 +103,15 @@ def _claude_p_new(message: str, schema: str) -> str:
 def _claude_p_resume(session_id: str, message: str, schema: str) -> str:
     """Resume an existing watcher session. Returns stdout, raises on failure.
 
-    Uses --bare to skip hooks (see _claude_p_new docstring).
+    Uses --bare to skip hooks (see _claude_p_new docstring). Kept thin as the
+    new-vs-resume test seam (see _claude_p_new).
     """
     return _run(message, schema, resume=session_id)
 
 
 def _run(message: str, schema: str, resume: str | None) -> str:
+    """Invoke the watcher's `claude -p` via the shared seam; raise on a process
+    error so run_tick treats it as a held window."""
     result = invoke_claude_agent(
         message,
         timeout=_watcher_timeout(),
