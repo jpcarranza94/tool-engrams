@@ -58,6 +58,14 @@ def test_find_by_name_excludes_archived_by_default(temp_db):
     assert ms.find_by_name(temp_db, "archived one", include_archived=True).id == mid
 
 
+def test_find_by_name_like_fallback(temp_db):
+    # Neither an exact name nor an FTS token hit — only the LIKE substring
+    # matches the middle of the name.
+    mid = _insert(temp_db, name="kubectl-rollout-helper", body="unrelated body")
+    found = ms.find_by_name(temp_db, "rollout")
+    assert found is not None and found.id == mid
+
+
 def test_name_exists(temp_db):
     _insert(temp_db, name="exists")
     assert ms.name_exists(temp_db, "exists") is True
@@ -108,6 +116,19 @@ def test_triggers_roundtrip_and_match(temp_db):
     assert mid in {r["id"] for r in rows}
     prows = ms.match_path_triggers(temp_db, project_slug=None, kind=None)
     assert mid in {r["id"] for r in prows}
+
+
+def test_match_token_triggers_kind_filter(temp_db):
+    # The kind-filtered SQL combination: only memories of the asked kind come back.
+    block = _insert(temp_db, name="blk", kind="block", scope="global")
+    hint = _insert(temp_db, name="hnt", kind="hint", scope="global")
+    ms.add_token_trigger(temp_db, block, "git", ["git", "push"])
+    ms.add_token_trigger(temp_db, hint, "git", ["git", "push"])
+
+    ids = {r["id"] for r in ms.match_token_triggers(temp_db, "git", None, kind="block")}
+    assert block in ids and hint not in ids
+    both = {r["id"] for r in ms.match_token_triggers(temp_db, "git", None, kind=None)}
+    assert block in both and hint in both
 
 
 def test_delete_triggers_and_single(temp_db):

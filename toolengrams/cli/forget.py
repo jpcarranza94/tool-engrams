@@ -70,6 +70,8 @@ def _forget_one(conn, name: str, hard_delete: bool) -> int:
 
 
 def _forget_topic(conn, keyword: str, hard_delete: bool) -> int:
+    # Effectively unbounded — the store is tiny, and search() orders by FTS rank
+    # so if a topic ever exceeded this the least-relevant matches drop first.
     mems = memory_store.search(conn, keyword, limit=10000)
     if not mems:
         print(json.dumps({"error": "no_matches", "topic": keyword}))

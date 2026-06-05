@@ -24,11 +24,19 @@ from typing import Sequence
 
 from .models import Memory, Trigger
 
-# Full column list for Memory.from_row — keep in sync with the dataclass.
+# Full column list for Memory.from_row — every column the Memory dataclass
+# reads. `from_row` uses KEYED access, so order here is irrelevant; only presence
+# matters. Adding a field to Memory without adding its column here surfaces as a
+# KeyError, which test_memory_store.test_insert_and_get_roundtrip catches.
 _MEM_COLS = (
     "id, name, description, body, kind, scope, project_slug, created_ts, "
     "last_surfaced_ts, surface_count, useful_count, pinned, archived_ts, last_verified_ts"
 )
+
+
+def _cols(alias: str) -> str:
+    """_MEM_COLS qualified with a table alias (for JOIN queries)."""
+    return ", ".join(f"{alias}.{c.strip()}" for c in _MEM_COLS.split(","))
 
 # Soft-demote penalty: phantom surfaces that crater the usefulness ratio
 # without fully hiding the memory.
@@ -459,8 +467,3 @@ def list_active_token_triggers(conn: sqlite3.Connection) -> list[sqlite3.Row]:
         "FROM triggers t JOIN memories m ON m.id = t.memory_id "
         "WHERE t.kind = 'token_subseq' AND m.archived_ts IS NULL"
     ).fetchall()
-
-
-def _cols(alias: str) -> str:
-    """_MEM_COLS qualified with a table alias (for JOIN queries)."""
-    return ", ".join(f"{alias}.{c.strip()}" for c in _MEM_COLS.split(","))
