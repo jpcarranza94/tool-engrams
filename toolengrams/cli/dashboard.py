@@ -10,6 +10,8 @@ from datetime import datetime
 from pathlib import Path
 
 from .. import db, memory_store
+from ..consolidation import runs as consolidation_runs
+from ..retrieval import session_state
 
 LOG_PATH = Path.home() / ".claude" / "tool-engrams" / "watcher.log"
 
@@ -68,18 +70,8 @@ def _build_html(conn: sqlite3.Connection) -> str:
     memories = memory_store.list_memories(conn, include_archived=True, order="dashboard")
     triggers = memory_store.all_triggers(conn)
 
-    surfaces = conn.execute(
-        "SELECT ss.session_id, ss.memory_id, m.name, ss.hook, ss.surfaced_ts "
-        "FROM session_surfaces ss JOIN memories m ON m.id = ss.memory_id "
-        "ORDER BY ss.surfaced_ts DESC LIMIT 50"
-    ).fetchall()
-
-    consolidations = conn.execute(
-        "SELECT run_date, sessions_scanned, memories_archived, memories_discovered, "
-        "memories_strengthened, memories_weakened, "
-        "quality_score, surfaces_helpful, surfaces_noise, episodes_evaluated "
-        "FROM consolidation_runs ORDER BY started_ts DESC LIMIT 10"
-    ).fetchall()
+    surfaces = session_state.recent_surfaces_with_memory(conn, limit=50)
+    consolidations = consolidation_runs.recent_runs(conn, limit=10)
 
     # Group triggers by memory_id.
     triggers_by_mem: dict[int, list] = {}

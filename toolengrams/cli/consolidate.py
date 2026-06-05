@@ -15,9 +15,11 @@ import time
 from datetime import date, timedelta
 
 from .. import db
+from ..consolidation import runs
 from ..consolidation.agent import run_consolidation_agent
 from ..consolidation.collect import collect_sessions
 from ..consolidation.schedule import install_schedule, uninstall_schedule
+from ..retrieval import session_state
 
 
 # Session surfaces older than this are cleaned up.
@@ -41,11 +43,7 @@ def main(argv: list[str] | None = None) -> int:
     with db.session() as conn:
         # Idempotency.
         if not args.force:
-            existing = conn.execute(
-                "SELECT id FROM consolidation_runs WHERE run_date = ?",
-                (target.isoformat(),),
-            ).fetchone()
-            if existing:
+            if runs.was_run(conn, target.isoformat()):
                 print(json.dumps({
                     "status": "already_run",
                     "run_date": target.isoformat(),
@@ -60,9 +58,7 @@ def main(argv: list[str] | None = None) -> int:
 
         # Housekeeping: clean old session_surfaces.
         cutoff = int(time.time()) - (SURFACES_TTL_DAYS * 86400)
-        cleaned = conn.execute(
-            "DELETE FROM session_surfaces WHERE surfaced_ts < ?", (cutoff,)
-        ).rowcount
+        cleaned = session_state.prune_surfaces_before(conn, cutoff)
 
         if args.dry_run:
             print(json.dumps({
@@ -88,26 +84,23 @@ def main(argv: list[str] | None = None) -> int:
 
         # Log the run.
         now_ts = int(time.time())
-        conn.execute(
-            "INSERT OR REPLACE INTO consolidation_runs "
-            "(run_date, started_ts, completed_ts, sessions_scanned, "
-            "episodes_evaluated, memories_strengthened, memories_weakened, "
-            "memories_archived, memories_discovered, report, "
-            "quality_score, surfaces_helpful, surfaces_noise, "
-            "memories_verified) "
-            "VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                target.isoformat(), now_ts, now_ts, len(sessions),
-                metrics.get("surfaces_evaluated", 0),
-                metrics.get("memories_pruned", 0),
-                metrics.get("memories_created", 0),
-                metrics.get("memories_created", 0),
-                result.report,
-                metrics.get("quality_score"),
-                metrics.get("surfaces_helpful", 0),
-                metrics.get("surfaces_noise", 0),
-                metrics.get("memories_verified", 0),
-            ),
+        runs.record_run(
+            conn,
+            run_date=target.isoformat(),
+            started_ts=now_ts,
+            completed_ts=now_ts,
+            sessions_scanned=len(sessions),
+            episodes_evaluated=metrics.get("surfaces_evaluated", 0),
+            memories_weakened=metrics.get("memories_pruned", 0),
+            # NOTE: archived + discovered both map to memories_created (preserved
+            # from the original recorder — the agent reports one "created" count).
+            memories_archived=metrics.get("memories_created", 0),
+            memories_discovered=metrics.get("memories_created", 0),
+            report=result.report,
+            quality_score=metrics.get("quality_score"),
+            surfaces_helpful=metrics.get("surfaces_helpful", 0),
+            surfaces_noise=metrics.get("surfaces_noise", 0),
+            memories_verified=metrics.get("memories_verified", 0),
         )
 
         if args.json:

@@ -18,6 +18,7 @@ from pathlib import Path
 from .. import memory_store
 from ..claude_invoke import invoke_claude_agent, parse_claude_json_output, write_agent_settings
 from ..prompts.consolidation import build_consolidation_prompt
+from ..retrieval import session_state
 from ..reinforcement.scoring import usefulness
 from .collect import SessionFile
 
@@ -71,11 +72,7 @@ def _get_memory_summary(db_path: Path) -> str:
         # Body truncated to 500 chars; agent can `engram recall --id N` for full text.
         lines.append(f"       body: {m.body[:500]}")
 
-    surfaces = conn.execute(
-        "SELECT ss.memory_id, m.name, ss.session_id, ss.hook "
-        "FROM session_surfaces ss JOIN memories m ON m.id = ss.memory_id "
-        "ORDER BY ss.surfaced_ts DESC LIMIT 20"
-    ).fetchall()
+    surfaces = session_state.recent_surfaces_with_memory(conn, limit=20)
     lines.append(f"\nRecent surfaces ({len(surfaces)}):")
     for s in surfaces:
         lines.append(

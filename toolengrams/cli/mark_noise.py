@@ -16,9 +16,9 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import sqlite3
 
 from .. import db, memory_store
+from ..retrieval import session_state
 
 logger = logging.getLogger("engram.mark_noise")
 
@@ -32,9 +32,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
 
         with db.transaction(conn):
-            updated = _mark_unmarked_surfaces_noise(
-                conn, mem.id, args.session_id,
-            )
+            updated = session_state.mark_unmarked_noise(conn, mem.id, args.session_id)
 
         if updated == 0:
             print(json.dumps({
@@ -58,23 +56,6 @@ def main(argv: list[str] | None = None) -> int:
             "rows_updated": updated,
         }))
         return 0
-
-
-def _mark_unmarked_surfaces_noise(
-    conn: sqlite3.Connection,
-    memory_id: int,
-    session_id: str | None,
-) -> int:
-    sql = (
-        "UPDATE session_surfaces SET outcome = 'noise' "
-        "WHERE memory_id = ? AND outcome IS NULL"
-    )
-    params: list = [memory_id]
-    if session_id:
-        sql += " AND session_id = ?"
-        params.append(session_id)
-    cur = conn.execute(sql, params)
-    return cur.rowcount or 0
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:

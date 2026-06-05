@@ -205,6 +205,60 @@ def mark_surface_outcome_by_ts(
     return cur.rowcount or 0
 
 
+def count_surfaces_since(conn: sqlite3.Connection, since_ts: int) -> int:
+    """How many surfaces were logged after `since_ts` (monitor: surfaces/24h)."""
+    row = conn.execute(
+        "SELECT COUNT(*) AS c FROM session_surfaces WHERE surfaced_ts > ?",
+        (since_ts,),
+    ).fetchone()
+    return int(row["c"] if row else 0)
+
+
+def recent_surfaces_with_memory(conn: sqlite3.Connection, limit: int) -> list[sqlite3.Row]:
+    """Most recent surfaces joined with the memory name, newest first — raw rows
+    for display (dashboard / consolidation summary): session_id, memory_id, name,
+    hook, surfaced_ts."""
+    return conn.execute(
+        "SELECT ss.session_id, ss.memory_id, m.name, ss.hook, ss.surfaced_ts "
+        "FROM session_surfaces ss JOIN memories m ON m.id = ss.memory_id "
+        "ORDER BY ss.surfaced_ts DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+
+
+def surfaces_for_memory(conn: sqlite3.Connection, memory_id: int,
+                        limit: int) -> list[sqlite3.Row]:
+    """A single memory's most recent surfaces (recall --id): session_id, hook,
+    surfaced_ts, newest first."""
+    return conn.execute(
+        "SELECT session_id, hook, surfaced_ts FROM session_surfaces "
+        "WHERE memory_id = ? ORDER BY surfaced_ts DESC LIMIT ?",
+        (memory_id, limit),
+    ).fetchall()
+
+
+def prune_surfaces_before(conn: sqlite3.Connection, cutoff_ts: int) -> int:
+    """Delete surfaces older than `cutoff_ts`. Returns rows deleted (housekeeping
+    from the nightly consolidation run)."""
+    cur = conn.execute(
+        "DELETE FROM session_surfaces WHERE surfaced_ts < ?", (cutoff_ts,)
+    )
+    return cur.rowcount or 0
+
+
+def mark_unmarked_noise(conn: sqlite3.Connection, memory_id: int,
+                        session_id: str | None) -> int:
+    """Set outcome='noise' on every still-unmarked surface of this memory
+    (optionally scoped to one session). Returns rows updated."""
+    sql = "UPDATE session_surfaces SET outcome = 'noise' WHERE memory_id = ? AND outcome IS NULL"
+    params: list = [memory_id]
+    if session_id:
+        sql += " AND session_id = ?"
+        params.append(session_id)
+    cur = conn.execute(sql, params)
+    return cur.rowcount or 0
+
+
 def find_latest_active_session(
     conn: sqlite3.Connection,
     within_seconds: int = 3600,
