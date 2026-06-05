@@ -38,8 +38,9 @@ def main(argv: list[str] | None = None) -> int:
             "SELECT COUNT(*) FROM watcher_state"
         ).fetchone()[0]
 
-        # Watcher log stats (last 24h).
-        watcher_wakes = 0
+        # Watcher log stats (last 24h). The watcher is event-driven now: one
+        # MODEL-* line per tick that called the model, SAVE per memory formed.
+        watcher_model_calls = 0
         watcher_saves = 0
         watcher_errors = 0
         if WATCHER_LOG.exists():
@@ -48,11 +49,13 @@ def main(argv: list[str] | None = None) -> int:
                 with open(WATCHER_LOG) as f:
                     for line in f:
                         if line[:10] >= cutoff:
+                            # Independent counters: a MODEL-ERROR line counts as
+                            # both a model call and an error.
+                            if "MODEL-" in line:
+                                watcher_model_calls += 1
                             if "SAVE " in line:
                                 watcher_saves += 1
-                            elif "START " in line or "SPAWN " in line:
-                                watcher_wakes += 1
-                            elif "ERROR" in line:
+                            if "ERROR" in line:
                                 watcher_errors += 1
             except Exception:
                 pass
@@ -62,8 +65,8 @@ def main(argv: list[str] | None = None) -> int:
             "active_memories": active,
             "surfaces_24h": surfaces_today,
             "watcher": {
-                "active_sessions": active_watchers,
-                "spawns_24h": watcher_wakes,
+                "tracked_sessions": active_watchers,
+                "model_calls_24h": watcher_model_calls,
                 "saves_24h": watcher_saves,
                 "errors_24h": watcher_errors,
             },

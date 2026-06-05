@@ -5,8 +5,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-# Env var set on the watcher subprocess by spawn_watcher. Any `claude` the
-# watcher launches inherits it, so the SessionStart / UserPromptSubmit hooks
+# Env var set on each detached watcher-tick by spawn_tick. Any `claude` the
+# tick launches inherits it, so the SessionStart / UserPromptSubmit hooks
 # running inside that child can refuse to spawn yet another watcher. This is
 # belt-and-suspenders on top of `--bare`: if `--bare` ever stops suppressing
 # hooks (the May-2026 recursive-spawn burst), this still stops the recursion.
@@ -60,18 +60,3 @@ def unslugify_candidates(slug: str) -> list[Path]:
     # Deepest match first so caller-prefers-longest behavior is natural.
     candidates.sort(key=lambda p: -len(p.parts))
     return candidates
-
-
-def is_pid_alive(pid: int) -> bool:
-    """Check if a process with this PID is still running.
-
-    Uses signal 0 — POSIX trick for "exists?" with no actual signal sent.
-    Returns False on any OSError (no such process, no permission, etc.).
-    """
-    if not pid:
-        return False
-    try:
-        os.kill(pid, 0)
-        return True
-    except OSError:
-        return False

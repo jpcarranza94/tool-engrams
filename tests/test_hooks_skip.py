@@ -70,7 +70,8 @@ def test_session_start_skips_consolidate_temp_cwd(monkeypatch):
 
 
 def test_session_start_tracks_real_user_cwd(monkeypatch):
-    with patch.object(session_start.tick, "ensure_row") as mock:
+    with patch.object(session_start.tick, "ensure_row") as mock, \
+         patch.object(session_start.tick, "sweep_idle_sessions"):
         _run_session_start(
             {"session_id": "s-real", "cwd": "/Users/jpcar/projects/my-app", "source": "startup"},
             monkeypatch,
