@@ -21,8 +21,14 @@ from .log import _log
 
 # `seconds_since_tick` returns this when a session has never ticked (or on
 # error) so the coalesce gate always lets the next tick through (fail-open:
-# better an extra tick than a missed one).
+# better an extra tick than a missed one). ~31 years in seconds — unreachable
+# as a real elapsed time, so it can't be mistaken for one.
 _NEVER = 10 ** 9
+
+# Hard cap on how many abandoned sessions one idle-sweep recovers. watcher_state
+# rows are not GC'd, so without a bound a long-lived install could stat-and-fire
+# for an unbounded backlog at a single SessionStart. Oldest ticks first.
+DEFAULT_SWEEP_LIMIT = 50
 
 
 @dataclass
@@ -135,9 +141,11 @@ def seconds_since_tick(session_id: str) -> int:
         return _NEVER
 
 
-def sweep_idle(idle_sec: int, exclude_session_id: str = "") -> list[IdleSession]:
+def sweep_idle(idle_sec: int, exclude_session_id: str = "",
+               limit: int = DEFAULT_SWEEP_LIMIT) -> list[IdleSession]:
     """Tracked sessions that ticked at least once, whose transcript still has
-    unread lines, and whose last tick is older than `idle_sec`.
+    unread lines, and whose last tick is older than `idle_sec`. At most `limit`
+    rows (oldest tick first) are considered per call.
 
     This is the backstop for a tail lost when a session died (hard kill, crash,
     OOM) before its final Stop/flush fired: the coalesce window or the missing
@@ -153,8 +161,9 @@ def sweep_idle(idle_sec: int, exclude_session_id: str = "") -> list[IdleSession]
                 "SELECT work_session_id, transcript_path, cwd, last_line_read "
                 "FROM watcher_state "
                 "WHERE last_tick_ts > 0 AND last_tick_ts < ? "
-                "  AND transcript_path != '' AND work_session_id != ?",
-                (cutoff, exclude_session_id),
+                "  AND transcript_path != '' AND work_session_id != ? "
+                "ORDER BY last_tick_ts ASC LIMIT ?",
+                (cutoff, exclude_session_id, limit),
             ).fetchall()
         for row in rows:
             if _has_unread_lines(row["transcript_path"], row["last_line_read"]):

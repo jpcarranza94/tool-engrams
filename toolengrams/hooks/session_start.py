@@ -1,8 +1,9 @@
 """SessionStart hook command.
 
 Injects formation guidance: tells Claude how and when to use `engram remember`
-to form tool-bound memories. Also spawns the persistent watcher cron for
-automatic memory formation.
+to form tool-bound memories. Also registers the session in watcher_state (so the
+event-driven ticks have a cursor) and runs the idle-sweep that recovers tails of
+sessions that died before their final flush. Spawns no long-running process.
 
 Input JSON on stdin (subset):
     {

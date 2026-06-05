@@ -162,11 +162,14 @@ def sweep_idle_sessions(current_session_id: str) -> int:
     """Backstop for lost tails: re-fire a flush tick for every tracked session
     (other than the current one) with unread lines and an old last tick. Run
     from SessionStart. Returns the number of sessions re-triggered."""
-    idle = state.sweep_idle(_idle_sweep_sec(), exclude_session_id=current_session_id)
+    idle = state.sweep_idle(_idle_sweep_sec(), exclude_session_id=current_session_id,
+                            limit=state.DEFAULT_SWEEP_LIMIT)
     for s in idle:
         spawn_tick(s.session_id, s.transcript_path, s.cwd, flush=True)
     if idle:
-        _log(f"IDLE-SWEEP recovered={len(idle)} from_session={current_session_id}")
+        capped = " (capped — more may remain for the next SessionStart)" \
+            if len(idle) >= state.DEFAULT_SWEEP_LIMIT else ""
+        _log(f"IDLE-SWEEP recovered={len(idle)} from_session={current_session_id}{capped}")
     return len(idle)
 
 
@@ -257,7 +260,9 @@ def run_tick(session_id: str, transcript_path: str, cwd: str, flush: bool = Fals
             response = _parse_response(stdout)
             action = (response or {}).get("action") or "parse_error"
             if action == "create":
-                for mem in response.get("memories", []):
+                mems = response.get("memories", [])
+                _log(f"MODEL-CREATE session={session_id} memories={len(mems)}")
+                for mem in mems:
                     try:
                         _save_memory(mem, cwd)
                         _log(f"SAVE session={session_id} name={mem.get('name', '?')}")

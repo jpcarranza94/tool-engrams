@@ -120,6 +120,29 @@ def test_sweep_idle_excludes_fully_read_transcript(temp_db, tmp_path):
     assert state.sweep_idle(idle_sec=1800) == []
 
 
+def test_sweep_idle_is_bounded_by_limit(temp_db, tmp_path):
+    # More idle sessions than the limit → only `limit` returned, oldest first.
+    for i in range(5):
+        _track_with_tail(tmp_path, f"idle-{i}", n_lines=3, cursor=0,
+                         tick_age_sec=3600 + i * 100)  # idle-4 is oldest
+    got = state.sweep_idle(idle_sec=1800, limit=2)
+    assert len(got) == 2
+    assert {s.session_id for s in got} == {"idle-4", "idle-3"}  # two oldest ticks
+
+
+# ---------- _has_unread_lines (EOF boundary) ----------
+
+
+def test_has_unread_lines_boundaries(tmp_path):
+    f = tmp_path / "t.jsonl"
+    f.write_text("a\nb\nc\nd\ne\n")  # 5 lines
+    assert state._has_unread_lines(str(f), 5) is False  # cursor == EOF
+    assert state._has_unread_lines(str(f), 4) is True   # one line past cursor
+    assert state._has_unread_lines(str(f), 0) is True   # nothing read yet
+    assert state._has_unread_lines(str(f), 6) is False  # cursor past EOF
+    assert state._has_unread_lines("/nonexistent.jsonl", 0) is False
+
+
 # ---------- derive_transcript_path ----------
 
 

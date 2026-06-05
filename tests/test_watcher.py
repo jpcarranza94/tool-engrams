@@ -1,5 +1,5 @@
 """Tests for the watcher's pure helpers: delta formatting, response parsing,
-memory saving, and the PID-liveness check the dashboard still uses.
+and memory saving.
 
 Cursor / arm / retry state lives in watcher_state and is covered by
 test_watcher_state.py; the event-driven tick is covered by test_watcher_tick.py.
@@ -8,9 +8,7 @@ test_watcher_state.py; the event-driven tick is covered by test_watcher_tick.py.
 from __future__ import annotations
 
 import json
-import os
 
-from toolengrams.utils import is_pid_alive
 from toolengrams.watcher import (
     _format_delta,
     _parse_response,
@@ -284,21 +282,3 @@ def test_save_memory_skips_no_name(temp_db, capsys):
     )
     count = temp_db.execute("SELECT COUNT(*) AS c FROM memories").fetchone()
     assert count["c"] == 0
-
-
-# ---------- PID alive (used by the dashboard) ----------
-
-
-def test_is_pid_alive_current_process():
-    assert is_pid_alive(os.getpid()) is True
-
-
-def test_is_pid_alive_nonexistent():
-    # PID 99999 is extremely unlikely to exist.
-    assert is_pid_alive(99999) is False
-
-
-def test_is_pid_alive_zero_or_none():
-    # Both falsy PID values must short-circuit to False — neither is a real
-    # process and we don't want to accidentally signal pid 0 (process group).
-    assert is_pid_alive(0) is False

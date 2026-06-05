@@ -249,3 +249,26 @@ def test_sweep_idle_sessions_fires_flush_tick(temp_db, tmp_path, monkeypatch):
 
     assert n == 1
     assert spawned == [("abandoned", True)]   # flush tick for the abandoned tail
+
+
+def test_sweep_does_not_refire_after_tail_processed(temp_db, tmp_path, monkeypatch):
+    """The flush tick the sweep fires consumes the tail (advances the cursor and
+    bumps last_tick_ts), so the session drops out of the next sweep — the
+    recovery is a one-shot, not a loop."""
+    transcript = tmp_path / "t.jsonl"
+    transcript.write_text(_bash_line("a") + _bash_line("b"))
+    _wire(monkeypatch, tmp_path,
+          lambda *a: _OK_NONE, lambda *a: _OK_NONE)
+    state.ensure_row("s", str(transcript), "/cwd")
+    with db.session() as conn:
+        conn.execute(
+            "UPDATE watcher_state SET last_tick_ts = ? WHERE work_session_id = 's'",
+            (int(time.time()) - 3600,),
+        )
+    assert [x.session_id for x in state.sweep_idle(idle_sec=1800)] == ["s"]
+
+    # The re-fired flush tick runs and consumes the tail.
+    tick.run_tick("s", str(transcript), "/cwd", flush=True)
+
+    assert _col("s", "last_line_read") == 2          # tail consumed
+    assert state.sweep_idle(idle_sec=1800) == []     # no longer a lost tail
