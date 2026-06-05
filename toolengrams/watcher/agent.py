@@ -15,11 +15,10 @@ import json
 import os
 import re
 import shutil
-import subprocess
 
+from ..claude_invoke import invoke_claude_agent, parse_claude_json_output
 from ..cli.remember import main as remember_main
 from ..prompts.watcher import build_watcher_prompt
-from ..subprocess_utils import parse_claude_json_output
 
 CLAUDE_BIN = shutil.which("claude")
 
@@ -89,48 +88,42 @@ def _build_initial_prompt(cwd: str) -> str:
 
 
 def _claude_p_new(message: str, schema: str) -> str:
-    """Start a new watcher model session. Returns stdout.
+    """Start a new watcher model session. Returns stdout, raises on failure.
 
-    Uses --bare to skip hooks — prevents the watcher's own claude session
-    from triggering SessionStart which would spawn another watcher
-    (recursive fork bomb).
+    Uses --bare to skip hooks — prevents the watcher's own claude session from
+    triggering SessionStart which would spawn another watcher (recursive fork
+    bomb). Process failures (timeout/spawn error) raise so run_tick's retry path
+    treats them as a held window. Kept thin (a one-liner over `_run`) as the
+    new-vs-resume test seam: run_tick's tests monkeypatch this to assert which
+    path a tick took.
     """
-    proc = subprocess.run(
-        [
-            CLAUDE_BIN, "-p",
-            "--bare",
-            "--model", _watcher_model(),
-            "--output-format", "json",
-            "--json-schema", schema,
-            "--", message,
-        ],
-        capture_output=True,
-        text=True,
-        timeout=_watcher_timeout(),
-    )
-    return proc.stdout
+    return _run(message, schema, resume=None)
 
 
 def _claude_p_resume(session_id: str, message: str, schema: str) -> str:
-    """Resume an existing watcher session. Returns stdout.
+    """Resume an existing watcher session. Returns stdout, raises on failure.
 
-    Uses --bare to skip hooks (see _claude_p_new docstring).
+    Uses --bare to skip hooks (see _claude_p_new docstring). Kept thin as the
+    new-vs-resume test seam (see _claude_p_new).
     """
-    proc = subprocess.run(
-        [
-            CLAUDE_BIN, "-p",
-            "--bare",
-            "--model", _watcher_model(),
-            "--output-format", "json",
-            "--json-schema", schema,
-            "--resume", session_id,
-            "--", message,
-        ],
-        capture_output=True,
-        text=True,
+    return _run(message, schema, resume=session_id)
+
+
+def _run(message: str, schema: str, resume: str | None) -> str:
+    """Invoke the watcher's `claude -p` via the shared seam; raise on a process
+    error so run_tick treats it as a held window."""
+    result = invoke_claude_agent(
+        message,
         timeout=_watcher_timeout(),
+        model=_watcher_model(),
+        schema=schema,
+        resume=resume,
+        bare=True,
+        claude_bin=CLAUDE_BIN,
     )
-    return proc.stdout
+    if result.error:
+        raise RuntimeError(result.error)
+    return result.stdout
 
 
 def _extract_session_id(stdout: str) -> str | None:

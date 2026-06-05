@@ -8,18 +8,16 @@ quality, identifies missed corrections, and runs engram commands directly.
 
 from __future__ import annotations
 
-import json
 import os
 import shutil
 import sqlite3
-import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..claude_invoke import invoke_claude_agent, parse_claude_json_output, write_agent_settings
 from ..prompts.consolidation import build_consolidation_prompt
 from ..reinforcement.scoring import usefulness
-from ..subprocess_utils import parse_claude_json_output, write_agent_settings
 from .collect import SessionFile
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -28,6 +26,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 MAX_SESSIONS = 10
 MAX_TOTAL_BYTES = 10 * 1024 * 1024  # 10 MB total
 MAX_SINGLE_SESSION_BYTES = 5 * 1024 * 1024  # 5 MB per session — skip giants
+
+# Per-run wall-clock budget for the consolidation agent's `claude -p`.
+CONSOLIDATION_TIMEOUT_SEC = 1800  # 30 minutes
 
 
 def _find_claude() -> str | None:
@@ -163,38 +164,34 @@ def run_consolidation_agent(
     env = os.environ.copy()
     env["ENGRAM_DB"] = str(db_path)
 
-    try:
-        proc = subprocess.run(
-            [claude_bin, "-p", "--output-format", "json", "--", prompt],
-            cwd=work_dir,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=1800,  # 30 minutes max
-        )
-    except subprocess.TimeoutExpired:
+    # invoke_claude_agent never raises — process failures come back on the result.
+    result = invoke_claude_agent(
+        prompt,
+        timeout=CONSOLIDATION_TIMEOUT_SEC,
+        cwd=work_dir,
+        env=env,
+        claude_bin=claude_bin,
+    )
+    # Clean up temp dir (settings only, no important state).
+    shutil.rmtree(work_dir, ignore_errors=True)
+
+    if result.timed_out:
         return AgentResult(
             report="", returncode=1,
-            error="Consolidation agent timed out (30 min)",
+            error=f"Consolidation agent timed out ({CONSOLIDATION_TIMEOUT_SEC // 60} min)",
         )
-    except Exception as e:
-        return AgentResult(
-            report="", returncode=1,
-            error=f"Failed to spawn agent: {e}",
-        )
-    finally:
-        # Clean up temp dir (settings only, no important state).
-        shutil.rmtree(work_dir, ignore_errors=True)
+    if result.error:
+        return AgentResult(report="", returncode=1, error=f"Failed to spawn agent: {result.error}")
 
     # Extract the agent's response.
-    report = parse_claude_json_output(proc.stdout)
+    report = parse_claude_json_output(result.stdout)
     if not report:
-        report = proc.stdout[:5000] if proc.stdout else ""
+        report = result.stdout[:5000] if result.stdout else ""
 
     return AgentResult(
         report=report,
-        returncode=proc.returncode,
-        error=None if proc.returncode == 0 else f"Agent exited with code {proc.returncode}",
+        returncode=result.returncode,
+        error=None if result.returncode == 0 else f"Agent exited with code {result.returncode}",
     )
 
 
