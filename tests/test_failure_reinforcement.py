@@ -48,12 +48,19 @@ def _run_hook(hook_module, payload: dict, monkeypatch) -> dict:
 
 @pytest.fixture
 def captured_ticks(monkeypatch):
-    """Capture recovery-tick spawns instead of launching a detached process."""
+    """Capture recovery-tick spawns (both roles) instead of launching detached
+    processes. Returns dicts with the spawned role's tick `kind`."""
     calls: list[dict] = []
     monkeypatch.setattr(
         post_tool.tick, "trigger",
         lambda session_id, tpath, cwd, reason, flush=False: calls.append(
-            {"session_id": session_id, "reason": reason}
+            {"kind": "formation", "reason": reason}
+        ),
+    )
+    monkeypatch.setattr(
+        post_tool.tick, "trigger_eval",
+        lambda session_id, tpath, cwd, reason, flush=False: calls.append(
+            {"kind": "eval", "reason": reason}
         ),
     )
     return calls
@@ -108,8 +115,10 @@ def test_failure_then_success_does_not_credit_but_fires_recovery_tick(
     # Still NOT credited — the eval watcher judges heeding, not post_tool.
     assert _useful(temp_db, "git-force-push") == 0
     assert _failure_outcome(temp_db, "sess-X") is None
-    # But a recovery tick fired.
-    assert [c["reason"] for c in captured_ticks] == ["recovery"]
+    # Recovery fires BOTH ticks: formation (episode complete) and eval (the
+    # failure surface's evidence window just closed).
+    assert {c["kind"] for c in captured_ticks} == {"formation", "eval"}
+    assert all(c["reason"] == "recovery" for c in captured_ticks)
 
 
 def test_no_recovery_tick_for_different_first_token(temp_db, monkeypatch, captured_ticks):

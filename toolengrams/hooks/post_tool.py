@@ -83,13 +83,18 @@ def _run(payload: dict[str, Any]) -> int:
 
         increment_session_turn(conn, session_id, now_ts)
 
-    # Fast-path trigger: fire a watcher tick now (outside the txn, so the Popen
-    # never holds the DB) instead of waiting for the next Stop.
+    # Fast-path trigger: fire watcher ticks now (outside the txn, so the Popen
+    # never holds the DB) instead of waiting for the next Stop. A failure→success
+    # recovery closes the failure-surface's evidence window, so it's an early
+    # trigger for BOTH roles: formation (the error→fix episode just completed)
+    # and eval (the prior failure surface can now be judged). trigger_eval
+    # self-gates on pending surfaces, so it's a no-op when there's nothing to judge.
     if recovered and not is_watcher_child():
         cwd = payload.get("cwd") or ""
         if cwd and not is_internal_cwd(cwd):
             tpath = payload.get("transcript_path") or derive_transcript_path(session_id, cwd)
             tick.trigger(session_id, tpath, cwd, reason="recovery")
+            tick.trigger_eval(session_id, tpath, cwd, reason="recovery")
 
     _emit({})
     return 0

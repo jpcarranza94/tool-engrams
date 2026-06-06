@@ -42,6 +42,12 @@ def main(argv: list[str] | None = None) -> int:
         }))
         return 1
 
+    # The eval watcher passes --session-id (the WORK session) explicitly via its
+    # prompt. The $CLAUDE_SESSION_ID fallback is a convenience for manual use —
+    # and it fails SAFE inside the watcher: there, $CLAUDE_SESSION_ID is the
+    # watcher's OWN claude session, which has no surfaces, so a verdict that
+    # omitted --session-id hits `not_in_session` below (rc=1, no write) rather
+    # than judging the wrong session. Worst case is a missed judgment.
     session_id = args.session_id or os.environ.get("CLAUDE_SESSION_ID") or ""
     if not session_id:
         print(json.dumps({
@@ -64,6 +70,7 @@ def main(argv: list[str] | None = None) -> int:
             }))
             return 1
 
+        updated = 0
         with db.transaction(conn):
             updated = session_state.mark_surface_outcome(
                 conn, session_id, [args.memory_id], args.outcome,
