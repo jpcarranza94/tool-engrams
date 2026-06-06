@@ -1,4 +1,9 @@
-"""Unit tests for `engram post-tool` — PostToolUse success reinforcement."""
+"""Unit tests for `engram post-tool` — turn counter + recovery tick.
+
+v10: post_tool no longer credits memories on success. The single writer of
+useful_count is the evaluation watcher (`engram judge`), so every assertion
+here is that a success leaves useful_count untouched.
+"""
 
 from __future__ import annotations
 
@@ -36,7 +41,8 @@ def _run(payload: dict, monkeypatch) -> dict:
 # ---------- success reinforcement ----------
 
 
-def test_success_bumps_useful_count(temp_db, monkeypatch, capsys):
+def test_success_does_not_credit(temp_db, monkeypatch, capsys):
+    """v10: a successful call no longer bumps useful_count — that was the bug."""
     mid = _seed_memory(temp_db)
     _log_surface(temp_db, "sess1", mid, "tool_abc")
 
@@ -49,8 +55,16 @@ def test_success_bumps_useful_count(temp_db, monkeypatch, capsys):
     })))
     post_tool.main()
 
-    row = temp_db.execute("SELECT useful_count FROM memories WHERE id = ?", (mid,)).fetchone()
-    assert row["useful_count"] == 1
+    row = temp_db.execute(
+        "SELECT useful_count, noise_count FROM memories WHERE id = ?", (mid,)
+    ).fetchone()
+    assert row["useful_count"] == 0
+    assert row["noise_count"] == 0
+    # The surface row is left for the eval watcher to judge — still NULL.
+    s = temp_db.execute(
+        "SELECT outcome FROM session_surfaces WHERE memory_id = ?", (mid,)
+    ).fetchone()
+    assert s["outcome"] is None
 
 
 def test_error_does_not_bump(temp_db, monkeypatch, capsys):
@@ -87,7 +101,8 @@ def test_no_surface_for_tool_use_id(temp_db, monkeypatch, capsys):
     assert row["useful_count"] == 0
 
 
-def test_multiple_memories_all_reinforced(temp_db, monkeypatch, capsys):
+def test_success_credits_no_surfaced_memory(temp_db, monkeypatch, capsys):
+    """Multiple pre-tool surfaces on a successful call: none are credited."""
     mid1 = _seed_memory(temp_db, "mem1")
     mid2 = _seed_memory(temp_db, "mem2")
     _log_surface(temp_db, "sess1", mid1, "tool_abc")
@@ -104,8 +119,8 @@ def test_multiple_memories_all_reinforced(temp_db, monkeypatch, capsys):
 
     r1 = temp_db.execute("SELECT useful_count FROM memories WHERE id = ?", (mid1,)).fetchone()
     r2 = temp_db.execute("SELECT useful_count FROM memories WHERE id = ?", (mid2,)).fetchone()
-    assert r1["useful_count"] == 1
-    assert r2["useful_count"] == 1
+    assert r1["useful_count"] == 0
+    assert r2["useful_count"] == 0
 
 
 def test_stderr_exit_code_detected_as_error(temp_db, monkeypatch, capsys):

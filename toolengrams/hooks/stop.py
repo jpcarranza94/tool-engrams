@@ -45,6 +45,9 @@ def _maybe_tick(payload: dict[str, Any]) -> None:
     transcript_path = payload.get("transcript_path") or derive_transcript_path(session_id, cwd)
     tick.ensure_row(session_id, transcript_path, cwd)
     tick.trigger(session_id, transcript_path, cwd, reason="stop")
+    # Also judge surfaced memories from earlier in the session, if any are
+    # pending (self-gated inside trigger_eval).
+    tick.trigger_eval(session_id, transcript_path, cwd, reason="stop")
 
 
 def _emit(obj: dict[str, Any]) -> None:

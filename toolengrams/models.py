@@ -34,6 +34,7 @@ class Memory:
     last_surfaced_ts: int
     surface_count: int
     useful_count: int
+    noise_count: int
     pinned: bool
     archived_ts: int | None
     last_verified_ts: int | None
@@ -52,6 +53,7 @@ class Memory:
             last_surfaced_ts=row["last_surfaced_ts"],
             surface_count=row["surface_count"],
             useful_count=row["useful_count"],
+            noise_count=row["noise_count"],
             pinned=bool(row["pinned"]),
             archived_ts=row["archived_ts"],
             last_verified_ts=row["last_verified_ts"],
@@ -103,11 +105,11 @@ class Candidate:
     matched_path: str | None
     surface_count: int
     useful_count: int
+    noise_count: int
     last_surfaced_ts: int
     pinned: bool
     kind: MemoryKind
     scope: MemoryScope
-    structural_match: float = 1.0
     final_score: float = 0.0
 
     @property

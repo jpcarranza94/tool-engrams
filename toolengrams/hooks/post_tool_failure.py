@@ -40,6 +40,7 @@ from typing import Any
 from .. import db, memory_store
 from ..prompts.pretool import format_injection
 from ..retrieval.extract import extract_hints
+from ..reinforcement.scoring import is_gated
 from ..retrieval.rank import now, retrieve_candidates
 from ..retrieval.session_state import (
     HOOK_POST_TOOL_USE_FAILURE,
@@ -69,6 +70,11 @@ def main() -> int:
 
 
 def _run(payload: dict[str, Any]) -> int:
+    # A watcher session's own tool calls must not surface hints or arm anything.
+    if is_watcher_child():
+        _emit({})
+        return 0
+
     # User interrupted — not a real tool failure. No hints.
     if payload.get("is_interrupt"):
         _emit({})
@@ -101,7 +107,14 @@ def _run(payload: dict[str, Any]) -> int:
     with db.session() as conn:
         now_ts = now()
 
-        candidates = retrieve_candidates(conn, hint, project_slug, now_ts, kind="hint")
+        candidates = retrieve_candidates(conn, hint, project_slug, kind="hint")
+        if not candidates:
+            _emit({})
+            return 0
+
+        # Surfacing gate: a hint proven more noise than signal stays suppressed
+        # even on a matching failure (see scoring.is_gated; pinned exempt).
+        candidates = [c for c in candidates if not is_gated(c)]
         if not candidates:
             _emit({})
             return 0

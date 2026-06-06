@@ -1,7 +1,7 @@
-"""Retrieval tests: subsequence match + scoring primitives.
+"""Retrieval tests: subsequence match + scoring primitives (q, gate, final_score).
 
-The v1 cluster-level Laplace gate was dropped in v2 (design-v9) — session
-dedup + specificity sort live in the hook handlers now, not here.
+v10: usefulness/recency are gone. One ratio `q` (noise-aware, Laplace-smoothed)
+drives ranking; the surfacing gate suppresses hints proven more noise than signal.
 """
 
 from __future__ import annotations
@@ -9,18 +9,15 @@ from __future__ import annotations
 import math
 
 from toolengrams.models import Candidate
-from toolengrams.reinforcement.scoring import final_score, recency, usefulness
+from toolengrams.reinforcement.scoring import final_score, is_gated, q
 from toolengrams.retrieval.rank import is_subsequence
-
-NOW = 1_780_000_000  # fixed "now" for deterministic recency math
-DAY = 86_400
 
 
 def _candidate(
     memory_id: int = 1,
     surface_count: int = 0,
     useful_count: int = 0,
-    last_surfaced_ts: int = 0,
+    noise_count: int = 0,
     pinned: bool = False,
     kind: str = "hint",
     matched_tokens: tuple[str, ...] = ("git",),
@@ -34,11 +31,11 @@ def _candidate(
         matched_path=matched_path,
         surface_count=surface_count,
         useful_count=useful_count,
-        last_surfaced_ts=last_surfaced_ts,
+        noise_count=noise_count,
+        last_surfaced_ts=0,
         pinned=pinned,
         kind=kind,
         scope="project",
-        structural_match=1.0,
     )
 
 
@@ -76,49 +73,84 @@ def test_subseq_empty_needle_fails():
     assert not is_subsequence((), ("git", "push"))
 
 
-# ---------- usefulness ----------
+# ---------- q (noise-aware usefulness) ----------
 
 
-def test_usefulness_cold_start_is_half():
-    assert usefulness(0, 0) == 0.5
+def test_q_cold_start_is_half():
+    assert q(0, 0) == 0.5
 
 
-def test_usefulness_rewards_hits():
-    # 4 hits out of 6 surfaces → 5/8 = 0.625
-    assert usefulness(4, 6) == 0.625
+def test_q_rewards_helpful_over_noise():
+    # 4 helpful, 0 noise → 5/6 ≈ 0.833
+    assert math.isclose(q(4, 0), 5 / 6)
 
 
-def test_usefulness_never_zero_due_to_smoothing():
-    assert usefulness(0, 100) > 0
+def test_q_punished_by_noise():
+    # 0 helpful, 4 noise → 1/6 ≈ 0.167 (below the 0.5 prior)
+    assert q(0, 4) < 0.5
 
 
-# ---------- recency ----------
+def test_q_never_zero_due_to_smoothing():
+    assert q(0, 100) > 0
 
 
-def test_recency_never_surfaced_is_one():
-    assert recency(0, 14.0, NOW) == 1.0
-
-
-def test_recency_decays_over_half_life():
-    r = recency(NOW - 14 * DAY, 14.0, NOW)
-    assert math.isclose(r, math.exp(-1.0), rel_tol=1e-6)
-
-
-def test_recency_old_memory_near_zero():
-    r = recency(NOW - 365 * DAY, 14.0, NOW)
-    assert r < 0.01
+def test_q_ignores_unused_surfaces():
+    # A situational memory: never judged helpful or noise → stays at the prior.
+    assert q(0, 0) == 0.5
 
 
 # ---------- final_score ----------
 
 
 def test_final_score_pinned_boosts():
-    unpinned = final_score(_candidate(), NOW)
-    pinned = final_score(_candidate(pinned=True), NOW)
+    unpinned = final_score(_candidate())
+    pinned = final_score(_candidate(pinned=True))
     assert math.isclose(pinned, unpinned * 1.5)
 
 
-def test_final_score_useful_memory_beats_fresh():
-    fresh = final_score(_candidate(surface_count=0, useful_count=0), NOW)
-    proven = final_score(_candidate(surface_count=10, useful_count=8), NOW)
+def test_final_score_helpful_memory_beats_fresh():
+    fresh = final_score(_candidate(useful_count=0, noise_count=0))
+    proven = final_score(_candidate(useful_count=8, noise_count=0))
     assert proven > fresh
+
+
+def test_final_score_noisy_memory_below_fresh():
+    fresh = final_score(_candidate(useful_count=0, noise_count=0))
+    noisy = final_score(_candidate(useful_count=0, noise_count=8))
+    assert noisy < fresh
+
+
+# ---------- surfacing gate ----------
+
+
+def test_gate_lets_fresh_hint_through():
+    assert not is_gated(_candidate(useful_count=0, noise_count=0))
+
+
+def test_gate_suppresses_noisy_hint_after_warmup():
+    # 0 helpful, 3 noise → q = 1/5 = 0.2 < 0.5, and judged = 3 ≥ WARMUP_N.
+    assert is_gated(_candidate(kind="hint", useful_count=0, noise_count=3))
+
+
+def test_gate_holds_fire_below_warmup():
+    # 0 helpful, 2 noise → q < 0.5 but only 2 verdicts (< WARMUP_N) → not gated.
+    assert not is_gated(_candidate(kind="hint", useful_count=0, noise_count=2))
+
+
+def test_gate_lets_proven_hint_through():
+    # 3 helpful, 0 noise → q = 0.8 ≥ 0.5.
+    assert not is_gated(_candidate(kind="hint", useful_count=3, noise_count=0))
+
+
+def test_gate_threshold_is_exclusive():
+    # 2 helpful, 2 noise → q = 3/6 = 0.5 exactly; gate is strict < 0.5 → not gated.
+    assert not is_gated(_candidate(kind="hint", useful_count=2, noise_count=2))
+
+
+def test_gate_exempts_block():
+    # A block past warm-up with terrible q still fires — safety rules aren't gated.
+    assert not is_gated(_candidate(kind="block", useful_count=0, noise_count=10))
+
+
+def test_gate_exempts_pinned():
+    assert not is_gated(_candidate(kind="hint", pinned=True, useful_count=0, noise_count=10))

@@ -37,6 +37,7 @@ from typing import Any
 from .. import db, memory_store
 from ..prompts.pretool import format_injection
 from ..retrieval.extract import extract_hints
+from ..reinforcement.scoring import is_gated
 from ..retrieval.rank import now, retrieve_candidates
 from ..retrieval.session_state import (
     HOOK_PRE_TOOL_USE,
@@ -44,7 +45,7 @@ from ..retrieval.session_state import (
     get_session_turn,
     log_surfaces,
 )
-from ..utils import slugify_cwd
+from ..utils import is_watcher_child, slugify_cwd
 from ._skip import WHITELIST, max_memories_per_call
 
 
@@ -65,6 +66,13 @@ def main() -> int:
 
 
 def _run(payload: dict[str, Any]) -> int:
+    # A watcher session's own `engram` tool calls must not surface memories
+    # (recursion + polluting the watcher's claude session). The internal-cwd
+    # guard backs this up; the env flag is the robust primary check.
+    if is_watcher_child():
+        _emit({})
+        return 0
+
     tool_name = payload.get("tool_name") or ""
     if tool_name not in WHITELIST:
         _emit({})
@@ -85,7 +93,14 @@ def _run(payload: dict[str, Any]) -> int:
         now_ts = now()
 
         # Retrieve ALL matching memories (both block and hint).
-        candidates = retrieve_candidates(conn, hint, project_slug, now_ts)
+        candidates = retrieve_candidates(conn, hint, project_slug)
+        if not candidates:
+            _emit({})
+            return 0
+
+        # Surfacing gate: suppress hints that have proven more noise than signal
+        # (q < 0.5 after warm-up). block + pinned are exempt (see scoring.is_gated).
+        candidates = [c for c in candidates if not is_gated(c)]
         if not candidates:
             _emit({})
             return 0

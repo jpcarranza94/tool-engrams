@@ -1,80 +1,79 @@
-"""Watcher's `claude -p` agent calls + JSON response parsing.
+"""Watcher permissioned `claude -p` sessions: formation + evaluation.
 
-The watcher invokes a `claude -p` session every interval, feeding it a
-formatted transcript delta and a JSON schema for constrained decoding. The
-model returns either `{"action": "none"}` or `{"action": "create",
-"memories": [...]}`. We parse that, then save each memory by calling
-`engram remember` in-process.
+v10 (design-v10 §2, §6, ADR-0001): a watcher session does its job by CALLING the
+engram CLI, not by returning a constrained JSON schema the harness parses. The
+old `--bare` + `--json-schema` + parse + in-process `remember` machinery is gone.
 
-Model selection is via `$ENGRAM_WATCHER_MODEL` (default: opus).
+Mechanics mirror the consolidation agent: a temp work dir with a
+`settings.local.json` that grants exactly the role's command surface, ENGRAM_DB
+in the env, and ENGRAM_IN_WATCHER set so the session's own tool calls don't
+recursively trigger engram hooks (the recursion guard moved off `--bare`). The
+user's real cwd is handed to the model in the prompt so it can pass
+`--project-cwd` to `engram remember` / `--session-id` to `engram judge`.
+
+Safety is the **command surface**, not a schema:
+    formation → `engram remember` only
+    eval      → `engram judge` only
+
+Model selection via `$ENGRAM_WATCHER_MODEL` (default opus); timeout via
+`$ENGRAM_WATCHER_TIMEOUT`.
 """
 
 from __future__ import annotations
 
 import json
 import os
-import re
 import shutil
+import tempfile
+from dataclasses import dataclass
+from pathlib import Path
 
-from ..claude_invoke import invoke_claude_agent, parse_claude_json_output
-from ..cli.remember import main as remember_main
-from ..prompts.watcher import build_watcher_prompt
+from .. import db
+from ..claude_invoke import invoke_claude_agent, write_agent_settings
+from ..utils import WATCHER_CHILD_ENV
 
 CLAUDE_BIN = shutil.which("claude")
 
 DEFAULT_WATCHER_MODEL = "opus"
 
-# Per-call wall-clock budget for the watcher's `claude -p`. The original 60s
-# was too tight: on a busy window the delta is large and opus is slow, so the
-# call timed out and the window was dropped. Now the tick HOLDS the cursor and
-# retries on error (see tick._retry_decision); 120s gives headroom. Tune via
+# Per-call wall-clock budget for the watcher's `claude -p`. Tool-calling is
+# multi-round-trip, so a busy window can run long; the tick HOLDS the cursor and
+# retries on error/timeout (see tick._retry_decision). Tune via
 # $ENGRAM_WATCHER_TIMEOUT without restarting.
 DEFAULT_WATCHER_TIMEOUT = 120
 
-# JSON schema for constrained decoding.
-WATCHER_SCHEMA = json.dumps({
-    "type": "object",
-    "properties": {
-        "action": {
-            "type": "string",
-            "enum": ["none", "create"],
-        },
-        "memories": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string"},
-                    "body": {"type": "string"},
-                    "kind": {"type": "string", "enum": ["block", "hint"]},
-                    "scope": {"type": "string", "enum": ["project", "global"]},
-                    "triggers": {"type": "array", "items": {"type": "string"}},
-                    "paths": {"type": "array", "items": {"type": "string"}},
-                },
-                "required": ["name", "body", "kind", "scope"],
-            },
-        },
-    },
-    "required": ["action"],
-})
+# The command surface each role is granted in its sandbox settings. This — not a
+# JSON schema — is what keeps a per-turn judge from nuking a good memory: eval
+# literally cannot run anything but `engram judge`.
+# Space-glob form mirrors the consolidation agent's proven `Bash(engram *)`
+# grant — restricted here to the single verb each role is allowed to run.
+ROLE_ALLOWLIST: dict[str, list[str]] = {
+    "formation": ["Bash(engram remember *)"],
+    "eval": ["Bash(engram judge *)"],
+}
+
+# Temp-dir prefix per role — must stay in sync with hooks/_skip._INTERNAL_CWD_PREFIXES
+# so the watcher session's own cwd is recognized as internal (recursion guard).
+_WORKDIR_PREFIX = {"formation": "engram-formation-", "eval": "engram-eval-"}
+
+
+@dataclass(slots=True)
+class SessionResult:
+    """Outcome of one watcher `claude -p` turn. `ok` is False on any process
+    failure (timeout, spawn error, non-zero exit); the tick treats that as a held
+    window and retries. `watcher_session_id` is the id to `--resume` next time."""
+
+    ok: bool
+    watcher_session_id: str | None
 
 
 def _watcher_model() -> str:
-    """Resolve the model name for the watcher's `claude -p` calls.
-
-    Reads $ENGRAM_WATCHER_MODEL each time so tests and per-shell overrides
-    take effect without restarting the process. Default is opus.
-    """
+    """Resolve the watcher model. Read each call so overrides apply live."""
     return os.environ.get("ENGRAM_WATCHER_MODEL", DEFAULT_WATCHER_MODEL)
 
 
 def _watcher_timeout() -> int:
-    """Resolve the per-call timeout (seconds) for the watcher's `claude -p`.
-
-    Read from $ENGRAM_WATCHER_TIMEOUT each call so it can be tuned without
-    restarting the watcher. Falls back to DEFAULT_WATCHER_TIMEOUT on a missing
-    or non-positive / non-integer value.
-    """
+    """Resolve the per-call timeout (seconds). Read each call; fall back on bad."""
     raw = os.environ.get("ENGRAM_WATCHER_TIMEOUT", "")
     try:
         val = int(raw)
@@ -83,51 +82,50 @@ def _watcher_timeout() -> int:
     return val if val > 0 else DEFAULT_WATCHER_TIMEOUT
 
 
-def _build_initial_prompt(cwd: str) -> str:
-    return f"{build_watcher_prompt()}\n\nProject: {cwd}\n\n--- Session activity ---\n\n"
+def run_watcher_session(role: str, message: str, resume: str | None) -> SessionResult:
+    """Run one permissioned `claude -p` turn for `role`, resuming `resume` if set.
 
-
-def _claude_p_new(message: str, schema: str) -> str:
-    """Start a new watcher model session. Returns stdout, raises on failure.
-
-    Uses --bare to skip hooks — prevents the watcher's own claude session from
-    triggering SessionStart which would spawn another watcher (recursive fork
-    bomb). Process failures (timeout/spawn error) raise so run_tick's retry path
-    treats them as a held window. Kept thin (a one-liner over `_run`) as the
-    new-vs-resume test seam: run_tick's tests monkeypatch this to assert which
-    path a tick took.
+    Builds a throwaway sandbox cwd granting the role's allowlist, sets ENGRAM_DB
+    + ENGRAM_IN_WATCHER in the env, and shells out via the shared seam. Returns
+    `ok=False` (held window) on any process failure. The side effects happen
+    in-band via the model's `engram` calls — there is nothing to parse here.
     """
-    return _run(message, schema, resume=None)
+    if not CLAUDE_BIN:
+        return SessionResult(ok=False, watcher_session_id=resume)
 
+    allow = ROLE_ALLOWLIST.get(role)
+    if allow is None:
+        return SessionResult(ok=False, watcher_session_id=resume)
 
-def _claude_p_resume(session_id: str, message: str, schema: str) -> str:
-    """Resume an existing watcher session. Returns stdout, raises on failure.
+    work_dir = tempfile.mkdtemp(prefix=_WORKDIR_PREFIX[role])
+    try:
+        write_agent_settings(Path(work_dir), allow)
+        env = os.environ.copy()
+        env[WATCHER_CHILD_ENV] = "1"
+        env["ENGRAM_DB"] = str(db.db_path())
+        result = invoke_claude_agent(
+            message,
+            timeout=_watcher_timeout(),
+            model=_watcher_model(),
+            resume=resume,
+            cwd=work_dir,
+            env=env,
+            claude_bin=CLAUDE_BIN,
+        )
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
 
-    Uses --bare to skip hooks (see _claude_p_new docstring). Kept thin as the
-    new-vs-resume test seam (see _claude_p_new).
-    """
-    return _run(message, schema, resume=session_id)
-
-
-def _run(message: str, schema: str, resume: str | None) -> str:
-    """Invoke the watcher's `claude -p` via the shared seam; raise on a process
-    error so run_tick treats it as a held window."""
-    result = invoke_claude_agent(
-        message,
-        timeout=_watcher_timeout(),
-        model=_watcher_model(),
-        schema=schema,
-        resume=resume,
-        bare=True,
-        claude_bin=CLAUDE_BIN,
-    )
-    if result.error:
-        raise RuntimeError(result.error)
-    return result.stdout
+    if result.error or result.returncode != 0:
+        return SessionResult(ok=False, watcher_session_id=resume)
+    # Reuse the existing session for the next --resume. We extract the id from the
+    # JSON envelope (always present) rather than pinning a caller --session-id:
+    # extraction is the proven path and composes with the permissioned session.
+    sid = _extract_session_id(result.stdout) or resume
+    return SessionResult(ok=True, watcher_session_id=sid)
 
 
 def _extract_session_id(stdout: str) -> str | None:
-    """Extract session_id from claude -p --output-format json output."""
+    """Extract session_id from `claude -p --output-format json` output."""
     for line in stdout.splitlines():
         line = line.strip()
         if line.startswith("{"):
@@ -139,81 +137,3 @@ def _extract_session_id(stdout: str) -> str | None:
             except json.JSONDecodeError:
                 continue
     return None
-
-
-def _parse_response(stdout: str) -> dict | None:
-    """Extract and parse the JSON response from claude -p output.
-
-    The model returns the response one of two ways:
-      - via the StructuredOutput tool (when `--json-schema` is honored) →
-        `result` field is already clean JSON.
-      - as a text block with Markdown-fenced JSON (```json ... ```) →
-        `result` still contains the fences; naive json.loads fails.
-    This parser handles both and also tolerates trailing/leading prose.
-    """
-    result_text = parse_claude_json_output(stdout)
-    if not result_text:
-        return None
-    candidates = _candidate_json_strings(result_text)
-    for s in candidates:
-        try:
-            parsed = json.loads(s)
-        except (json.JSONDecodeError, ValueError):
-            continue
-        if isinstance(parsed, dict):
-            return parsed
-    return None
-
-
-def _candidate_json_strings(text: str) -> list[str]:
-    """Yield plausible JSON snippets extracted from a mixed text/code-fenced response."""
-    out: list[str] = []
-    stripped = text.strip()
-    if stripped:
-        out.append(stripped)
-
-    # ```json ... ``` or ``` ... ```
-    fence_re = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL | re.IGNORECASE)
-    for m in fence_re.finditer(text):
-        inner = m.group(1).strip()
-        if inner:
-            out.append(inner)
-
-    # Largest balanced {...} block, as a last resort.
-    first = text.find("{")
-    last = text.rfind("}")
-    if first != -1 and last > first:
-        out.append(text[first : last + 1].strip())
-
-    return out
-
-
-def _save_memory(mem: dict, cwd: str) -> None:
-    """Save a memory by calling engram remember.
-
-    Plumbs `cwd` through `--project-cwd` so the user's working directory
-    (not the watcher's, which is wherever launchd/the spawn happened to put
-    it) is used to compute the project slug for scope=project memories.
-    """
-    name = mem.get("name", "")
-    body = mem.get("body", "")
-    kind = mem.get("kind") or "hint"
-    scope = mem.get("scope", "project")
-    triggers = mem.get("triggers", [])
-    paths = mem.get("paths", [])
-
-    if not name or not body:
-        return
-    if not triggers and not paths:
-        return
-
-    argv = [body, "--kind", kind, "--scope", scope, "--name", name]
-    if cwd:
-        argv.extend(["--project-cwd", cwd])
-    for t in triggers:
-        if isinstance(t, str) and t.strip():
-            argv.extend(["--trigger", t.strip()])
-    for p in paths:
-        if isinstance(p, str) and p.strip():
-            argv.extend(["--path", p.strip()])
-    remember_main(argv)

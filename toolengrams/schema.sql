@@ -17,7 +17,8 @@ CREATE TABLE IF NOT EXISTS memories (
     created_ts       INTEGER NOT NULL,
     last_surfaced_ts INTEGER NOT NULL DEFAULT 0,
     surface_count    INTEGER NOT NULL DEFAULT 0,
-    useful_count     INTEGER NOT NULL DEFAULT 0,
+    useful_count     INTEGER NOT NULL DEFAULT 0,   -- helpful verdicts (eval watcher)
+    noise_count      INTEGER NOT NULL DEFAULT 0,   -- noise verdicts (trigger over-matched)
     pinned           INTEGER NOT NULL DEFAULT 0,
     archived_ts      INTEGER,
     last_verified_ts INTEGER DEFAULT NULL
@@ -95,10 +96,13 @@ CREATE TABLE IF NOT EXISTS consolidation_runs (
     report                 TEXT
 );
 
--- Watcher state (one row per work session). Tracks the transcript cursor and
--- the event-driven tick state (armed / coalesce / cross-event retry streak).
+-- Watcher state — two symmetric rows per work session, one per role
+-- (formation | eval). Tracks each role's own transcript cursor and the
+-- event-driven tick state (armed / coalesce / cross-event retry streak).
 CREATE TABLE IF NOT EXISTS watcher_state (
-    work_session_id    TEXT PRIMARY KEY,
+    work_session_id    TEXT NOT NULL,
+    role               TEXT NOT NULL DEFAULT 'formation'
+                         CHECK (role IN ('formation','eval')),
     watcher_session_id TEXT,
     watcher_pid        INTEGER,
     transcript_path    TEXT,
@@ -108,7 +112,8 @@ CREATE TABLE IF NOT EXISTS watcher_state (
     created_ts         INTEGER NOT NULL,
     armed              INTEGER NOT NULL DEFAULT 0,
     last_tick_ts       INTEGER NOT NULL DEFAULT 0,
-    fail_streak        INTEGER NOT NULL DEFAULT 0
+    fail_streak        INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (work_session_id, role)
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(

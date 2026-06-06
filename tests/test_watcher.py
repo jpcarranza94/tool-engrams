@@ -1,20 +1,15 @@
-"""Tests for the watcher's pure helpers: delta formatting, response parsing,
-and memory saving.
+"""Tests for the watcher's pure helpers: delta formatting + transcript reads.
 
-Cursor / arm / retry state lives in watcher_state and is covered by
-test_watcher_state.py; the event-driven tick is covered by test_watcher_tick.py.
+v10 deleted the JSON response parser and the in-process `_save_memory` — watcher
+sessions now call the engram CLI directly (covered by test_watcher_tick.py).
+Cursor / arm / retry state lives in watcher_state (test_watcher_state.py).
 """
 
 from __future__ import annotations
 
 import json
 
-from toolengrams.watcher import (
-    _format_delta,
-    _parse_response,
-    _read_lines_from,
-    _save_memory,
-)
+from toolengrams.watcher import _format_delta, _read_lines_from
 
 
 # ---------- delta formatting ----------
@@ -181,104 +176,3 @@ def test_read_lines_from_start(tmp_path):
 def test_read_lines_from_missing_file():
     result = _read_lines_from("/nonexistent/path.jsonl", 0)
     assert result == []
-
-
-# ---------- parse response ----------
-
-
-def test_parse_response_none():
-    stdout = json.dumps({"result": '{"action": "none"}'})
-    response = _parse_response(stdout)
-    assert response is not None
-    assert response["action"] == "none"
-    assert response.get("memories") is None
-
-
-def test_parse_response_create():
-    inner = json.dumps({
-        "action": "create",
-        "memories": [{
-            "name": "test-mem",
-            "body": "Without this memory, Claude would fail.",
-            "kind": "block",
-            "scope": "project",
-            "triggers": ["test cmd"],
-            "paths": [],
-        }],
-    })
-    stdout = json.dumps({"result": inner})
-    response = _parse_response(stdout)
-    assert response["action"] == "create"
-    assert len(response["memories"]) == 1
-    assert response["memories"][0]["name"] == "test-mem"
-
-
-def test_parse_response_empty():
-    response = _parse_response("")
-    assert response is None
-
-
-def test_parse_response_garbage():
-    response = _parse_response("this is not json")
-    assert response is None
-
-
-# ---------- save memory ----------
-
-
-def test_save_memory_uses_cwd_for_project_slug(temp_db, capsys):
-    """The watcher passes its work_session cwd to remember via --project-cwd
-    so the resulting memory binds to the user's project slug, not the
-    watcher subprocess's own cwd (which is wherever launchd left it).
-    """
-    _save_memory(
-        {
-            "name": "test-save",
-            "body": "Without this memory, Claude would use `docker build` wrong.",
-            "kind": "hint",
-            "scope": "project",
-            "triggers": ["docker build"],
-            "paths": [],
-        },
-        cwd="/tmp/test-project",
-    )
-    row = temp_db.execute(
-        "SELECT name, body, project_slug FROM memories WHERE name = 'test-save'"
-    ).fetchone()
-    assert row is not None
-    assert "docker build" in row["body"]
-    assert row["project_slug"] == "-tmp-test-project"
-
-
-def test_save_memory_skips_no_triggers(temp_db, capsys):
-    _save_memory(
-        {
-            "name": "no-triggers",
-            "body": "Without this memory...",
-            "kind": "hint",
-            "scope": "project",
-            "triggers": [],
-            "paths": [],
-        },
-        cwd="/tmp/test-project",
-    )
-    row = temp_db.execute(
-        "SELECT COUNT(*) AS c FROM memories WHERE name = 'no-triggers'"
-    ).fetchone()
-    assert row["c"] == 0
-
-
-def test_save_memory_skips_no_name(temp_db, capsys):
-    _save_memory(
-        {
-            "name": "",
-            "body": "Without this memory...",
-            "kind": "hint",
-            "scope": "project",
-            "triggers": ["test cmd"],
-            "paths": [],
-        },
-        cwd="/tmp/test-project",
-    )
-    count = temp_db.execute("SELECT COUNT(*) AS c FROM memories").fetchone()
-    assert count["c"] == 0

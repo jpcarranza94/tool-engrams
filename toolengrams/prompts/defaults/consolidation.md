@@ -26,8 +26,9 @@ Use Grep to find "PreToolUse", "PostToolUseFailure", and "[memory:" in the JSONL
 ### 2. Prune bad memories
 
 This is equally important as discovery. Look for:
-- **Noisy memories** -- high surface_count, low useful_count. If a memory fires often without helping, it's noise.
-- **Memories flagged 'unused' or 'noise'** -- query `session_surfaces.outcome` for negative judgments accumulated since the last consolidation run. A memory with multiple `outcome='unused'` rows (Claude actively rejected the hint) or `outcome='noise'` rows (a prior consolidation marked it) is a strong prune candidate, often stronger than usefulness ratio alone. Use SQL like `SELECT memory_id, COUNT(*) FROM session_surfaces WHERE outcome IN ('unused','noise') GROUP BY memory_id`.
+- **Low-quality memories** -- the per-memory quality is `q = (useful_count + 1) / (useful_count + noise_count + 2)` (shown as `q=` in the inventory). `q < 0.5` means more `noise` verdicts than `helpful` — the surfacing gate already suppresses these hints, so they're prime prune/fix candidates. Note: `surface_count` is telemetry only now (times shown), NOT a quality signal — a high surface_count with low `useful_count` is no longer "noise" by itself, because `unused` surfaces (relevant-but-not-acted-on) don't count against the memory.
+- **The noise/unused split tells you WHAT to fix.** Query the distribution since the last run: `SELECT memory_id, outcome, COUNT(*) FROM session_surfaces WHERE outcome IS NOT NULL GROUP BY memory_id, outcome`. A pile of `noise` means the **trigger over-matched** — the content may be fine, so prefer **trigger-narrowing** (see below) over archiving. A pile of `unused` means the memory keeps surfacing on relevant calls but Claude never acts on it — that's a content/value problem, a stronger archive signal.
+- **Trigger-narrowing (prefer this over archiving a noisy memory).** When `noise` dominates because a trigger is too broad — a `**/Dockerfile` path-glob that fires on every Dockerfile read, a one-word command trigger, a redundant path on a memory that already has a precise command trigger — narrow the trigger instead of deleting the knowledge: `Bash(engram trigger <memory_id> --remove <trigger_id> --add-path "infra/**/Dockerfile")` (use `engram trigger <memory_id> --list` to see ids). This preserves the memory's `useful_count` / `noise_count` history, which `forget`+`remember` would reset. Only archive when the *content* itself is useless.
 - **Duplicate memories** -- two memories with overlapping triggers and similar content. When deciding which to keep:
   - **Prefer reach over specificity.** A `global`-scoped memory with a short trigger (e.g. `["jira","issue","move"]`) fires from any cwd; a `project`-scoped memory only fires when the user's cwd matches *exactly* (no parent-prefix matching). Don't archive the broad-global memory in favor of a narrower project-scoped one — even if the project-scoped one looks "more specific," it will silently fail to fire when the user runs the same command from a parent dir, a sibling repo, or a subdirectory.
   - **Check that the surviving trigger can actually match real calls.** Triggers like `["jira","issue","move","SYS"]` look correct but never fire because `SYS` doesn't equal `SYS-6899` under token-equality subsequence matching. Before archiving the alternative, verify the survivor has at least one trigger that has actually fired (`surface_count > 0`) — if neither has surfaced, prefer the one whose tokens match how the command is actually typed.
@@ -39,7 +40,7 @@ When you decide a memory is noise (regardless of how you concluded it), retroact
 
 `Bash(engram mark-noise "<name>")` — marks ALL unmarked surfaces of the memory across every session as `outcome='noise'`. Use `--session-id <S>` to scope to a single session. Prefer this over bare `Bash(sqlite3 UPDATE …)` so the CHECK constraint stays enforced centrally.
 
-Note: `outcome='helpful'` is only ever set by automatic reinforcement on success — block memories live on the PreToolUse track and deny the call before there's a success/failure arc, so they never accumulate `outcome='helpful'`. Don't read absence of helpful outcomes on a block as a prune signal; use surface_count / useful_count instead.
+Note (v10): outcomes (`helpful` / `unused` / `noise`) are set by the **evaluation watcher** (`engram judge`), which reads each session's transcript and judges whether Claude actually heeded the surfaced memory — for BOTH kinds, including `block`. They are no longer inferred from tool-call success. So `useful_count` and `noise_count` reflect real heeding; trust `q` and the outcome distribution over raw `surface_count`.
 
 ### 3. Discover new memories (HIGH BAR)
 
@@ -69,6 +70,7 @@ What does NOT qualify:
 
 ### 4. Take action
 
+- For a noisy *trigger* on otherwise-good content: `engram trigger <memory_id> --remove <id> --add-path "<narrower glob>"` (or `--add-trigger "<narrower phrase>"`). Narrow first; archive only when the content is useless.
 - For noisy/stale memories: `engram forget --delete "<name>"` (archive, not soft-demote)
 - For new discoveries: `engram remember "<body>" --trigger "<token seq>" --kind <block|hint> --scope <global|project> --name "<name>"`
   - Body MUST start with "Without this memory, Claude would..."
@@ -140,6 +142,8 @@ Before the JSON block, include a human-readable report with:
 - `Bash(engram verify "name")` -- mark a memory's body as still accurate (sets last_verified_ts = now); use after auditing it against git history and finding no contradiction
 - `Bash(engram skip "name" --session-id <S>)` -- mark a memory's most recent unmarked surface as outcome='unused' in a specific session. Useful for retrospectively flagging surfaces that you judged unhelpful while reviewing session transcripts.
 - `Bash(engram mark-noise "name")` -- retroactively label a memory's unmarked surfaces as outcome='noise'. Add `--session-id <S>` to scope to one session. Use when concluding a memory is noise during consolidation rather than running raw `Bash(sqlite3 UPDATE …)` SQL.
+- `Bash(engram trigger <memory_id> --list)` -- list a memory's triggers with their ids
+- `Bash(engram trigger <memory_id> --remove <id> --add-path "<glob>")` / `--add-trigger "<phrase>"` -- narrow an over-matching trigger in place, preserving the memory's useful/noise counters (a `forget`+`remember` would reset them). The preferred fix when `noise` verdicts come from a too-broad trigger.
 - `Bash(engram resolve-slug <slug>)` -- reverse a project slug to candidate repo paths on disk; returns `{{"best": "/path", "candidates": [...]}}` or empty candidates if the repo is gone
 - `Bash(engram remember "body" --trigger "token seq" --kind K --scope S --name "name")` -- create a memory
 - `Bash(engram status)` -- system health

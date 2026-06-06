@@ -1,13 +1,15 @@
-"""Event-driven watcher: background LLM memory formation, fired by hooks.
+"""Event-driven watcher: background LLM memory formation + evaluation.
 
-Hooks fire a detached `engram watcher-tick` per meaningful event; each tick
-reads the transcript delta since its cursor, gates out pure-chat turns, calls
-`claude -p`, and saves. Model via `$ENGRAM_WATCHER_MODEL` (default: opus).
+Hooks fire a detached `engram watcher-tick` per meaningful event; each tick reads
+the transcript delta since its (session, role) cursor and runs a permissioned
+`claude -p` session that does its job by calling the engram CLI — `engram
+remember` (formation) or `engram judge` (evaluation). No JSON schema, no parsing.
+Model via `$ENGRAM_WATCHER_MODEL` (default opus).
 
 Module layout:
   - transcript_format.py — pure JSONL → readable-conversation
-  - agent.py             — claude -p invocation + JSON response parsing
-  - state.py             — watcher_state persistence (cursor / armed / streak)
+  - agent.py             — permissioned claude -p session runner (per role)
+  - state.py             — watcher_state persistence, keyed (session, role)
   - log.py               — watcher log sink
   - tick.py              — event-driven tick engine + coalesce + idle sweep
 """
@@ -17,10 +19,10 @@ from .agent import (
     CLAUDE_BIN,
     DEFAULT_WATCHER_MODEL,
     DEFAULT_WATCHER_TIMEOUT,
-    WATCHER_SCHEMA,
-    _candidate_json_strings,
-    _parse_response,
-    _save_memory,
+    ROLE_ALLOWLIST,
+    SessionResult,
+    run_watcher_session,
+    _extract_session_id,
     _watcher_model,
     _watcher_timeout,
 )
@@ -42,6 +44,7 @@ __all__ = [
     # Public API
     "tick",
     "derive_transcript_path",
+    "run_watcher_session",
     # Configuration constants
     "CLAUDE_BIN",
     "DEFAULT_WATCHER_MODEL",
@@ -51,17 +54,16 @@ __all__ = [
     "MAX_DELTA_CHARS",
     "MAX_FORM_RETRIES",
     "MAX_RESULT_CHARS",
-    "WATCHER_SCHEMA",
+    "ROLE_ALLOWLIST",
+    "SessionResult",
     # Internals re-exported for tests / introspection
-    "_candidate_json_strings",
     "_cap_delta",
     "_clip_ends",
     "_clip_head",
+    "_extract_session_id",
     "_format_delta",
-    "_parse_response",
     "_read_lines_from",
     "_retry_decision",
-    "_save_memory",
     "_watcher_model",
     "_watcher_timeout",
 ]

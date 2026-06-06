@@ -30,7 +30,8 @@ from .models import Memory, Trigger
 # KeyError, which test_memory_store.test_insert_and_get_roundtrip catches.
 _MEM_COLS = (
     "id, name, description, body, kind, scope, project_slug, created_ts, "
-    "last_surfaced_ts, surface_count, useful_count, pinned, archived_ts, last_verified_ts"
+    "last_surfaced_ts, surface_count, useful_count, noise_count, pinned, "
+    "archived_ts, last_verified_ts"
 )
 
 
@@ -256,7 +257,7 @@ def match_token_triggers(conn: sqlite3.Connection, first_token: str,
     args = (first_token, project_slug, kind) if kind else (first_token, project_slug)
     return conn.execute(
         "SELECT m.id, m.name, m.body, m.kind, m.scope, m.surface_count, "
-        "       m.useful_count, m.last_surfaced_ts, m.pinned, t.tokens_json "
+        "       m.useful_count, m.noise_count, m.last_surfaced_ts, m.pinned, t.tokens_json "
         "FROM triggers t JOIN memories m ON m.id = t.memory_id "
         "WHERE t.kind = 'token_subseq' AND t.first_token = ? "
         "  AND m.archived_ts IS NULL "
@@ -273,7 +274,7 @@ def match_path_triggers(conn: sqlite3.Connection, project_slug: str | None,
     args = (project_slug, kind) if kind else (project_slug,)
     return conn.execute(
         "SELECT m.id, m.name, m.body, m.kind, m.scope, m.surface_count, "
-        "       m.useful_count, m.last_surfaced_ts, m.pinned, t.path_pattern "
+        "       m.useful_count, m.noise_count, m.last_surfaced_ts, m.pinned, t.path_pattern "
         "FROM triggers t JOIN memories m ON m.id = t.memory_id "
         "WHERE t.kind = 'path_glob' AND m.archived_ts IS NULL "
         "  AND (m.scope = 'global' OR m.project_slug = ?)"
@@ -375,12 +376,25 @@ def bump_surface(conn: sqlite3.Connection, memory_ids: Sequence[int], now_ts: in
 
 
 def bump_useful(conn: sqlite3.Connection, memory_ids: Sequence[int]) -> None:
-    """Increment useful_count for each memory — success reinforcement."""
+    """Increment useful_count for each memory — a 'helpful' verdict."""
     if not memory_ids:
         return
     placeholders = ",".join("?" * len(memory_ids))
     conn.execute(
         f"UPDATE memories SET useful_count = useful_count + 1 "
+        f"WHERE id IN ({placeholders})",
+        list(memory_ids),
+    )
+
+
+def bump_noise(conn: sqlite3.Connection, memory_ids: Sequence[int]) -> None:
+    """Increment noise_count for each memory — a 'noise' verdict (the trigger
+    over-matched). Paired with bump_useful, this feeds the q quality ratio."""
+    if not memory_ids:
+        return
+    placeholders = ",".join("?" * len(memory_ids))
+    conn.execute(
+        f"UPDATE memories SET noise_count = noise_count + 1 "
         f"WHERE id IN ({placeholders})",
         list(memory_ids),
     )

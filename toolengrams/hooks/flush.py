@@ -43,6 +43,8 @@ def _maybe_flush(payload: dict[str, Any]) -> None:
     transcript_path = payload.get("transcript_path") or derive_transcript_path(session_id, cwd)
     tick.ensure_row(session_id, transcript_path, cwd)
     tick.trigger(session_id, transcript_path, cwd, reason="flush", flush=True)
+    # Final pass: force closure on any still-pending surfaces (self-gated).
+    tick.trigger_eval(session_id, transcript_path, cwd, reason="flush", flush=True)
 
 
 def _emit(obj: dict[str, Any]) -> None:
