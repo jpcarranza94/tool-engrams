@@ -31,7 +31,6 @@ def retrieve_candidates(
     conn: sqlite3.Connection,
     hint: ExtractedTriggerHint,
     project_slug: str | None,
-    now_ts: int,
     kind: str | None = None,
 ) -> list[Candidate]:
     """Return memories whose triggers match this tool call.
@@ -63,7 +62,7 @@ def retrieve_candidates(
                 _merge_path_candidate(candidates, row)
 
     for c in candidates.values():
-        c.final_score = final_score(c, now_ts)
+        c.final_score = final_score(c)
 
     return list(candidates.values())
 
@@ -114,6 +113,7 @@ def _merge_token_candidate(
             matched_path=None,
             surface_count=row["surface_count"],
             useful_count=row["useful_count"],
+            noise_count=row["noise_count"],
             last_surfaced_ts=row["last_surfaced_ts"],
             pinned=bool(row["pinned"]),
             kind=row["kind"],
@@ -132,6 +132,7 @@ def _merge_path_candidate(store: dict[int, Candidate], row: sqlite3.Row) -> None
         matched_path=row["path_pattern"],
         surface_count=row["surface_count"],
         useful_count=row["useful_count"],
+        noise_count=row["noise_count"],
         last_surfaced_ts=row["last_surfaced_ts"],
         pinned=bool(row["pinned"]),
         kind=row["kind"],

@@ -127,6 +127,36 @@ def get_prior_failure_surfaces(
     return [r["memory_id"] for r in rows]
 
 
+def has_pending_surfaces(conn: sqlite3.Connection, session_id: str) -> bool:
+    """True if this session has at least one unjudged (outcome IS NULL) surface.
+
+    The cheap hot-path check the Stop/flush hooks run before spawning an eval
+    tick — most turns surface nothing, so this bounds eval cost to turns that
+    need it."""
+    if not session_id:
+        return False
+    return conn.execute(
+        "SELECT 1 FROM session_surfaces WHERE session_id = ? AND outcome IS NULL LIMIT 1",
+        (session_id,),
+    ).fetchone() is not None
+
+
+def pending_surfaces(conn: sqlite3.Connection, session_id: str) -> list[sqlite3.Row]:
+    """Unjudged surfaces in this session joined with their memory, for the eval
+    watcher's judging list: memory_id, name, body, kind, turn_at_surface,
+    first_token, hook. Oldest first."""
+    if not session_id:
+        return []
+    return conn.execute(
+        "SELECT ss.memory_id, ss.turn_at_surface, ss.first_token, ss.hook, "
+        "       m.name, m.body, m.kind "
+        "FROM session_surfaces ss JOIN memories m ON m.id = ss.memory_id "
+        "WHERE ss.session_id = ? AND ss.outcome IS NULL "
+        "ORDER BY ss.surfaced_ts",
+        (session_id,),
+    ).fetchall()
+
+
 def mark_surface_outcome(
     conn: sqlite3.Connection,
     session_id: str,
@@ -162,6 +192,25 @@ def mark_surface_outcome(
         params.append(first_token)
     cur = conn.execute(sql, params)
     return cur.rowcount or 0
+
+
+def has_surface(
+    conn: sqlite3.Connection,
+    session_id: str,
+    memory_id: int,
+) -> bool:
+    """True if this memory surfaced at all in this session (any outcome).
+
+    `engram judge` uses it to tell "id never surfaced here" (reject) apart from
+    "surfaced but already judged" (idempotent noop): the former has no row, the
+    latter has a non-NULL row.
+    """
+    if not session_id:
+        return False
+    return conn.execute(
+        "SELECT 1 FROM session_surfaces WHERE session_id = ? AND memory_id = ? LIMIT 1",
+        (session_id, memory_id),
+    ).fetchone() is not None
 
 
 def get_most_recent_unmarked_surface(

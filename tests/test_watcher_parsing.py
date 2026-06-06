@@ -1,17 +1,15 @@
-"""Unit tests for watcher parsing + delta capping.
+"""Unit tests for watcher config knobs + delta capping.
 
-These cover the three bugs found by the 2026-04-23 live-session audit:
-  1. Parser failed on fenced-JSON model responses (silently dropped memories).
-  2. Dormant sessions ballooned the delta into hundreds of KB on first wake.
+v10 deleted the JSON response parser (`_parse_response` / `_candidate_json_strings`)
+and the `_run` wrapper — watcher sessions call the engram CLI directly. What
+remains here: model/timeout resolution, the held-window retry decision, and the
+delta-capping helpers (the dormant-session ballooning fix).
 """
 
 from __future__ import annotations
 
 import json
-import os
 
-from toolengrams.claude_invoke import ClaudeResult
-from toolengrams.watcher import agent
 from toolengrams.watcher import (
     DEFAULT_WATCHER_MODEL,
     DEFAULT_WATCHER_TIMEOUT,
@@ -20,11 +18,9 @@ from toolengrams.watcher import (
     MAX_FORM_RETRIES,
     MAX_RESULT_CHARS,
     _cap_delta,
-    _candidate_json_strings,
     _clip_ends,
     _clip_head,
     _format_delta,
-    _parse_response,
     _retry_decision,
     _watcher_model,
     _watcher_timeout,
@@ -56,7 +52,7 @@ def test_watcher_model_resolves_at_call_time(monkeypatch):
 
 def test_watcher_timeout_default(monkeypatch):
     monkeypatch.delenv("ENGRAM_WATCHER_TIMEOUT", raising=False)
-    assert _watcher_timeout() == DEFAULT_WATCHER_TIMEOUT == 120
+    assert _watcher_timeout() == DEFAULT_WATCHER_TIMEOUT == 120  # documented default
 
 
 def test_watcher_timeout_env_override(monkeypatch):
@@ -114,33 +110,6 @@ def test_retry_decision_full_sequence():
         outcomes.append(advance)
     assert outcomes == [False, False, True]
     assert streak == 0  # reset after giving up
-
-
-# ---------- _run: re-raise a process error so run_tick holds the window ----------
-
-
-def test_run_reraises_on_invoke_error(monkeypatch):
-    """A process failure (timeout/spawn) comes back as ClaudeResult.error from
-    the seam; the watcher wrapper must re-raise it so run_tick treats the window
-    as held-and-retried rather than parsing empty stdout."""
-    monkeypatch.setattr(
-        agent, "invoke_claude_agent",
-        lambda *a, **k: ClaudeResult(stdout="", returncode=1, timed_out=True,
-                                     error="claude -p timed out (120s)"),
-    )
-    try:
-        agent._run("msg", "{}", resume=None)
-        assert False, "expected RuntimeError"
-    except RuntimeError as e:
-        assert "timed out" in str(e)
-
-
-def test_run_returns_stdout_on_success(monkeypatch):
-    monkeypatch.setattr(
-        agent, "invoke_claude_agent",
-        lambda *a, **k: ClaudeResult(stdout='{"result":"ok"}', returncode=0),
-    )
-    assert agent._run("msg", "{}", resume="sid") == '{"result":"ok"}'
 
 
 # ---------- _clip_head / _clip_ends ----------
@@ -217,76 +186,6 @@ def test_format_delta_caps_giant_error_result_head_and_tail():
     assert "ERROR: it broke at the top" in result_line
     assert "real cause at the end" in result_line
     assert len(result_line) <= len("RESULT: ") + MAX_RESULT_CHARS + 40
-
-
-def _wrap_claude_json(result_text: str) -> str:
-    """Shape a claude -p --output-format json stdout line."""
-    return json.dumps({"result": result_text, "session_id": "fake"}) + "\n"
-
-
-# ---------- _parse_response ----------
-
-
-def test_parse_response_clean_json():
-    stdout = _wrap_claude_json('{"action": "none"}')
-    assert _parse_response(stdout) == {"action": "none"}
-
-
-def test_parse_response_fenced_json_with_language():
-    """Haiku sometimes responds with ```json … ``` instead of via StructuredOutput."""
-    body = '```json\n{\n  "action": "create",\n  "memories": [{"name":"x","body":"y","kind":"hint","scope":"global","triggers":["bq"]}]\n}\n```'
-    stdout = _wrap_claude_json(body)
-    got = _parse_response(stdout)
-    assert got is not None
-    assert got["action"] == "create"
-    assert got["memories"][0]["name"] == "x"
-
-
-def test_parse_response_fenced_json_no_language_tag():
-    body = '```\n{"action": "none"}\n```'
-    stdout = _wrap_claude_json(body)
-    assert _parse_response(stdout) == {"action": "none"}
-
-
-def test_parse_response_tolerates_surrounding_prose():
-    """Haiku says something like "Here is my response:" + JSON."""
-    body = 'Here is the response:\n\n{"action": "none"}\n\nThanks!'
-    stdout = _wrap_claude_json(body)
-    assert _parse_response(stdout) == {"action": "none"}
-
-
-def test_parse_response_empty_result_returns_none():
-    stdout = _wrap_claude_json("")
-    assert _parse_response(stdout) is None
-
-
-def test_parse_response_malformed_json_returns_none():
-    stdout = _wrap_claude_json("this is not JSON at all")
-    assert _parse_response(stdout) is None
-
-
-def test_parse_response_nested_json_extracted():
-    body = 'prose prose {"ignore":1} prose prose {"action":"create","memories":[]} trailing'
-    stdout = _wrap_claude_json(body)
-    got = _parse_response(stdout)
-    # Either extracted candidate parses — the largest-balanced-braces heuristic
-    # should pick up the whole span. Accept either a match or a graceful None.
-    # We just require the parser doesn't blow up and returns something
-    # deterministic (dict-or-None), never raises.
-    assert got is None or isinstance(got, dict)
-
-
-# ---------- _candidate_json_strings ----------
-
-
-def test_candidate_json_strings_extracts_fence():
-    candidates = _candidate_json_strings('Preamble\n```json\n{"a":1}\n```\nAfter')
-    assert any(c == '{"a":1}' for c in candidates)
-
-
-def test_candidate_json_strings_extracts_balanced_braces_fallback():
-    candidates = _candidate_json_strings('text {"a":1} text')
-    assert any('"a":1' in c for c in candidates)
 
 
 # ---------- _cap_delta ----------

@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 SCHEMA_PATH = Path(__file__).parent / "schema.sql"
 MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 

@@ -9,10 +9,12 @@ Lookup order:
 from .loader import load_prompt
 
 
-def build_watcher_prompt() -> str:
-    return load_prompt("watcher")
+def build_watcher_prompt(cwd: str = "") -> str:
+    """Formation prompt, with the user's cwd interpolated so the model passes it
+    to `engram remember --project-cwd`."""
+    return load_prompt("watcher", cwd=cwd)
 
 
-# Kept as a module attribute for back-compat with any inline readers, but the
-# canonical accessor is build_watcher_prompt() so user overrides apply.
-WATCHER_SUBSEQUENT_HEADER = "--- New activity (last 5 minutes) ---\n\n"
+# Header prepended to the delta on a resumed formation session (the standing
+# guidance already lives in the session history; each pass just sends new lines).
+WATCHER_SUBSEQUENT_HEADER = "--- New activity ---\n\n"

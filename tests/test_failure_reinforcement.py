@@ -1,4 +1,12 @@
-"""End-to-end: post_tool_failure hint → next same-first_token success bumps useful_count."""
+"""post_tool's failure→success behavior after v10.
+
+v9 credited a hint when a prior failed call's first_token succeeded again.
+v10 deleted that credit — usefulness is judged by the evaluation watcher
+(`engram judge`), not inferred from a retry succeeding. What survives is the
+*recovery fast-path tick*: the same failure→success detection now only fires an
+early watcher tick (the failure surface's evidence window just closed), and
+crucially leaves the counters and the surface outcome untouched.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +14,8 @@ import io
 import json
 import sys
 import time
+
+import pytest
 
 from toolengrams.hooks import post_tool, post_tool_failure, pretool
 
@@ -36,63 +46,78 @@ def _run_hook(hook_module, payload: dict, monkeypatch) -> dict:
     return json.loads(out) if out else {}
 
 
-def test_failure_hint_credited_on_next_same_first_token_success(temp_db, monkeypatch):
+@pytest.fixture
+def captured_ticks(monkeypatch):
+    """Capture recovery-tick spawns instead of launching a detached process."""
+    calls: list[dict] = []
+    monkeypatch.setattr(
+        post_tool.tick, "trigger",
+        lambda session_id, tpath, cwd, reason, flush=False: calls.append(
+            {"session_id": session_id, "reason": reason}
+        ),
+    )
+    return calls
+
+
+def _useful(conn, name: str) -> int:
+    return conn.execute(
+        "SELECT useful_count FROM memories WHERE name = ?", (name,)
+    ).fetchone()["useful_count"]
+
+
+def _failure_outcome(conn, session_id: str):
+    return conn.execute(
+        "SELECT outcome FROM session_surfaces "
+        "WHERE session_id = ? AND hook = 'post_tool_use_failure'",
+        (session_id,),
+    ).fetchone()["outcome"]
+
+
+def test_failure_then_success_does_not_credit_but_fires_recovery_tick(
+    temp_db, monkeypatch, captured_ticks
+):
     _seed_hint(
         temp_db, "git-force-push",
         "Without this memory, Claude would force push and overwrite teammates' commits.",
         ["git", "push", "--force"],
     )
 
-    # 1. The failed `git push --force` surfaces the hint via post_tool_failure.
+    # 1. The failed `git push --force` surfaces the hint (outcome NULL).
     _run_hook(post_tool_failure, {
         "session_id": "sess-X",
         "cwd": "/tmp/x",
-        "hook_event_name": "PostToolUseFailure",
         "tool_name": "Bash",
         "tool_input": {"command": "git push --force origin main"},
         "tool_use_id": "tu-1",
         "error": "Exit code 1",
         "is_interrupt": False,
     }, monkeypatch)
+    assert _useful(temp_db, "git-force-push") == 0
+    assert _failure_outcome(temp_db, "sess-X") is None
 
-    # useful_count is still 0 — the failure call surfaced but didn't succeed.
-    row = temp_db.execute(
-        "SELECT useful_count FROM memories WHERE name = 'git-force-push'"
-    ).fetchone()
-    assert row["useful_count"] == 0
-
-    # 2. The next call: `git push --force-with-lease` succeeds.
+    # 2. The retry `git push --force-with-lease` succeeds.
     _run_hook(post_tool, {
         "session_id": "sess-X",
         "cwd": "/tmp/x",
-        "hook_event_name": "PostToolUse",
         "tool_name": "Bash",
         "tool_input": {"command": "git push --force-with-lease origin main"},
         "tool_use_id": "tu-2",
         "tool_response": "Everything up-to-date",
     }, monkeypatch)
 
-    # useful_count must now be 1 — the prior failure surface got credited.
-    row = temp_db.execute(
-        "SELECT useful_count FROM memories WHERE name = 'git-force-push'"
-    ).fetchone()
-    assert row["useful_count"] == 1
-
-    # The session_surfaces row should be marked outcome='helpful'.
-    surface = temp_db.execute(
-        "SELECT outcome FROM session_surfaces "
-        "WHERE session_id = 'sess-X' AND hook = 'post_tool_use_failure'"
-    ).fetchone()
-    assert surface["outcome"] == "helpful"
+    # Still NOT credited — the eval watcher judges heeding, not post_tool.
+    assert _useful(temp_db, "git-force-push") == 0
+    assert _failure_outcome(temp_db, "sess-X") is None
+    # But a recovery tick fired.
+    assert [c["reason"] for c in captured_ticks] == ["recovery"]
 
 
-def test_failure_hint_not_credited_for_different_first_token(temp_db, monkeypatch):
-    _seed_hint(
-        temp_db, "git-only", "Hint about git.", ["git", "push"],
-    )
+def test_no_recovery_tick_for_different_first_token(temp_db, monkeypatch, captured_ticks):
+    _seed_hint(temp_db, "git-only", "Hint about git.", ["git", "push"])
 
     _run_hook(post_tool_failure, {
         "session_id": "sess-Y",
+        "cwd": "/tmp/y",
         "tool_name": "Bash",
         "tool_input": {"command": "git push origin main"},
         "tool_use_id": "tu-1",
@@ -100,65 +125,27 @@ def test_failure_hint_not_credited_for_different_first_token(temp_db, monkeypatc
         "is_interrupt": False,
     }, monkeypatch)
 
-    # Next call is `ls -la` — different first_token, must NOT credit.
+    # Next call is `ls -la` — different first_token: no recovery, no credit.
     _run_hook(post_tool, {
         "session_id": "sess-Y",
+        "cwd": "/tmp/y",
         "tool_name": "Bash",
         "tool_input": {"command": "ls -la"},
         "tool_use_id": "tu-2",
         "tool_response": "drwxr-xr-x ...",
     }, monkeypatch)
 
-    row = temp_db.execute(
-        "SELECT useful_count FROM memories WHERE name = 'git-only'"
-    ).fetchone()
-    assert row["useful_count"] == 0
+    assert _useful(temp_db, "git-only") == 0
+    assert captured_ticks == []
 
 
-def test_failure_hint_not_credited_twice(temp_db, monkeypatch):
-    _seed_hint(temp_db, "h", "body", ["git", "push"])
-
-    _run_hook(post_tool_failure, {
-        "session_id": "sess-Z",
-        "tool_name": "Bash",
-        "tool_input": {"command": "git push origin main"},
-        "tool_use_id": "tu-1",
-        "error": "Exit code 1",
-        "is_interrupt": False,
-    }, monkeypatch)
-
-    # First success — bump.
-    _run_hook(post_tool, {
-        "session_id": "sess-Z",
-        "tool_name": "Bash",
-        "tool_input": {"command": "git push origin main"},
-        "tool_use_id": "tu-2",
-        "tool_response": "ok",
-    }, monkeypatch)
-
-    # Second success — surface row is already marked, must NOT bump again.
-    _run_hook(post_tool, {
-        "session_id": "sess-Z",
-        "tool_name": "Bash",
-        "tool_input": {"command": "git push origin develop"},
-        "tool_use_id": "tu-3",
-        "tool_response": "ok",
-    }, monkeypatch)
-
-    row = temp_db.execute(
-        "SELECT useful_count FROM memories WHERE name = 'h'"
-    ).fetchone()
-    assert row["useful_count"] == 1
-
-
-def test_pretool_hint_surface_marked_helpful_on_success(temp_db, monkeypatch):
-    """Existing pre_tool_use reinforcement path also writes outcome='helpful'."""
+def test_pretool_surface_not_credited_on_success(temp_db, monkeypatch, captured_ticks):
+    """The v9 pre_tool_use 'helpful' credit path is gone too."""
     _seed_hint(temp_db, "ph", "psql replica hint", ["psql", "-h"])
 
     _run_hook(pretool, {
         "session_id": "sess-PT",
         "cwd": "/tmp/x",
-        "hook_event_name": "PreToolUse",
         "tool_name": "Bash",
         "tool_input": {"command": "psql -h replica.internal -c 'SELECT 1'"},
         "tool_use_id": "tu-1",
@@ -166,14 +153,16 @@ def test_pretool_hint_surface_marked_helpful_on_success(temp_db, monkeypatch):
 
     _run_hook(post_tool, {
         "session_id": "sess-PT",
+        "cwd": "/tmp/x",
         "tool_name": "Bash",
         "tool_input": {"command": "psql -h replica.internal -c 'SELECT 1'"},
         "tool_use_id": "tu-1",
         "tool_response": "1 row",
     }, monkeypatch)
 
+    assert _useful(temp_db, "ph") == 0
     surface = temp_db.execute(
         "SELECT outcome FROM session_surfaces "
         "WHERE session_id = 'sess-PT' AND hook = 'pre_tool_use'"
     ).fetchone()
-    assert surface["outcome"] == "helpful"
+    assert surface["outcome"] is None

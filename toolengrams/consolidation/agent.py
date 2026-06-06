@@ -19,7 +19,7 @@ from .. import memory_store
 from ..claude_invoke import invoke_claude_agent, parse_claude_json_output, write_agent_settings
 from ..prompts.consolidation import build_consolidation_prompt
 from ..retrieval import session_state
-from ..reinforcement.scoring import usefulness
+from ..reinforcement.scoring import q
 from .collect import SessionFile
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -58,7 +58,7 @@ def _get_memory_summary(db_path: Path) -> str:
 
     lines = [f"Active memories ({len(memories)}) ordered audit-first (never-verified, then oldest-verified):"]
     for m in memories:
-        u = usefulness(m.useful_count, m.surface_count)
+        qv = q(m.useful_count, m.noise_count)
         scope_str = m.scope
         if m.project_slug:
             scope_str = f"{scope_str}:{m.project_slug}"
@@ -66,8 +66,8 @@ def _get_memory_summary(db_path: Path) -> str:
         lines.append(
             f"  [{m.id}] \"{m.name}\" kind={m.kind} "
             f"scope={scope_str} "
-            f"surfaces={m.surface_count} useful={m.useful_count} "
-            f"usefulness={u:.2f} created={m.created_ts} {verified_str}"
+            f"surfaces={m.surface_count} useful={m.useful_count} noise={m.noise_count} "
+            f"q={qv:.2f} created={m.created_ts} {verified_str}"
         )
         # Body truncated to 500 chars; agent can `engram recall --id N` for full text.
         lines.append(f"       body: {m.body[:500]}")

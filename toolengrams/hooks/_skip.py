@@ -47,6 +47,8 @@ def max_memories_per_call() -> int:
 # Match by prefix on the cwd basename.
 _INTERNAL_CWD_PREFIXES: tuple[str, ...] = (
     "engram-consolidate-",
+    "engram-formation-",
+    "engram-eval-",
     "engram-observe-",
     "engram-experiment-",
 )

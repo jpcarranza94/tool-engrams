@@ -1,12 +1,19 @@
-"""PostToolUse hook command — success reinforcement.
+"""PostToolUse hook command — turn counter + recovery fast-path tick.
 
-Bumps useful_count for memories that were surfaced on this tool call and
-increments the per-session turn counter.
+v10 removed reinforcement from this hook. The v9 "success = useful" bump (and
+the prior-failure same-first_token credit) were the source of the saturated
+useful_count: most tool calls succeed, so noise got reinforced. The single
+writer of `useful_count` / `noise_count` / `session_surfaces.outcome` is now the
+evaluation watcher (`engram judge`), which reads the transcript and judges
+actual heeding.
 
-Two reinforcement paths, both wrapped in a single transaction so the
-useful_count bump and the surface-row outcome marker land together. A
-crash between them would leave the next same-first_token success
-double-crediting the same prior failure surface.
+What stays here:
+  - `increment_session_turn` — the per-session tool-call counter that feeds
+    `turn_at_surface` and `find_latest_active_session`.
+  - the recovery fast-path tick — when a prior failure surface's first_token
+    just succeeded, an error→fix episode is provably present and that surface's
+    evidence window just closed. We fire a watcher tick now (don't credit)
+    instead of waiting for the next Stop.
 
 Output: {} (no injection).
 """
@@ -14,26 +21,19 @@ Output: {} (no injection).
 from __future__ import annotations
 
 import json
-import logging
 import sys
 import time
 from typing import Any
 
-from .. import db, memory_store
+from .. import db
 from ..retrieval.extract import extract_hints
 from ..retrieval.session_state import (
-    HOOK_POST_TOOL_USE_FAILURE,
-    HOOK_PRE_TOOL_USE,
     get_prior_failure_surfaces,
-    get_tool_call_surfaces,
     increment_session_turn,
-    mark_surface_outcome,
 )
 from ..utils import is_watcher_child
 from ..watcher import derive_transcript_path, tick
 from ._skip import is_internal_cwd
-
-logger = logging.getLogger("engram.post_tool")
 
 
 def main() -> int:
@@ -53,6 +53,11 @@ def main() -> int:
 
 
 def _run(payload: dict[str, Any]) -> int:
+    # A watcher session's own tool calls must not count turns or fire ticks.
+    if is_watcher_child():
+        _emit({})
+        return 0
+
     tool_use_id = payload.get("tool_use_id") or ""
     session_id = payload.get("session_id") or ""
     is_error = _detect_error(payload)
@@ -65,49 +70,21 @@ def _run(payload: dict[str, Any]) -> int:
     recovered = False  # a prior failure with this first_token just succeeded
     with db.session() as conn:
         if not is_error:
-            with db.transaction(conn):
-                # (1) Pre-tool surfaces from this exact call: bump useful_count
-                #     and mark the surface row 'helpful'.
-                pre_ids = get_tool_call_surfaces(
-                    conn, session_id, tool_use_id, HOOK_PRE_TOOL_USE,
-                )
-                if pre_ids:
-                    memory_store.bump_useful(conn, pre_ids)
-                    mark_surface_outcome(
-                        conn, session_id, pre_ids, "helpful",
-                        hook=HOOK_PRE_TOOL_USE,
-                    )
-
-                # (2) Prior failure surfaces in this session with matching
-                #     first_token: same-shape call now succeeded, so credit
-                #     the hint. Non-whitelisted tools just produce empty
-                #     hint.tokens, so the `if first_token:` short-circuits
-                #     naturally — no explicit WHITELIST check needed.
-                tool_name = payload.get("tool_name") or ""
-                hint = extract_hints(tool_name, payload.get("tool_input") or {})
-                first_token = hint.tokens[0] if hint.tokens else None
-                if first_token:
-                    failure_ids = get_prior_failure_surfaces(
-                        conn, session_id, first_token,
-                    )
-                    if failure_ids:
-                        recovered = True
-                        memory_store.bump_useful(conn, failure_ids)
-                        mark_surface_outcome(
-                            conn, session_id, failure_ids, "helpful",
-                            hook=HOOK_POST_TOOL_USE_FAILURE,
-                            first_token=first_token,
-                        )
-                        logger.info(
-                            "credited failure surfaces session=%s first_token=%s memory_ids=%s",
-                            session_id, first_token, failure_ids,
-                        )
+            # Detect — but do NOT credit — a prior failure surface whose
+            # first_token matches this successful call. Crediting moved to the
+            # eval watcher; here the failure→success pair only triggers an early
+            # tick. Non-whitelisted tools yield empty hint.tokens, so the
+            # `if first_token` short-circuits naturally.
+            tool_name = payload.get("tool_name") or ""
+            hint = extract_hints(tool_name, payload.get("tool_input") or {})
+            first_token = hint.tokens[0] if hint.tokens else None
+            if first_token and get_prior_failure_surfaces(conn, session_id, first_token):
+                recovered = True
 
         increment_session_turn(conn, session_id, now_ts)
 
-    # Fast-path trigger: a failure→success pair just completed, so an error→fix
-    # episode is provably present. Fire a watcher tick now (outside the txn, so
-    # the Popen never holds the DB) instead of waiting for the next Stop.
+    # Fast-path trigger: fire a watcher tick now (outside the txn, so the Popen
+    # never holds the DB) instead of waiting for the next Stop.
     if recovered and not is_watcher_child():
         cwd = payload.get("cwd") or ""
         if cwd and not is_internal_cwd(cwd):

@@ -23,12 +23,23 @@ def test_v9_db_upgrades_to_v10_default_zero(tmp_path: Path):
     path = tmp_path / "v9.sqlite"
     raw = sqlite3.connect(str(path))
     raw.executescript(db.SCHEMA_PATH.read_text())
-    # Strip the v10 column to simulate a real v9 DB (and the v11 watcher_state
-    # columns, since the current schema.sql already carries them).
+    # Strip everything added after v9 (v10 memories_verified, the v11
+    # watcher_state columns, and the v12 noise_count + watcher_state re-key),
+    # since the current schema.sql already carries them, so the forward
+    # migration chain re-applies each cleanly.
     raw.executescript("""
-        ALTER TABLE watcher_state DROP COLUMN armed;
-        ALTER TABLE watcher_state DROP COLUMN last_tick_ts;
-        ALTER TABLE watcher_state DROP COLUMN fail_streak;
+        ALTER TABLE memories DROP COLUMN noise_count;
+        DROP TABLE watcher_state;
+        CREATE TABLE watcher_state (
+            work_session_id    TEXT PRIMARY KEY,
+            watcher_session_id TEXT,
+            watcher_pid        INTEGER,
+            transcript_path    TEXT,
+            last_line_read     INTEGER NOT NULL DEFAULT 0,
+            last_checked_ts    INTEGER NOT NULL,
+            cwd                TEXT,
+            created_ts         INTEGER NOT NULL
+        );
         ALTER TABLE consolidation_runs RENAME TO consolidation_runs_tmp;
         CREATE TABLE consolidation_runs (
             id                     INTEGER PRIMARY KEY AUTOINCREMENT,
