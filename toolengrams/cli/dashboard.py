@@ -94,7 +94,7 @@ def _build_html(conn: sqlite3.Connection) -> str:
         return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
 
     def _usefulness(m):
-        # q: noise-aware quality (design-v10). surface_count is telemetry now.
+        # q: noise-aware quality. surface_count is telemetry now.
         return (m.useful_count + 1) / (m.useful_count + m.noise_count + 2)
 
     def _bar(val, max_val):

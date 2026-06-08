@@ -1,14 +1,14 @@
--- Migration v11 → v12: the v10-design scoring cutover.
+-- Migration v11 → v12: the scoring cutover.
 --
--- See docs/design-v10.md §4 (scoring) and §8 (schema). Three changes:
+-- Three changes:
 --
 --   (1) memories.noise_count — a new counter the evaluation watcher bumps on a
 --       'noise' verdict (the trigger over-matched; the content may be fine).
 --       Paired with useful_count, it feeds the noise-aware quality ratio
 --           q = (useful_count + 1) / (useful_count + noise_count + 2)
---       that replaces the v9 success=useful usefulness.
+--       that drives ranking and the surfacing gate.
 --
---   (2) useful_count reset to 0 — the v9 PostToolUse hook credited a surfaced
+--   (2) useful_count reset to 0 — the old PostToolUse hook credited a surfaced
 --       memory whenever the tool call merely *succeeded*, so the column is
 --       saturated (101/111 active memories at useful ≈ surface) and carries no
 --       real signal. Wipe it; the eval watcher rebuilds honest counts. Every

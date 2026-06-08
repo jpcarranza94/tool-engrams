@@ -1,9 +1,9 @@
 """PostToolUseFailure hook — hint injection on tool-call failure.
 
 Fires only when a tool call has actually failed (Claude Code's PostToolUseFailure
-event). See docs/design-v9.md §5 for why this event is the right surface moment
-for hints: Claude Code already discriminates real failures from semantically-OK
-non-zero exits (e.g. grep no-match), so we don't have to sniff exit codes.
+event). This event is the right surface moment for hints: Claude Code already
+discriminates real failures from semantically-OK non-zero exits (e.g. grep
+no-match), so we don't have to sniff exit codes.
 
 Empirical payload shape (verified 2026-04-21 across Bash/Read/Edit):
     {
@@ -20,7 +20,7 @@ Empirical payload shape (verified 2026-04-21 across Bash/Read/Edit):
 
 No `tool_response` — the tool failed, nothing returned.
 
-Behavior (v2, design-v9 §3.3):
+Behavior:
   - Skip if `is_interrupt` (user interrupted, not a real tool failure).
   - Retrieve memories with kind='hint' whose triggers match the failed call.
   - Session dedup against already-surfaced memories.

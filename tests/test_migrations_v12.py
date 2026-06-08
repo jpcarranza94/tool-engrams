@@ -1,11 +1,10 @@
-"""v12 migration: the v10-design scoring cutover.
+"""v12 migration: the scoring cutover.
 
 Three changes, all in `migrations/v12.sql`:
-  (1) memories.noise_count — new counter the evaluation watcher bumps on a
+  (1) memories.noise_count — a counter the evaluation watcher bumps on a
       'noise' verdict (the trigger over-matched).
-  (2) useful_count reset to 0 — the legacy column is polluted by the v9
-      success=useful bug (101/111 memories saturated), so it carries no
-      real signal and is wiped to a clean slate. surface_count is KEPT.
+  (2) useful_count reset to 0 — the legacy useful_count column carries no
+      real signal, so it is wiped to a clean slate. surface_count is KEPT.
   (3) watcher_state re-keyed (work_session_id, role) — formation and eval
       each get a symmetric row per session. Existing rows → role='formation'.
 """
@@ -106,7 +105,7 @@ def test_v11_db_upgrades_noise_count_and_resets_useful(tmp_path: Path):
         "SELECT surface_count, useful_count, noise_count FROM memories WHERE name = 'm'"
     ).fetchone()
     assert row["noise_count"] == 0      # new column, default
-    assert row["useful_count"] == 0     # polluted counter wiped
+    assert row["useful_count"] == 0     # legacy counter wiped
     assert row["surface_count"] == 10   # telemetry preserved
     conn.close()
 

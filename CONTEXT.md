@@ -26,10 +26,10 @@ _Avoid_: show, fire, emit, recall (as a verb).
 **Block / Hint** (a memory's *kind*):
 `block` denies a call at PreToolUse and injects its body; `hint` injects on tool
 failure (PostToolUseFailure). These are the only two kinds.
-_Avoid_: feedback/reference (the retired v1 kinds), guard, tip, warning.
+_Avoid_: feedback, reference, guard, tip, warning.
 
 **Reinforcement**:
-The counting that scores a memory. v10: a memory accrues `useful_count` (helpful
+The counting that scores a memory. A memory accrues `useful_count` (helpful
 verdicts) and `noise_count` (noise verdicts) from the **evaluation watcher**, never
 from tool-call success. Distinct from formation (creating memories) and consolidation.
 _Avoid_: scoring (too generic), feedback, learning.
@@ -46,7 +46,7 @@ The single Laplace-smoothed quality ratio `(useful_count + 1) / (useful_count +
 noise_count + 2)` that drives both ranking and the surfacing gate. `unused` enters
 neither counter, so a correct-but-situational memory is not punished for not being
 acted on. A fresh memory sits at `q = 0.5`.
-_Avoid_: usefulness (the v9 ratio it replaces), score, confidence.
+_Avoid_: usefulness (too generic), score, confidence.
 
 **Surfacing gate**:
 The PreToolUse suppression rule: a `hint` with `q < 0.5` (after a warm-up of
@@ -99,7 +99,7 @@ Stop/flush. Recovers a tail the coalesce window or a missing SessionEnd would
 otherwise lose.
 _Avoid_: cleanup, reaper, GC.
 
-**Watcher session** (v10):
+**Watcher session**:
 Any of the three LLM jobs run as a permissioned `claude -p` that does its work by
 calling `engram` CLI commands (no constrained JSON): **formation** (`engram remember`),
 **evaluation** (`engram judge`), **consolidation** (full `engram *`). They differ only
@@ -116,7 +116,7 @@ _Avoid_: evaluator, grader, scorer, the eval job.
 
 **Consolidation**:
 The nightly Opus agent that reviews the day's sessions to prune noise, dedupe, and
-discover missed patterns. v10: it aggregates per-memory `helpful`/`unused`/`noise`
+discover missed patterns. It aggregates per-memory `helpful`/`unused`/`noise`
 distributions and prefers **narrowing a trigger** over archiving when a memory is
 noisy (the noise is the trigger's fault, not the content's). Separate from the watcher
 ticks and from reinforcement.

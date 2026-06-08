@@ -1,6 +1,5 @@
 """Formation CLI: `engram forget` — soft-demote or archive memories.
 
-Per design-v8.md §8:
   - `engram forget <name>`            → soft demote (useful_count=0, surface_count+=5, last_surfaced_ts=0)
   - `engram forget --delete <name>`   → set archived_ts, excluded from retrieval
   - `engram forget --topic <keyword>` → soft-demote all matching by FTS

@@ -4,17 +4,17 @@ Pure functions — no DB, no side effects. Used by retrieval/rank.py when rankin
 candidates, by hooks/pretool.py + hooks/post_tool_failure.py for the surfacing
 gate, and by consolidation when reporting memory health.
 
-v10 (design-v10 §4): one ratio, `q`, drives both ranking and the gate. Recency
-was removed — surfacing is event-driven, so age is a backwards signal (a
-rare-but-important memory is relevant exactly when its long-dormant trigger fires
-again). Staleness is consolidation's job, not the ranker's.
+One ratio, `q`, drives both ranking and the gate. There is no recency term —
+surfacing is event-driven, so age is a backwards signal (a rare-but-important
+memory is relevant exactly when its long-dormant trigger fires again). Staleness
+is consolidation's job, not the ranker's.
 """
 
 from __future__ import annotations
 
 from ..models import Candidate
 
-# Surfacing-gate knobs (design-v10 §4.2).
+# Surfacing-gate knobs.
 GATE_THRESHOLD = 0.5  # q below this ⟺ noise > helpful; the prior's mean, not tuned.
 WARMUP_N = 3          # don't gate until this many verdicts, so one unlucky early
                       # 'noise' can't kill a young memory.

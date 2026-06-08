@@ -2,7 +2,7 @@
 
 **Tool-bound memory for Claude Code.** Agent-facing tools become self-documenting through interaction: Claude fails a call, the system remembers why, and next session (or next month) arrives with that knowledge in hand.
 
-> **Status:** alpha. Breaking changes expected; no stable users to protect. See `docs/design-v10.md` for the current design (and `docs/adr/` for the load-bearing decisions).
+> **Status:** alpha. Breaking changes expected; no stable users to protect. See `docs/design.md` for the design (and `docs/adr/` for the load-bearing decisions).
 
 ## The problem
 
@@ -168,7 +168,7 @@ The watcher, evaluation, and consolidation prompts are **user-overridable** with
 
 ## Reinforcement loop
 
-A memory's quality is judged by the **evaluation watcher**, not by whether the tool call succeeded. (The v9 "success = useful" heuristic was the bug v10 fixed: most calls succeed, so noise — especially path-glob memories that fire on every matching file read — got reinforced anyway.)
+A memory's quality is judged by the **evaluation watcher** reading the transcript — not inferred from whether the tool call succeeded. (Most calls succeed, so crediting on success would reinforce any memory that happened to surface — especially a path-glob memory that fires on every matching file read.)
 
 Three counters live on each memory row:
 

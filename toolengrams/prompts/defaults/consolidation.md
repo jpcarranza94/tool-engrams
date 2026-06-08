@@ -40,7 +40,7 @@ When you decide a memory is noise (regardless of how you concluded it), retroact
 
 `Bash(engram mark-noise "<name>")` — marks ALL unmarked surfaces of the memory across every session as `outcome='noise'`. Use `--session-id <S>` to scope to a single session. Prefer this over bare `Bash(sqlite3 UPDATE …)` so the CHECK constraint stays enforced centrally.
 
-Note (v10): outcomes (`helpful` / `unused` / `noise`) are set by the **evaluation watcher** (`engram judge`), which reads each session's transcript and judges whether Claude actually heeded the surfaced memory — for BOTH kinds, including `block`. They are no longer inferred from tool-call success. So `useful_count` and `noise_count` reflect real heeding; trust `q` and the outcome distribution over raw `surface_count`.
+Note: outcomes (`helpful` / `unused` / `noise`) are set by the **evaluation watcher** (`engram judge`), which reads each session's transcript and judges whether Claude actually heeded the surfaced memory — for BOTH kinds, including `block`. They are not inferred from tool-call success. So `useful_count` and `noise_count` reflect real heeding; trust `q` and the outcome distribution over raw `surface_count`.
 
 ### 3. Discover new memories (HIGH BAR)
 

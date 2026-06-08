@@ -34,5 +34,3 @@ Things to do before sharing this repo publicly as a proper open source project.
 - [ ] **Expand .gitignore** — Current one is good but missing: `.eggs/`, `*.egg`, `*.log`, `.coverage`, `htmlcov/`, `.idea/`, `.vscode/`. Not urgent since nothing sensitive, but tidier.
 
 - [ ] **Review install.sh for portability** — Currently macOS-specific (launchd, `open` command). Document that the consolidation schedule only works on macOS, or add Linux cron support.
-
-- [ ] **Clean up docs/design-v8.md** — Internal design doc still has old example references. Visible in the public repo.

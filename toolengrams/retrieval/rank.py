@@ -1,6 +1,6 @@
 """Candidate retrieval — tool call → scored candidates.
 
-Matching model (v2, design-v9 §3.2):
+Matching model:
   - token_subseq: the call's first token selects a bucket via indexed lookup,
     then we subsequence-match stored trigger tokens against the call's tokens
     in Python.
@@ -9,9 +9,9 @@ Matching model (v2, design-v9 §3.2):
 Scoring is applied by `reinforcement/scoring.py::final_score`; this module
 just reads candidates, runs the match predicate, and attaches the score.
 Session dedup and the final sort live in the hook handlers themselves (see
-hooks/pretool.py and hooks/post_tool_failure.py) — v2 has no cluster-level
-Laplace gate, that was a v1 feature we dropped once the two-kind model
-made per-cluster quality filtering redundant.
+hooks/pretool.py and hooks/post_tool_failure.py). There is no cluster-level
+Laplace gate — the two-kind model makes per-cluster quality filtering
+redundant.
 """
 
 from __future__ import annotations

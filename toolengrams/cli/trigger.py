@@ -2,8 +2,8 @@
 triggers on an existing memory WITHOUT recreating it (counters and history are
 preserved).
 
-This is consolidation's lever for the v10 insight that a `noise` verdict means
-the TRIGGER over-matched, not that the content is bad: narrow a broad glob, drop
+This is consolidation's lever for the fact that a `noise` verdict means the
+TRIGGER over-matched, not that the content is bad: narrow a broad glob, drop
 a redundant path on a hybrid that already has a command trigger, or rebind to the
 real command moment — instead of archiving a useful memory. A `forget` + new
 `remember` would reset useful_count / noise_count; this keeps them.

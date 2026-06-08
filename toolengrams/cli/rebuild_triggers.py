@@ -1,10 +1,10 @@
 """engram rebuild-triggers — re-extract triggers from memory bodies.
 
-Why: the v6 migration dropped v1 triggers (the shape changed, the values
-couldn't be mapped cleanly because v1 stored head-prefixes but v2 needs
-full token sequences). Memories kept their bodies + kind + scope, but
-lost their triggers. This CLI re-runs `formation.extract_candidates`
-on each active memory body and re-inserts the derived triggers.
+Why: a schema migration can drop triggers when the trigger shape changes
+(values that can't be mapped cleanly — e.g. old head-prefixes vs. the current
+full token sequences). Memories keep their bodies + kind + scope, but lose
+their triggers. This CLI re-runs `formation.extract_candidates` on each active
+memory body and re-inserts the derived triggers.
 
 Also useful as a general "reset triggers to what the extractor thinks"
 tool: drops all triggers for target memories, re-extracts.
