@@ -1,11 +1,10 @@
 -- Migration v6 → v7: memories.type → memories.kind (feedback/reference → block/hint).
 --
--- See docs/design-v9.md §3.1 and §10 step 2. Two memory kinds, one trigger
--- mechanism, two surface moments:
+-- Two memory kinds, one trigger mechanism, two surface moments:
 --   block: PreToolUse denies the call, injects body as context (rare)
 --   hint:  PostToolUseFailure injects body as context (default)
 --
--- Value map (best-effort, alpha stage):
+-- Value map:
 --   feedback  → block  (PreToolUse-deny behavior preserved)
 --   reference → hint   (moves from pre-call context to post-failure context)
 --

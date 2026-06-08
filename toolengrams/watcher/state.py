@@ -4,7 +4,7 @@ Every read/write of a session's tick cursor and retry/arm state goes through
 here. The event-driven tick (`tick.py`) and the SessionStart idle-sweep are the
 only callers; no raw `watcher_state` SQL lives outside this module.
 
-v10: a session has TWO watcher roles — `formation` (creates memories) and
+A session has TWO watcher roles — `formation` (creates memories) and
 `eval` (judges surfaced memories) — each an independent watcher session with its
 own cursor / resume id / retry streak. `watcher_state` is keyed
 `(work_session_id, role)`, so every accessor takes a `role` (default

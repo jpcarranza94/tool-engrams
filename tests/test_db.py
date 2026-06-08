@@ -19,10 +19,10 @@ def test_fresh_db_gets_all_tables(tmp_path):
     assert "session_turns" in tables
     assert "consolidation_runs" in tables
     assert "watcher_state" in tables
-    # Hebbian table was dropped in v6.
+    # The schema has no memory_associations table.
     assert "memory_associations" not in tables
 
-    # v7 shape: memories.kind (not .type), triggers has first_token + tokens_json.
+    # memories uses .kind (not .type); triggers has first_token + tokens_json.
     mem_cols = {r[1] for r in conn.execute("PRAGMA table_info(memories)").fetchall()}
     assert "kind" in mem_cols
     assert "type" not in mem_cols

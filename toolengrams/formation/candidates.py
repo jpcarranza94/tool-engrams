@@ -1,7 +1,7 @@
 """Formation-time trigger extraction from memory body text.
 
-The design (docs/design-v9.md §3) says `engram remember` should deterministically
-parse the body for patterns that bind the memory to future tool calls:
+`engram remember` deterministically parses the body for patterns that bind the
+memory to future tool calls:
 
   - Backticked shell snippets → token_subseq triggers
   - Tilde / absolute / repo-rooted paths → path_glob triggers

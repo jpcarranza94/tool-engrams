@@ -1,7 +1,6 @@
 """Tests for the watcher's pure helpers: delta formatting + transcript reads.
 
-v10 deleted the JSON response parser and the in-process `_save_memory` — watcher
-sessions now call the engram CLI directly (covered by test_watcher_tick.py).
+Watcher sessions call the engram CLI directly (covered by test_watcher_tick.py).
 Cursor / arm / retry state lives in watcher_state (test_watcher_state.py).
 """
 

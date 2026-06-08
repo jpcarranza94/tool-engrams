@@ -1,7 +1,7 @@
 """Retrieval tests: subsequence match + scoring primitives (q, gate, final_score).
 
-v10: usefulness/recency are gone. One ratio `q` (noise-aware, Laplace-smoothed)
-drives ranking; the surfacing gate suppresses hints proven more noise than signal.
+One ratio `q` (noise-aware, Laplace-smoothed) drives ranking; the surfacing
+gate suppresses hints proven more noise than signal.
 """
 
 from __future__ import annotations

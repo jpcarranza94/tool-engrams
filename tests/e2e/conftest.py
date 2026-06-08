@@ -253,8 +253,8 @@ def _insert_trigger(conn, memory_id: int, trigger: dict) -> None:
     import json as _json
 
     kind = trigger["kind"]
-    # Back-compat shim: older e2e tests still use tool_head/head shape. Convert
-    # on the fly into v2's token_subseq/tokens shape so the fixtures keep working.
+    # Back-compat shim: some e2e tests use the tool_head/head shape. Convert
+    # on the fly into the token_subseq/tokens shape so the fixtures keep working.
     if kind == "tool_head":
         kind = "token_subseq"
         trigger = {"kind": kind, "tokens": list(trigger["head"])}

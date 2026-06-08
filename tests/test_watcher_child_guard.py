@@ -3,8 +3,7 @@ $ENGRAM_IN_WATCHER) must not trigger any engram hook side effects when it runs
 its own `engram remember` / `engram judge` Bash calls. Each hook main early-
 returns `{}` and writes nothing.
 
-This replaces what `--bare` used to provide for the formation watcher: v10
-watcher sessions are permissioned (non-bare), so the guard is now the env flag
+Watcher sessions are permissioned (non-bare), so the guard is the env flag
 checked at the top of every hook (plus the internal-cwd backstop).
 """
 

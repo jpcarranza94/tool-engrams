@@ -1,6 +1,6 @@
 """Unit tests for `engram post-tool` — turn counter + recovery tick.
 
-v10: post_tool no longer credits memories on success. The single writer of
+post_tool does not credit memories on success. The single writer of
 useful_count is the evaluation watcher (`engram judge`), so every assertion
 here is that a success leaves useful_count untouched.
 """
@@ -42,7 +42,7 @@ def _run(payload: dict, monkeypatch) -> dict:
 
 
 def test_success_does_not_credit(temp_db, monkeypatch, capsys):
-    """v10: a successful call no longer bumps useful_count — that was the bug."""
+    """A successful call does not bump useful_count."""
     mid = _seed_memory(temp_db)
     _log_surface(temp_db, "sess1", mid, "tool_abc")
 

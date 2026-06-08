@@ -1,11 +1,10 @@
-"""post_tool's failure→success behavior after v10.
+"""post_tool's failure→success behavior.
 
-v9 credited a hint when a prior failed call's first_token succeeded again.
-v10 deleted that credit — usefulness is judged by the evaluation watcher
-(`engram judge`), not inferred from a retry succeeding. What survives is the
-*recovery fast-path tick*: the same failure→success detection now only fires an
-early watcher tick (the failure surface's evidence window just closed), and
-crucially leaves the counters and the surface outcome untouched.
+post_tool does not credit a hint when a prior failed call's first_token
+succeeds again — usefulness is judged by the evaluation watcher
+(`engram judge`), not inferred from a retry succeeding. The failure→success
+detection only fires an early watcher tick (the failure surface's evidence
+window just closed), and leaves the counters and the surface outcome untouched.
 """
 
 from __future__ import annotations
@@ -149,7 +148,7 @@ def test_no_recovery_tick_for_different_first_token(temp_db, monkeypatch, captur
 
 
 def test_pretool_surface_not_credited_on_success(temp_db, monkeypatch, captured_ticks):
-    """The v9 pre_tool_use 'helpful' credit path is gone too."""
+    """A pre_tool_use surface is not credited as 'helpful' on a later success."""
     _seed_hint(temp_db, "ph", "psql replica hint", ["psql", "-h"])
 
     _run_hook(pretool, {

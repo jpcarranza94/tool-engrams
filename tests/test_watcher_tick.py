@@ -1,7 +1,7 @@
 """Tests for the event-driven watcher tick (gate, coalesce, arm, retry, lock)
 across both roles — formation and evaluation.
 
-v10: the model seam is `tick.run_watcher_session(role, message, resume)` →
+The model seam is `tick.run_watcher_session(role, message, resume)` →
 `SessionResult(ok, watcher_session_id)`. There is no JSON parsing or in-process
 save; the watcher session calls the engram CLI itself.
 """

@@ -1,7 +1,7 @@
 """Trigger extraction tests.
 
 Covers the `(tool_name, tool_input) -> ExtractedTriggerHint` mapping for the
-tools in the PreToolUse whitelist. v2 extraction returns the full tokenization
+tools in the PreToolUse whitelist. Extraction returns the full tokenization
 of the call (not prefix pairs) and relies on subsequence matching downstream.
 """
 

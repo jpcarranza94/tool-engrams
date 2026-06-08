@@ -1,8 +1,7 @@
 """End-to-end PreToolUse handler test against a temp SQLite.
 
-v2 (design-v9 §3.3): PreToolUse only surfaces `block`-kind memories and
-always denies. `hint`-kind memories live on the PostToolUseFailure track
-(step 3).
+PreToolUse only surfaces `block`-kind memories and always denies.
+`hint`-kind memories live on the PostToolUseFailure track.
 """
 
 from __future__ import annotations
@@ -86,8 +85,8 @@ def test_pretool_block_memory_denies_and_injects_context(temp_db, monkeypatch):
 
 
 def test_pretool_subseq_match_skips_positional_arg(temp_db, monkeypatch):
-    """The v2 flagship case: `ergeon order 12345 reassign` matches
-    trigger `[ergeon, order, reassign]` because subseq allows gaps."""
+    """`ergeon order 12345 reassign` matches trigger
+    `[ergeon, order, reassign]` because subseq allows gaps."""
     _seed_token_memory(
         temp_db, "reassign rule", "Reassign body", ["ergeon", "order", "reassign"]
     )

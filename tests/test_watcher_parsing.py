@@ -1,9 +1,8 @@
 """Unit tests for watcher config knobs + delta capping.
 
-v10 deleted the JSON response parser (`_parse_response` / `_candidate_json_strings`)
-and the `_run` wrapper — watcher sessions call the engram CLI directly. What
-remains here: model/timeout resolution, the held-window retry decision, and the
-delta-capping helpers (the dormant-session ballooning fix).
+Watcher sessions call the engram CLI directly. Covered here: model/timeout
+resolution, the held-window retry decision, and the delta-capping helpers
+that bound a dormant session's transcript window.
 """
 
 from __future__ import annotations

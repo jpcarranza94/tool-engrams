@@ -1,6 +1,5 @@
--- ToolEngrams schema (current v2). See docs/design-v9.md for full design.
--- This is a complete v_latest snapshot — fresh DBs apply this ONLY, not the
--- v*.sql migrations (those are for upgrading existing DBs).
+-- ToolEngrams schema — complete current snapshot. Fresh DBs apply this ONLY (not the
+-- v*.sql migrations, which are for upgrading existing DBs).
 
 PRAGMA journal_mode = WAL;
 PRAGMA synchronous = NORMAL;

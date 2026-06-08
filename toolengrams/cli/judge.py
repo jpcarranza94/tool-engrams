@@ -7,8 +7,8 @@ call it surfaced on, reading the model's *forward* actions:
     unused  → the memory was relevant, not acted on    → (neither counter)
     noise   → the memory had no bearing; the trigger over-matched → noise_count++
 
-With no constrained JSON schema, this CLI is the validation boundary (design-v10
-§3.5). It rejects an unknown memory_id, a memory_id not surfaced in this session,
+With no constrained JSON schema, this CLI is the validation boundary. It rejects
+an unknown memory_id, a memory_id not surfaced in this session,
 and an outcome outside the set. It is idempotent — `mark_surface_outcome` only
 writes rows whose outcome is NULL, so a retry that re-judges a closed surface is
 a noop and never double-bumps the counter. The outcome write and the counter

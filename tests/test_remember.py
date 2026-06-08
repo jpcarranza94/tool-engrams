@@ -110,7 +110,7 @@ def test_triggers_are_persisted_to_db(temp_db, monkeypatch, capsys):
 
 
 def test_extra_trigger_keyword_rejected(temp_db, monkeypatch):
-    """keyword triggers are not supported in v2."""
+    """keyword triggers are not supported."""
     with pytest.raises(SystemExit):
         remember.main(["--extra-trigger", "keyword:psql", "body text"])
 

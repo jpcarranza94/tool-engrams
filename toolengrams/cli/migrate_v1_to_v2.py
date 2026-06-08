@@ -1,4 +1,4 @@
-"""engram migrate-v1-to-v2 — best-effort one-shot migration from v1 (design-v8) to v2.
+"""engram migrate-v1-to-v2 — best-effort one-shot migration from a v1-era DB to v2.
 
 Why standalone:
   - v1 used `memories.type` (feedback|reference) and `triggers.tool_head` with
@@ -12,8 +12,6 @@ Why standalone:
 Alpha-stage caveat: we assume the source DB is actually at v5 (last v1 state).
 If the user's DB is already at v6+, we no-op. If at <v5, we refuse — that's
 an older version we never shipped in a public form.
-
-See docs/design-v9.md §8.
 """
 
 from __future__ import annotations

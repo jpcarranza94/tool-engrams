@@ -1,6 +1,6 @@
 """Unit tests for the SessionStart handler — formation guidance + session tracking.
 
-SessionStart no longer spawns a persistent watcher process; it just registers
+SessionStart does not spawn a persistent watcher process; it just registers
 the session in watcher_state (via tick.ensure_row) so the event-driven ticks
 have a cursor to track.
 """

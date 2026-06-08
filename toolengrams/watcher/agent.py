@@ -1,13 +1,12 @@
 """Watcher permissioned `claude -p` sessions: formation + evaluation.
 
-v10 (design-v10 §2, §6, ADR-0001): a watcher session does its job by CALLING the
-engram CLI, not by returning a constrained JSON schema the harness parses. The
-old `--bare` + `--json-schema` + parse + in-process `remember` machinery is gone.
+A watcher session does its job by CALLING the engram CLI, not by returning a
+constrained JSON schema the harness parses (see ADR-0001).
 
 Mechanics mirror the consolidation agent: a temp work dir with a
 `settings.local.json` that grants exactly the role's command surface, ENGRAM_DB
 in the env, and ENGRAM_IN_WATCHER set so the session's own tool calls don't
-recursively trigger engram hooks (the recursion guard moved off `--bare`). The
+recursively trigger engram hooks (the recursion guard). The
 user's real cwd is handed to the model in the prompt so it can pass
 `--project-cwd` to `engram remember` / `--session-id` to `engram judge`.
 

@@ -1,11 +1,10 @@
 """PostToolUse hook command — turn counter + recovery fast-path tick.
 
-v10 removed reinforcement from this hook. The v9 "success = useful" bump (and
-the prior-failure same-first_token credit) were the source of the saturated
-useful_count: most tool calls succeed, so noise got reinforced. The single
-writer of `useful_count` / `noise_count` / `session_surfaces.outcome` is now the
-evaluation watcher (`engram judge`), which reads the transcript and judges
-actual heeding.
+This hook does not credit usefulness. Crediting a memory whenever a tool call
+merely succeeds saturates useful_count — most tool calls succeed, so noise gets
+reinforced. The single writer of `useful_count` / `noise_count` /
+`session_surfaces.outcome` is the evaluation watcher (`engram judge`), which
+reads the transcript and judges actual heeding.
 
 What stays here:
   - `increment_session_turn` — the per-session tool-call counter that feeds
