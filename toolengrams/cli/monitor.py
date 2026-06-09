@@ -69,8 +69,9 @@ def _short(sid: str | None) -> str:
 
 
 def _money(cost: float | None) -> str:
-    """$0.0123-style, or — for runs with no envelope (errors, pre-v14 rows)."""
-    return f"${cost:.4f}" if cost else "—"
+    """$0.0123-style, or — for runs with no envelope (errors, pre-v14 rows).
+    `is not None`, not truthiness: a genuine $0 (subscription auth) is data."""
+    return f"${cost:.4f}" if cost is not None else "—"
 
 
 def _ktok(n: int) -> str:
@@ -111,7 +112,10 @@ def _run_view(row, now_ts: int) -> dict:
         "error": row["error"],
         "model": row["model"],
         "cost_usd": row["cost_usd"],
+        "input_tokens": row["input_tokens"],
         "output_tokens": row["output_tokens"],
+        "cache_read_tokens": row["cache_read_tokens"],
+        "cache_creation_tokens": row["cache_creation_tokens"],
     }
 
 
@@ -233,8 +237,8 @@ def _render(snap: dict):
               f'crashed {by.get("crashed", 0)} · running {by.get("running", 0)}   '
               f'│ created {c["created"]} · judged {c["judged"]}   '
               f'│ spend {_money(c["cost_usd"])} '
-              f'({_ktok(c["output_tokens"])} out · '
-              f'{_ktok(c["input_tokens"] + c["cache_read_tokens"] + c["cache_creation_tokens"])} in)')
+              f'({_ktok(c["output_tokens"])} out · {_ktok(c["input_tokens"])} in · '
+              f'{_ktok(c["cache_read_tokens"] + c["cache_creation_tokens"])} cached)')
 
     layout = Layout()
     layout.split_column(

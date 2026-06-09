@@ -23,7 +23,7 @@ from .agent import (
     ROLE_ALLOWLIST,
     SessionResult,
     run_watcher_session,
-    _extract_session_id,
+    _envelope,
     _watcher_model,
     _watcher_timeout,
 )
@@ -62,7 +62,7 @@ __all__ = [
     "_cap_delta",
     "_clip_ends",
     "_clip_head",
-    "_extract_session_id",
+    "_envelope",
     "_format_delta",
     "_read_lines_from",
     "_retry_decision",

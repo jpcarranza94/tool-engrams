@@ -233,9 +233,3 @@ def _envelope(stdout: str) -> dict | None:
             if payload.get("session_id"):
                 return payload
     return None
-
-
-def _extract_session_id(stdout: str) -> str | None:
-    """Extract session_id from `claude -p --output-format json` output."""
-    payload = _envelope(stdout)
-    return payload.get("session_id") if payload else None

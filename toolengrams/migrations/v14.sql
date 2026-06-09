@@ -13,9 +13,18 @@
 
 -- Keep RENAME from rewriting watcher_run_events' FK text to the tmp name:
 -- with foreign_keys ON, RENAME updates REFERENCES clauses regardless of
--- legacy_alter_table — both must be set for the rebuild.
+-- legacy_alter_table — both must be set for the rebuild. Pragmas sit OUTSIDE
+-- the transaction (foreign_keys is a no-op inside one).
 PRAGMA foreign_keys = OFF;
 PRAGMA legacy_alter_table = ON;
+
+-- The connection is autocommit, and this is the repo's first DESTRUCTIVE
+-- migration (v2–v13 are additive CREATE IF NOT EXISTS). Without a transaction,
+-- a crash between the RENAME and the CREATE strands the DB with no
+-- watcher_runs and user_version still 13 — every later open re-runs the
+-- script and fails on the RENAME, forever. The transaction makes a crash roll
+-- back to intact v13; the re-run is the verified double-apply path.
+BEGIN;
 
 ALTER TABLE watcher_runs RENAME TO watcher_runs_v13_tmp;
 
@@ -51,10 +60,16 @@ INSERT INTO watcher_runs
 
 DROP TABLE watcher_runs_v13_tmp;
 
-PRAGMA legacy_alter_table = OFF;
-PRAGMA foreign_keys = ON;
-
 CREATE INDEX IF NOT EXISTS idx_watcher_runs_recent
     ON watcher_runs(started_ts DESC);
 CREATE INDEX IF NOT EXISTS idx_watcher_runs_session
     ON watcher_runs(work_session_id, role, status);
+
+COMMIT;
+
+PRAGMA legacy_alter_table = OFF;
+-- Restore the process default. The app never enables FK enforcement (see
+-- runs_store.prune_runs_before, which deletes events manually for exactly
+-- that reason) — ending with ON would leave the one migrating connection
+-- enforcing constraints nothing else does.
+PRAGMA foreign_keys = OFF;

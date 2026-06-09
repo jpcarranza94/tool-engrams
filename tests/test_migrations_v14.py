@@ -77,3 +77,22 @@ def test_v13_db_upgrades_preserving_rows_and_fk(tmp_path: Path):
     assert "watcher_runs" in fk_sql and "tmp" not in fk_sql
     assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
     conn.close()
+
+
+def test_v14_double_apply_is_safe_and_restores_fk_default(tmp_path: Path):
+    """The migration's idempotency claim, pinned: re-running v14 on an
+    already-v14 DB (snapshot shape, or a crash after COMMIT but before the
+    user_version bump) must leave a working table. And the script must end
+    with foreign_keys OFF — the app never enables enforcement, so the
+    migrating connection must not be the one connection that does."""
+    path = tmp_path / "v14.sqlite"
+    conn = db.connect(path)
+    v14_sql = (db.MIGRATIONS_DIR / "v14.sql").read_text()
+    conn.executescript(v14_sql)
+
+    assert _COST_COLS <= _cols(conn, "watcher_runs")
+    assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 0
+    conn.execute(
+        "INSERT INTO watcher_runs (work_session_id, role, status, started_ts) "
+        "VALUES ('s', 'formation', 'ok', 1)")
+    conn.close()

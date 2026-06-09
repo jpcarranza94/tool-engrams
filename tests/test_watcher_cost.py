@@ -124,3 +124,16 @@ def test_counts_since_sums_spend_and_snapshot_exposes_it(temp_db):
     assert snap["counts_24h"]["cost_usd"] == 0.03
     assert snap["recent_24h"][0]["cost_usd"] is None       # the error run, newest
     assert snap["recent_24h"][1]["cost_usd"] == 0.02
+
+
+def test_money_distinguishes_zero_from_missing():
+    """A genuine $0 (subscription auth) is data; only None (no envelope) is —."""
+    assert monitor._money(None) == "—"
+    assert monitor._money(0.0) == "$0.0000"
+    assert monitor._money(0.0231) == "$0.0231"
+
+
+def test_ktok_compacts():
+    assert monitor._ktok(850) == "850"
+    assert monitor._ktok(12_345) == "12.3k"
+    assert monitor._ktok(1_200_000) == "1.2M"

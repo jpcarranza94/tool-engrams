@@ -39,7 +39,13 @@ from ..prompts.watcher import WATCHER_SUBSEQUENT_HEADER, build_watcher_prompt
 from ..retrieval import session_state
 from ..utils import WATCHER_CHILD_ENV, safe_filename_id as _safe
 from . import runs_store, state
-from .agent import CLAUDE_BIN, DELTA_FILENAME, _watcher_model, run_watcher_session
+from .agent import (
+    CLAUDE_BIN,
+    DELTA_FILENAME,
+    SessionResult,
+    _watcher_model,
+    run_watcher_session,
+)
 from .log import LOG_PATH, _log
 from .state import ensure_row
 from .transcript_format import _format_delta, _read_lines_from
@@ -321,8 +327,8 @@ def _open_run(session_id: str, role: str, cwd: str, flush: bool,
         return None
 
 
-def _close_run(run_id: int | None, result, *, ok: bool, cursor_to: int,
-               delta_chars: int) -> None:
+def _close_run(run_id: int | None, result: SessionResult, *, ok: bool,
+               cursor_to: int, delta_chars: int) -> None:
     """Finalize the run row to ok/error, carrying the call's cost/token usage
     from the SessionResult envelope fields. Fail-open."""
     if run_id is None:
