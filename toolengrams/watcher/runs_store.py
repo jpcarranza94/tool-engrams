@@ -63,12 +63,21 @@ def finish_run(
     cursor_to: int | None = None,
     delta_chars: int | None = None,
     error: str | None = None,
+    cost_usd: float | None = None,
+    input_tokens: int | None = None,
+    output_tokens: int | None = None,
+    cache_read_tokens: int | None = None,
+    cache_creation_tokens: int | None = None,
 ) -> None:
-    """Finalize a run row to `ok` / `error` with end time + window stats."""
+    """Finalize a run row to `ok` / `error` with end time + window stats, plus
+    the cost/token usage from the claude -p envelope (None on failed calls)."""
     conn.execute(
         "UPDATE watcher_runs SET status = ?, ended_ts = ?, cursor_to = ?, "
-        "delta_chars = ?, error = ? WHERE id = ?",
-        (status, ended_ts, cursor_to, delta_chars, error, run_id),
+        "delta_chars = ?, error = ?, cost_usd = ?, input_tokens = ?, "
+        "output_tokens = ?, cache_read_tokens = ?, cache_creation_tokens = ? "
+        "WHERE id = ?",
+        (status, ended_ts, cursor_to, delta_chars, error, cost_usd, input_tokens,
+         output_tokens, cache_read_tokens, cache_creation_tokens, run_id),
     )
 
 
@@ -197,8 +206,22 @@ def counts_since(conn: sqlite3.Connection, since_ts: int) -> dict:
     ).fetchall()
     by_status = {r["status"]: r["n"] for r in runs}
     by_kind = {r["kind"]: r["n"] for r in events}
+    spend = conn.execute(
+        "SELECT COALESCE(SUM(cost_usd), 0) AS cost, "
+        "       COALESCE(SUM(input_tokens), 0) AS tok_in, "
+        "       COALESCE(SUM(output_tokens), 0) AS tok_out, "
+        "       COALESCE(SUM(cache_read_tokens), 0) AS tok_cache_read, "
+        "       COALESCE(SUM(cache_creation_tokens), 0) AS tok_cache_write "
+        "FROM watcher_runs WHERE started_ts >= ?",
+        (since_ts,),
+    ).fetchone()
     return {
         "runs_by_status": by_status,
         "created": by_kind.get("created", 0),
         "judged": by_kind.get("judged", 0),
+        "cost_usd": round(spend["cost"], 4),
+        "input_tokens": spend["tok_in"],
+        "output_tokens": spend["tok_out"],
+        "cache_read_tokens": spend["tok_cache_read"],
+        "cache_creation_tokens": spend["tok_cache_write"],
     }

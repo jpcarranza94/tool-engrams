@@ -314,16 +314,17 @@ def _open_run(session_id: str, role: str, cwd: str, flush: bool,
         with db.session() as conn:
             return runs_store.start_run(
                 conn, work_session_id=session_id, role=role, pid=os.getpid(),
-                started_ts=int(time.time()), model=_watcher_model(), flush=flush,
+                started_ts=int(time.time()), model=_watcher_model(role), flush=flush,
                 cursor_from=cursor_from, cwd=cwd,
             )
     except Exception:
         return None
 
 
-def _close_run(run_id: int | None, *, ok: bool, cursor_to: int,
-               delta_chars: int, error: str | None) -> None:
-    """Finalize the run row to ok/error. Fail-open."""
+def _close_run(run_id: int | None, result, *, ok: bool, cursor_to: int,
+               delta_chars: int) -> None:
+    """Finalize the run row to ok/error, carrying the call's cost/token usage
+    from the SessionResult envelope fields. Fail-open."""
     if run_id is None:
         return
     try:
@@ -331,7 +332,13 @@ def _close_run(run_id: int | None, *, ok: bool, cursor_to: int,
             runs_store.finish_run(
                 conn, run_id, status="ok" if ok else "error",
                 ended_ts=int(time.time()), cursor_to=cursor_to,
-                delta_chars=delta_chars, error=None if ok else (error or "")[:300],
+                delta_chars=delta_chars,
+                error=None if ok else (result.error or "")[:300],
+                cost_usd=result.cost_usd,
+                input_tokens=result.input_tokens,
+                output_tokens=result.output_tokens,
+                cache_read_tokens=result.cache_read_tokens,
+                cache_creation_tokens=result.cache_creation_tokens,
             )
     except Exception:
         pass
@@ -393,8 +400,8 @@ def run_tick(session_id: str, transcript_path: str, cwd: str,
         # cursor_to records the window this run READ (last_line..+new_lines); on a
         # failure the persisted cursor is held below this — the run log shows what
         # was attempted, not what was committed.
-        _close_run(run_id, ok=not failed, cursor_to=last_line + len(new_lines),
-                   delta_chars=len(delta), error=result.error)
+        _close_run(run_id, result, ok=not failed,
+                   cursor_to=last_line + len(new_lines), delta_chars=len(delta))
         if failed:
             _log(f"MODEL-ERROR session={session_id} role={role} "
                  f"delta_chars={len(delta)} attempt={attempt} flush={int(flush)} "

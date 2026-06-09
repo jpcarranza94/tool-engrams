@@ -17,7 +17,7 @@ Safety is the **command surface**, not a schema:
     formation → `engram remember` only
     eval      → `engram judge` only
 
-Model selection via `$ENGRAM_WATCHER_MODEL` (default opus); timeout via
+Model selection via `$ENGRAM_WATCHER_MODEL` (default sonnet); timeout via
 `$ENGRAM_WATCHER_TIMEOUT`.
 """
 
@@ -36,7 +36,16 @@ from ..utils import WATCHER_CHILD_ENV, safe_filename_id
 
 CLAUDE_BIN = shutil.which("claude")
 
-DEFAULT_WATCHER_MODEL = "opus"
+# Sonnet, not opus: judging surfaced memories and extracting tool lessons from
+# a transcript delta is not opus-grade work, and the watcher makes ~dozens of
+# background calls a day. Override per tick via $ENGRAM_WATCHER_MODEL, or per
+# role via $ENGRAM_FORMATION_MODEL / $ENGRAM_EVAL_MODEL — formation (pattern
+# extraction) and eval (verdict judging) have different difficulty/cost
+# profiles, so they can run different models.
+DEFAULT_WATCHER_MODEL = "sonnet"
+
+_ROLE_MODEL_ENV = {"formation": "ENGRAM_FORMATION_MODEL",
+                   "eval": "ENGRAM_EVAL_MODEL"}
 
 # Per-call wall-clock budget for the watcher's `claude -p`. Tool-calling is
 # multi-round-trip, so a busy window can run long; the tick HOLDS the cursor and
@@ -90,15 +99,27 @@ def _work_dir(role: str, work_session_id: str) -> Path:
 class SessionResult:
     """Outcome of one watcher `claude -p` turn. `ok` is False on any process
     failure (timeout, spawn error, non-zero exit); the tick treats that as a held
-    window and retries. `watcher_session_id` is the id to `--resume` next time."""
+    window and retries. `watcher_session_id` is the id to `--resume` next time.
+    Cost/token fields come from the JSON envelope of a successful call (None on
+    failure — there is no envelope to read) and land on the `watcher_runs` row."""
 
     ok: bool
     watcher_session_id: str | None
     error: str | None = None
+    cost_usd: float | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cache_read_tokens: int | None = None
+    cache_creation_tokens: int | None = None
 
 
-def _watcher_model() -> str:
-    """Resolve the watcher model. Read each call so overrides apply live."""
+def _watcher_model(role: str | None = None) -> str:
+    """Resolve the model for a role: per-role env ($ENGRAM_FORMATION_MODEL /
+    $ENGRAM_EVAL_MODEL) → watcher-wide ($ENGRAM_WATCHER_MODEL) → default.
+    Read each call so overrides apply live."""
+    per_role = os.environ.get(_ROLE_MODEL_ENV.get(role or "", ""), "") if role else ""
+    if per_role:
+        return per_role
     return os.environ.get("ENGRAM_WATCHER_MODEL", DEFAULT_WATCHER_MODEL)
 
 
@@ -166,7 +187,7 @@ def run_watcher_session(role: str, message: str, resume: str | None,
         result = invoke_claude_agent(
             message,
             timeout=_watcher_timeout(),
-            model=_watcher_model(),
+            model=_watcher_model(role),
             resume=resume,
             cwd=str(work_dir),
             env=env,
@@ -184,20 +205,37 @@ def run_watcher_session(role: str, message: str, resume: str | None,
     # Reuse the existing session for the next --resume. We extract the id from the
     # JSON envelope (always present) rather than pinning a caller --session-id:
     # extraction is the proven path and composes with the permissioned session.
-    sid = _extract_session_id(result.stdout) or resume
-    return SessionResult(ok=True, watcher_session_id=sid)
+    # The same envelope reports the call's exact cost and token usage — captured
+    # here so the run row (and `engram monitor`) can show watcher spend.
+    payload = _envelope(result.stdout) or {}
+    usage = payload.get("usage") or {}
+    return SessionResult(
+        ok=True,
+        watcher_session_id=payload.get("session_id") or resume,
+        cost_usd=payload.get("total_cost_usd"),
+        input_tokens=usage.get("input_tokens"),
+        output_tokens=usage.get("output_tokens"),
+        cache_read_tokens=usage.get("cache_read_input_tokens"),
+        cache_creation_tokens=usage.get("cache_creation_input_tokens"),
+    )
 
 
-def _extract_session_id(stdout: str) -> str | None:
-    """Extract session_id from `claude -p --output-format json` output."""
+def _envelope(stdout: str) -> dict | None:
+    """The result envelope from `claude -p --output-format json`: the first
+    parseable JSON line carrying a session_id."""
     for line in stdout.splitlines():
         line = line.strip()
         if line.startswith("{"):
             try:
                 payload = json.loads(line)
-                sid = payload.get("session_id")
-                if sid:
-                    return sid
             except json.JSONDecodeError:
                 continue
+            if payload.get("session_id"):
+                return payload
     return None
+
+
+def _extract_session_id(stdout: str) -> str | None:
+    """Extract session_id from `claude -p --output-format json` output."""
+    payload = _envelope(stdout)
+    return payload.get("session_id") if payload else None

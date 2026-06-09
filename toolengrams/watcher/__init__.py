@@ -4,7 +4,7 @@ Hooks fire a detached `engram watcher-tick` per meaningful event; each tick read
 the transcript delta since its (session, role) cursor and runs a permissioned
 `claude -p` session that does its job by calling the engram CLI — `engram
 remember` (formation) or `engram judge` (evaluation). No JSON schema, no parsing.
-Model via `$ENGRAM_WATCHER_MODEL` (default opus).
+Model via `$ENGRAM_WATCHER_MODEL` (default sonnet).
 
 Module layout:
   - transcript_format.py — pure JSONL → readable-conversation
