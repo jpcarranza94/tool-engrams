@@ -3,10 +3,13 @@
 A watcher session does its job by CALLING the engram CLI, not by returning a
 constrained JSON schema the harness parses (see ADR-0001).
 
-Mechanics mirror the consolidation agent: a temp work dir with a
+Mechanics mirror the consolidation agent: a sandbox work dir with a
 `settings.local.json` that grants exactly the role's command surface, ENGRAM_DB
 in the env, and ENGRAM_IN_WATCHER set so the session's own tool calls don't
-recursively trigger engram hooks (the recursion guard). The
+recursively trigger engram hooks (the recursion guard). The sandbox dir is
+STABLE per (work session, role) — `claude -p --resume` resolves session ids
+within the current project (cwd), so a fresh dir per tick would orphan every
+resume id the moment it was extracted. The
 user's real cwd is handed to the model in the prompt so it can pass
 `--project-cwd` to `engram remember` / `--session-id` to `engram judge`.
 
@@ -38,8 +41,10 @@ DEFAULT_WATCHER_MODEL = "opus"
 # Per-call wall-clock budget for the watcher's `claude -p`. Tool-calling is
 # multi-round-trip, so a busy window can run long; the tick HOLDS the cursor and
 # retries on error/timeout (see tick._retry_decision). Tune via
-# $ENGRAM_WATCHER_TIMEOUT without restarting.
-DEFAULT_WATCHER_TIMEOUT = 120
+# $ENGRAM_WATCHER_TIMEOUT without restarting. 120s proved too tight for the
+# eval role (read delta + one `engram judge` per pending surface) — it hit
+# SKIP-GIVEUP on every window, so no judgments ever landed.
+DEFAULT_WATCHER_TIMEOUT = 300
 
 # The command surface each role is granted in its sandbox settings. This — not a
 # JSON schema — is what keeps a per-turn judge from nuking a good memory: eval
@@ -51,9 +56,24 @@ ROLE_ALLOWLIST: dict[str, list[str]] = {
     "eval": ["Bash(engram judge *)"],
 }
 
-# Temp-dir prefix per role — must stay in sync with hooks/_skip._INTERNAL_CWD_PREFIXES
-# so the watcher session's own cwd is recognized as internal (recursion guard).
+# Sandbox-dir prefix per role — must stay in sync with
+# hooks/_skip._INTERNAL_CWD_PREFIXES (recursion guard) and
+# consolidation/collect._INTERNAL_PROJECT_RE (keeps watcher transcripts out of
+# the nightly review).
 _WORKDIR_PREFIX = {"formation": "engram-formation-", "eval": "engram-eval-"}
+
+
+def _work_dir(role: str, work_session_id: str) -> Path:
+    """The stable sandbox cwd for one (work session, role).
+
+    Stability is what makes `--resume` work: Claude Code stores conversations
+    under a per-project slug derived from the cwd, and `--resume <id>` only
+    resolves within the current project. The dir lives under the system temp
+    root, so the OS reaps it once the session goes cold; if it vanishes while a
+    resume id is still persisted, the resume fails and tick.py falls back to a
+    fresh session on the retry.
+    """
+    return Path(tempfile.gettempdir()) / f"{_WORKDIR_PREFIX[role]}{work_session_id}"
 
 
 @dataclass(slots=True)
@@ -92,15 +112,16 @@ DELTA_FILENAME = "delta.txt"
 
 
 def run_watcher_session(role: str, message: str, resume: str | None,
-                        run_id: int | None = None, delta: str = "") -> SessionResult:
+                        work_session_id: str, run_id: int | None = None,
+                        delta: str = "") -> SessionResult:
     """Run one permissioned `claude -p` turn for `role`, resuming `resume` if set.
 
-    Builds a throwaway sandbox cwd granting the role's allowlist, writes the
-    transcript `delta` to `./delta.txt` there (the prompt tells the model to read
-    it), sets ENGRAM_DB + ENGRAM_IN_WATCHER (and ENGRAM_RUN_ID, when given) in the
-    env, and shells out via the shared seam. Returns `ok=False` (held window) on
-    any process failure. The side effects happen in-band via the model's `engram`
-    calls — there is nothing to parse.
+    Ensures the (work session, role) stable sandbox cwd granting the role's
+    allowlist, writes the transcript `delta` to `./delta.txt` there (the prompt
+    tells the model to read it), sets ENGRAM_DB + ENGRAM_IN_WATCHER (and
+    ENGRAM_RUN_ID, when given) in the env, and shells out via the shared seam.
+    Returns `ok=False` (held window) on any process failure. The side effects
+    happen in-band via the model's `engram` calls — there is nothing to parse.
     """
     if not CLAUDE_BIN:
         return SessionResult(ok=False, watcher_session_id=resume,
@@ -111,10 +132,10 @@ def run_watcher_session(role: str, message: str, resume: str | None,
         return SessionResult(ok=False, watcher_session_id=resume,
                              error=f"unknown role {role!r}")
 
-    work_dir = None
     try:
-        work_dir = tempfile.mkdtemp(prefix=_WORKDIR_PREFIX[role])
-        delta_path = Path(work_dir) / DELTA_FILENAME
+        work_dir = _work_dir(role, work_session_id)
+        work_dir.mkdir(parents=True, exist_ok=True)
+        delta_path = work_dir / DELTA_FILENAME
         delta_path.write_text(delta or "(no new activity)")
         # Grant read access to exactly that file alongside the role's one verb.
         # `allow + [...]` builds a NEW list — never mutate the module ROLE_ALLOWLIST.
@@ -129,18 +150,15 @@ def run_watcher_session(role: str, message: str, resume: str | None,
             timeout=_watcher_timeout(),
             model=_watcher_model(),
             resume=resume,
-            cwd=work_dir,
+            cwd=str(work_dir),
             env=env,
             claude_bin=CLAUDE_BIN,
         )
     except Exception as e:
-        # Sandbox setup failed (mkdtemp / delta write / settings). Fail open so
+        # Sandbox setup failed (mkdir / delta write / settings). Fail open so
         # the tick finalizes the run row as error instead of crashing.
         return SessionResult(ok=False, watcher_session_id=resume,
                              error=f"session setup failed: {e}")
-    finally:
-        if work_dir:
-            shutil.rmtree(work_dir, ignore_errors=True)
 
     if result.error or result.returncode != 0:
         return SessionResult(ok=False, watcher_session_id=resume,

@@ -8,8 +8,17 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from toolengrams.claude_invoke import ClaudeResult
 from toolengrams.watcher import SessionResult, agent, log as wlog, tick
+
+
+@pytest.fixture(autouse=True)
+def _sandbox_root(tmp_path, monkeypatch):
+    """The stable sandbox dirs persist across calls by design — root them under
+    tmp_path so tests don't leave engram-* dirs in the real temp dir."""
+    monkeypatch.setattr(agent.tempfile, "gettempdir", lambda: str(tmp_path))
 
 
 def _bash_line(cmd: str) -> str:
@@ -36,7 +45,8 @@ def test_run_watcher_session_writes_delta_file_and_grants_scoped_read(monkeypatc
     monkeypatch.setattr(agent, "CLAUDE_BIN", "/usr/bin/claude")
 
     r = agent.run_watcher_session(
-        "formation", "PROMPT: read ./delta.txt", resume=None, run_id=5,
+        "formation", "PROMPT: read ./delta.txt", resume=None,
+        work_session_id="s1", run_id=5,
         delta="USER: hi\nTOOL (Bash): git push --force origin main",
     )
     assert r.ok
@@ -58,8 +68,10 @@ def test_run_session_does_not_mutate_role_allowlist(monkeypatch):
     monkeypatch.setattr(agent, "CLAUDE_BIN", "/usr/bin/claude")
     before = list(agent.ROLE_ALLOWLIST["formation"])
 
-    agent.run_watcher_session("formation", "p", resume=None, delta="a")
-    agent.run_watcher_session("formation", "p", resume=None, delta="b")
+    agent.run_watcher_session("formation", "p", resume=None,
+                              work_session_id="s1", delta="a")
+    agent.run_watcher_session("formation", "p", resume=None,
+                              work_session_id="s1", delta="b")
 
     assert agent.ROLE_ALLOWLIST["formation"] == before   # unchanged after two calls
     assert len(agent.ROLE_ALLOWLIST["formation"]) == 1
@@ -73,10 +85,40 @@ def test_run_session_fail_open_on_delta_write_error(monkeypatch):
     monkeypatch.setattr(pathlib.Path, "write_text",
                         lambda self, *a, **k: (_ for _ in ()).throw(OSError("disk full")))
 
-    r = agent.run_watcher_session("formation", "p", resume="sid", delta="x")
+    r = agent.run_watcher_session("formation", "p", resume="sid",
+                                  work_session_id="s1", delta="x")
     assert r.ok is False
     assert r.watcher_session_id == "sid"        # resume id preserved for retry
     assert "setup failed" in (r.error or "")
+
+
+def test_sandbox_cwd_is_stable_per_session_and_role(monkeypatch):
+    """`--resume` resolves session ids per project cwd, so the sandbox dir must
+    be the SAME across ticks of one (work session, role) — and different across
+    sessions and roles. A fresh dir per tick orphans every resume id."""
+    cwds = []
+    monkeypatch.setattr(agent, "invoke_claude_agent",
+                        lambda message, **kw: (cwds.append(kw["cwd"]),
+                                               ClaudeResult(stdout='{"session_id": "w"}',
+                                                            returncode=0))[1])
+    monkeypatch.setattr(agent, "CLAUDE_BIN", "/usr/bin/claude")
+
+    agent.run_watcher_session("formation", "p", resume=None,
+                              work_session_id="sess-a", delta="a")
+    agent.run_watcher_session("formation", "p", resume="w",
+                              work_session_id="sess-a", delta="b")
+    agent.run_watcher_session("formation", "p", resume=None,
+                              work_session_id="sess-b", delta="c")
+    agent.run_watcher_session("eval", "p", resume=None,
+                              work_session_id="sess-a", delta="d")
+
+    assert cwds[0] == cwds[1]                      # same session+role → same cwd
+    assert cwds[0] != cwds[2]                      # other session → other cwd
+    assert cwds[0] != cwds[3]                      # other role → other cwd
+    # Recursion guard + consolidation filter both key off this basename prefix.
+    assert Path(cwds[0]).name == "engram-formation-sess-a"
+    # The delta file is overwritten in place, not accumulated.
+    assert (Path(cwds[0]) / "delta.txt").read_text() == "b"
 
 
 def test_tick_routes_activity_through_delta_not_inline(temp_db, tmp_path, monkeypatch):

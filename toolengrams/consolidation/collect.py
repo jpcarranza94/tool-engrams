@@ -11,14 +11,18 @@ from pathlib import Path
 CLAUDE_PROJECTS_DIR = Path.home() / ".claude" / "projects"
 
 # A project slug is `cwd.replace("/", "-")` (see utils.slugify_cwd).
-# Our internal temp dirs use `tempfile.mkdtemp(prefix="engram-{role}-")`,
-# which produces a basename like `engram-consolidate-Z3K9q1` (alphanumeric
-# random suffix, no further dashes). After slugification, this trails the
-# slug. Match the suffix anchored at end-of-string, with the random part
-# constrained to non-dash chars so we don't accidentally swallow a deeper
-# project path that happens to contain "engram-consolidate" in the middle.
+# Our internal temp dirs come in two shapes, both trailing the slug:
+#   - `tempfile.mkdtemp(prefix="engram-{role}-")` → `engram-consolidate-Z3K9q1`
+#     (alphanumeric random suffix, no further dashes)
+#   - the watcher's stable sandbox (agent._work_dir) → `engram-formation-<uuid>`
+#     (the work session id, dashes included)
+# Match anchored at end-of-string. The mkdtemp arm constrains the suffix to
+# non-dash chars and the watcher arm to an exact UUID, so neither swallows a
+# deeper project path that merely contains "engram-<role>" in the middle.
 _INTERNAL_PROJECT_RE = re.compile(
-    r"engram-(?:observe|consolidate|experiment)-[A-Za-z0-9_]+$"
+    r"engram-(?:observe|consolidate|experiment|formation|eval)-[A-Za-z0-9_]+$"
+    r"|engram-(?:formation|eval)-"
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 )
 
 

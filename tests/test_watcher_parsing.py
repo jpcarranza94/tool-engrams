@@ -51,7 +51,7 @@ def test_watcher_model_resolves_at_call_time(monkeypatch):
 
 def test_watcher_timeout_default(monkeypatch):
     monkeypatch.delenv("ENGRAM_WATCHER_TIMEOUT", raising=False)
-    assert _watcher_timeout() == DEFAULT_WATCHER_TIMEOUT == 120  # documented default
+    assert _watcher_timeout() == DEFAULT_WATCHER_TIMEOUT == 300  # documented default
 
 
 def test_watcher_timeout_env_override(monkeypatch):

@@ -386,7 +386,8 @@ def run_tick(session_id: str, transcript_path: str, cwd: str,
         # engram CLI calls can record events against it via $ENGRAM_RUN_ID.
         run_id = _open_run(session_id, role, cwd, flush, last_line)
         result = run_watcher_session(role, decision.message,
-                                     resume=watcher_session_id, run_id=run_id,
+                                     resume=watcher_session_id,
+                                     work_session_id=session_id, run_id=run_id,
                                      delta=decision.delta)
         watcher_session_id = result.watcher_session_id
         failed = not result.ok

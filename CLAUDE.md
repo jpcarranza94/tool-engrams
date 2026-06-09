@@ -47,7 +47,7 @@ pytest tests/e2e/ -m e2e     # E2E tests (spawns claude -p, slow)
 Read per tick (each tick is a fresh process), so changes apply to the next event:
 
 - `$ENGRAM_WATCHER_MODEL` — model for the watcher's `claude -p` (default `opus`).
-- `$ENGRAM_WATCHER_TIMEOUT` — per-call `claude -p` timeout in seconds (default `120`).
+- `$ENGRAM_WATCHER_TIMEOUT` — per-call `claude -p` timeout in seconds (default `300`).
 - `$ENGRAM_TICK_COALESCE_SEC` — min seconds between ticks for one session; a burst of triggers coalesces into one model call (default `45`; flush triggers ignore it).
 - `$ENGRAM_IDLE_SWEEP_SEC` — how old a tracked session's last tick must be before the SessionStart idle-sweep treats its unread tail as abandoned and re-fires a flush tick (default `1800`).
 

@@ -310,7 +310,7 @@ engram rebuild-triggers           Re-extract triggers from bodies (post-migratio
 |---|---|---|
 | `ENGRAM_DB` | `~/.claude/tool-engrams/db.sqlite` | SQLite DB path |
 | `ENGRAM_WATCHER_MODEL` | `opus` | Model passed to `claude -p` for both watcher roles (e.g. `haiku` for a cheaper, faster watcher) |
-| `ENGRAM_WATCHER_TIMEOUT` | `120` | Per-call `claude -p` timeout (seconds) for a watcher tick |
+| `ENGRAM_WATCHER_TIMEOUT` | `300` | Per-call `claude -p` timeout (seconds) for a watcher tick |
 | `ENGRAM_TICK_COALESCE_SEC` | `45` | Min seconds between ticks for one (session, role); a burst of triggers coalesces into one call (flush triggers ignore it) |
 | `ENGRAM_IDLE_SWEEP_SEC` | `1800` | How old a tracked session's last tick must be before the SessionStart idle-sweep treats its unread tail as abandoned and re-fires a flush tick |
 | `ENGRAM_WATCHER_PROMPT_PATH` | unset | Override the formation prompt file |
