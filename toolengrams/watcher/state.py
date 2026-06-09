@@ -186,6 +186,39 @@ def sweep_idle(idle_sec: int, exclude_session_id: str = "",
     return out
 
 
+def prune_dead_sessions(ttl_sec: int) -> int:
+    """Delete watcher_state rows for sessions whose transcript file no longer
+    exists and whose last activity is older than `ttl_sec`. Returns rows removed.
+
+    The transcript is the source of truth: while it exists the row keeps the
+    cursor (deleting it early would make a resumed session re-read its whole
+    transcript and re-form memories). Once Claude Code has cleaned the
+    transcript up there is nothing left to read, so the row is dead weight the
+    idle-sweep would otherwise re-stat forever. Called from `engram cleanup`."""
+    try:
+        cutoff = int(time.time()) - ttl_sec
+        with db.session() as conn:
+            rows = conn.execute(
+                "SELECT work_session_id, role, transcript_path FROM watcher_state "
+                "WHERE MAX(COALESCE(last_tick_ts, 0), COALESCE(last_checked_ts, 0), "
+                "          COALESCE(created_ts, 0)) < ?",
+                (cutoff,),
+            ).fetchall()
+            dead = [
+                (row["work_session_id"], row["role"]) for row in rows
+                if not (row["transcript_path"]
+                        and Path(row["transcript_path"]).exists())
+            ]
+            conn.executemany(
+                "DELETE FROM watcher_state WHERE work_session_id = ? AND role = ?",
+                dead,
+            )
+        return len(dead)
+    except Exception as e:
+        _log(f"PRUNE-ERROR error={e}")
+        return 0
+
+
 def _has_unread_lines(transcript_path: str, cursor: int) -> bool:
     """True if the transcript has at least one line past `cursor`. Short-circuits
     on the first unread line so it never reads a whole transcript."""

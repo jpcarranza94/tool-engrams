@@ -28,6 +28,11 @@ from toolengrams.consolidation.collect import (
     "-var-folders-2x-abc123-T-engram-consolidate-Z3K9q1",
     "-tmp-engram-observe-abc123",
     "-private-var-folders-T-engram-experiment-XYZ",
+    # Watcher stable sandboxes are named after the work session UUID.
+    "-private-var-folders-T-engram-formation-0b00831d-526f-438f-aaf8-5616e63e399a",
+    "-tmp-engram-eval-0b00831d-526f-438f-aaf8-5616e63e399a",
+    # Legacy watcher mkdtemp dirs (pre-stable-sandbox) — random dash-free suffix.
+    "-tmp-engram-formation-Xy3kQz",
 ])
 def test_is_internal_project_true_for_our_temp_dirs(slug: str) -> None:
     assert _is_internal_project(slug) is True
@@ -42,6 +47,8 @@ def test_is_internal_project_true_for_our_temp_dirs(slug: str) -> None:
     "-tmp-engram-consolidate-",
     # Substring-not-suffix case the old `prefix in slug` logic broke on.
     "-Users-jpcar-engram-experiment-research-2024-data",
+    # Dashed suffix that is not a UUID must not match the watcher arm.
+    "-Users-jpcar-engram-eval-research-2024-data",
 ])
 def test_is_internal_project_false_for_user_projects(slug: str) -> None:
     assert _is_internal_project(slug) is False
