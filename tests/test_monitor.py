@@ -66,9 +66,15 @@ def test_active_view_stale_when_pid_dead():
 def test_active_view_stale_when_old_even_if_pid_alive():
     now = int(time.time())
     row = {"work_session_id": "s", "role": "formation",
-           "started_ts": now - (monitor.STALE_AFTER_SEC + 10),
+           "started_ts": now - (monitor._stale_after_sec() + 10),
            "pid": os.getpid(), "cwd": "/r"}
     assert monitor._active_view(row, now)["state"] == "stale"
+
+
+def test_build_snapshot_empty_db(temp_db):
+    snap = monitor.build_snapshot(temp_db, int(time.time()))
+    assert snap["active"] == [] and snap["recent_24h"] == [] and snap["stream"] == []
+    assert snap["counts_24h"]["created"] == 0 and snap["counts_24h"]["judged"] == 0
 
 
 def test_pid_alive_self_and_dead():

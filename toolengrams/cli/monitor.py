@@ -21,12 +21,18 @@ import time
 
 from .. import db
 from ..watcher import runs_store
+from ..watcher.agent import _watcher_timeout
 
-# A `running` row older than this (with a dead/unknown pid) is shown as stale,
-# not active — covers a tick that died before finalizing. ~claude -p timeout + margin.
-STALE_AFTER_SEC = 180
+# A `running` row older than the watcher's `claude -p` timeout (plus a margin)
+# can't still be executing, so it's shown stale, not active. Derived from
+# $ENGRAM_WATCHER_TIMEOUT so the two stay coupled when the knob is tuned.
+STALE_MARGIN_SEC = 60
 DEFAULT_INTERVAL = 2.0
 _DAY = 86_400
+
+
+def _stale_after_sec() -> int:
+    return _watcher_timeout() + STALE_MARGIN_SEC
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -65,7 +71,7 @@ def _short(sid: str | None) -> str:
 def _active_view(row, now_ts: int) -> dict:
     """A `running` row → its display state: active (pid alive + fresh) or stale."""
     age = now_ts - row["started_ts"]
-    fresh = age < STALE_AFTER_SEC
+    fresh = age < _stale_after_sec()
     state = "active" if (_pid_alive(row["pid"]) and fresh) else "stale"
     return {
         "session": _short(row["work_session_id"]),
@@ -151,13 +157,16 @@ def _render(snap: dict):
     from rich.table import Table
     from rich.text import Text
 
-    def _ago(ts: int) -> str:
-        s = max(0, snap["now"] - ts)
+    def _human(s: int) -> str:
+        s = max(0, s)
         if s < 60:
             return f"{s}s"
         if s < 3600:
             return f"{s // 60}m"
         return f"{s // 3600}h"
+
+    def _ago(ts: int) -> str:
+        return _human(snap["now"] - ts)
 
     # Active now.
     active = Table(expand=True, box=None)
@@ -166,7 +175,7 @@ def _render(snap: dict):
     for r in snap["active"]:
         color = "bold green" if r["state"] == "active" else "yellow"
         active.add_row(r["session"], r["role"], Text(r["state"], style=color),
-                       f'{r["age_sec"]}s', str(r["pid"] or "—"))
+                       _human(r["age_sec"]), str(r["pid"] or "—"))
     if not snap["active"]:
         active.add_row("—", "no watcher running", "", "", "")
 

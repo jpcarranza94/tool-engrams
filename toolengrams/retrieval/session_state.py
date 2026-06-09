@@ -286,6 +286,13 @@ def surfaces_for_memory(conn: sqlite3.Connection, memory_id: int,
     ).fetchall()
 
 
+def count_surfaces_before(conn: sqlite3.Connection, cutoff_ts: int) -> int:
+    """How many surfaces are older than `cutoff_ts` — the dry-run prune preview."""
+    return int(conn.execute(
+        "SELECT COUNT(*) FROM session_surfaces WHERE surfaced_ts < ?", (cutoff_ts,)
+    ).fetchone()[0])
+
+
 def prune_surfaces_before(conn: sqlite3.Connection, cutoff_ts: int) -> int:
     """Delete surfaces older than `cutoff_ts`. Returns rows deleted (housekeeping
     from the nightly consolidation run)."""

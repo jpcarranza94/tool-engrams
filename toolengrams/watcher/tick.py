@@ -371,6 +371,9 @@ def run_tick(session_id: str, transcript_path: str, cwd: str,
                                      resume=watcher_session_id, run_id=run_id)
         watcher_session_id = result.watcher_session_id
         failed = not result.ok
+        # cursor_to records the window this run READ (last_line..+new_lines); on a
+        # failure the persisted cursor is held below this — the run log shows what
+        # was attempted, not what was committed.
         _close_run(run_id, ok=not failed, cursor_to=last_line + len(new_lines),
                    delta_chars=len(delta), error=result.error)
         if failed:

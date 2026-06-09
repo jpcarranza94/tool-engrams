@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 
+from toolengrams import db
 from toolengrams.watcher import SessionResult, log as wlog, runs_store, tick
 
 
@@ -92,6 +93,27 @@ def test_gated_tick_writes_no_run(temp_db, tmp_path, monkeypatch):
 
     assert called == []                       # model not called
     assert _runs(temp_db) == []               # and no run row
+
+
+def test_run_row_committed_before_session_runs(temp_db, tmp_path, monkeypatch):
+    """The run row must be committed (visible on another connection) before the
+    claude session runs, so the child engram CLI can reference it via run_id."""
+    transcript = tmp_path / "t.jsonl"
+    transcript.write_text(_bash_line("gh pr create"))
+    seen = {}
+
+    def runner(role, message, resume, run_id=None):
+        with db.session() as conn2:           # a separate connection
+            row = conn2.execute(
+                "SELECT status FROM watcher_runs WHERE id = ?", (run_id,)
+            ).fetchone()
+        seen["status"] = row["status"] if row else None
+        return SessionResult(ok=True, watcher_session_id="w1")
+
+    _wire(monkeypatch, tmp_path, runner)
+    tick.ensure_row("s", str(transcript), "/cwd")
+    tick.run_tick("s", str(transcript), "/cwd")
+    assert seen["status"] == "running"        # committed before the session started
 
 
 def test_reaper_crashes_prior_running_row(temp_db, tmp_path, monkeypatch):

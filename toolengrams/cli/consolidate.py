@@ -59,22 +59,25 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps({"status": "no_sessions", "run_date": target.isoformat()}))
             return 0
 
-        # Housekeeping: clean old session_surfaces + watcher run-log rows.
+        # Housekeeping window for old session_surfaces + watcher run-log rows.
         now_ts = int(time.time())
-        cleaned = session_state.prune_surfaces_before(
-            conn, now_ts - SURFACES_TTL_DAYS * 86400)
-        runs_cleaned = runs_store.prune_runs_before(
-            conn, now_ts - WATCHER_RUNS_TTL_DAYS * 86400)
+        surfaces_cutoff = now_ts - SURFACES_TTL_DAYS * 86400
+        runs_cutoff = now_ts - WATCHER_RUNS_TTL_DAYS * 86400
 
         if args.dry_run:
+            # Dry-run must not mutate: report what WOULD be pruned.
             print(json.dumps({
                 "status": "dry_run",
                 "run_date": target.isoformat(),
                 "sessions_found": len(sessions),
-                "surfaces_would_clean": cleaned,
-                "watcher_runs_would_clean": runs_cleaned,
+                "surfaces_would_clean": session_state.count_surfaces_before(conn, surfaces_cutoff),
+                "watcher_runs_would_clean": runs_store.count_runs_before(conn, runs_cutoff),
             }))
             return 0
+
+        # Real run: prune, then consolidate.
+        cleaned = session_state.prune_surfaces_before(conn, surfaces_cutoff)
+        runs_store.prune_runs_before(conn, runs_cutoff)
 
         # Run the consolidation agent.
         result = run_consolidation_agent(

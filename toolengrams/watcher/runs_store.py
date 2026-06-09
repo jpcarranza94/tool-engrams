@@ -122,6 +122,13 @@ def record_cli_event(conn: sqlite3.Connection, *, kind: str,
         pass
 
 
+def count_runs_before(conn: sqlite3.Connection, cutoff_ts: int) -> int:
+    """How many runs are older than `cutoff_ts` — the dry-run prune preview."""
+    return int(conn.execute(
+        "SELECT COUNT(*) FROM watcher_runs WHERE started_ts < ?", (cutoff_ts,)
+    ).fetchone()[0])
+
+
 def prune_runs_before(conn: sqlite3.Connection, cutoff_ts: int) -> int:
     """Delete runs started before `cutoff_ts` (and their events — explicitly, not
     relying on the FK cascade, since foreign_keys may be off). Returns runs
@@ -143,7 +150,7 @@ def active_runs(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     `pid` liveness + the timeout window — this just returns the candidates."""
     return conn.execute(
         "SELECT * FROM watcher_runs WHERE status = 'running' "
-        "ORDER BY started_ts DESC"
+        "ORDER BY started_ts DESC LIMIT 50"   # reaper keeps this ~1/role; cap as a backstop
     ).fetchall()
 
 
