@@ -80,7 +80,15 @@ def invoke_claude_agent(
     except Exception as e:
         return ClaudeResult(stdout="", returncode=1, error=f"failed to spawn claude: {e}")
 
-    return ClaudeResult(stdout=proc.stdout or "", returncode=proc.returncode)
+    # On a non-zero exit, surface the real reason: the stderr tail (rate-limit,
+    # auth, bad --resume, …). Without this a plain `exit N` hides what happened.
+    error = None
+    if proc.returncode != 0:
+        stderr = (proc.stderr or "").strip().replace("\n", " ")
+        error = f"exit {proc.returncode}"
+        if stderr:
+            error += f": {stderr[-300:]}"
+    return ClaudeResult(stdout=proc.stdout or "", returncode=proc.returncode, error=error)
 
 
 def parse_claude_json_output(stdout: str) -> str:

@@ -9,9 +9,29 @@ from toolengrams import claude_invoke
 
 
 class _Proc:
-    def __init__(self, stdout="", returncode=0):
+    def __init__(self, stdout="", returncode=0, stderr=""):
         self.stdout = stdout
         self.returncode = returncode
+        self.stderr = stderr
+
+
+def test_nonzero_exit_surfaces_stderr_tail(monkeypatch):
+    monkeypatch.setattr(claude_invoke.subprocess, "run",
+                        lambda argv, **kw: _Proc(stdout="", returncode=1,
+                                                 stderr="Error: overloaded_error (529)\n"))
+    r = claude_invoke.invoke_claude_agent("p", timeout=5, claude_bin="/c")
+    assert r.returncode == 1
+    assert r.error is not None
+    assert "exit 1" in r.error and "529" in r.error
+    assert "\n" not in r.error          # newlines flattened for the run-log / dashboard
+
+
+def test_zero_exit_has_no_error(monkeypatch):
+    monkeypatch.setattr(claude_invoke.subprocess, "run",
+                        lambda argv, **kw: _Proc(stdout='{"result":"ok"}', returncode=0,
+                                                 stderr="some warning"))
+    r = claude_invoke.invoke_claude_agent("p", timeout=5, claude_bin="/c")
+    assert r.error is None
 
 
 # ---------- invoke_claude_agent: argv construction ----------
