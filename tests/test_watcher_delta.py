@@ -49,6 +49,36 @@ def test_run_watcher_session_writes_delta_file_and_grants_scoped_read(monkeypatc
     assert any(a.startswith("Read(") and "delta.txt" in a for a in allow)
 
 
+def test_run_session_does_not_mutate_role_allowlist(monkeypatch):
+    """`allow + [Read(...)]` must build a new list — never grow the module-level
+    ROLE_ALLOWLIST across calls."""
+    monkeypatch.setattr(agent, "invoke_claude_agent",
+                        lambda message, **kw: ClaudeResult(stdout='{"session_id": "w"}',
+                                                           returncode=0))
+    monkeypatch.setattr(agent, "CLAUDE_BIN", "/usr/bin/claude")
+    before = list(agent.ROLE_ALLOWLIST["formation"])
+
+    agent.run_watcher_session("formation", "p", resume=None, delta="a")
+    agent.run_watcher_session("formation", "p", resume=None, delta="b")
+
+    assert agent.ROLE_ALLOWLIST["formation"] == before   # unchanged after two calls
+    assert len(agent.ROLE_ALLOWLIST["formation"]) == 1
+
+
+def test_run_session_fail_open_on_delta_write_error(monkeypatch):
+    """A sandbox-setup failure (e.g. the delta write) must not raise into the
+    tick — it returns ok=False with a reason so the run row finalizes as error."""
+    import pathlib
+    monkeypatch.setattr(agent, "CLAUDE_BIN", "/usr/bin/claude")
+    monkeypatch.setattr(pathlib.Path, "write_text",
+                        lambda self, *a, **k: (_ for _ in ()).throw(OSError("disk full")))
+
+    r = agent.run_watcher_session("formation", "p", resume="sid", delta="x")
+    assert r.ok is False
+    assert r.watcher_session_id == "sid"        # resume id preserved for retry
+    assert "setup failed" in (r.error or "")
+
+
 def test_tick_routes_activity_through_delta_not_inline(temp_db, tmp_path, monkeypatch):
     # A command that does NOT appear in the prompt's own examples, so we can tell
     # the delta apart from the prompt text.

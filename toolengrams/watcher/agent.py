@@ -84,7 +84,10 @@ def _watcher_timeout() -> int:
 
 # Filename of the transcript delta dropped into the session's sandbox cwd. The
 # model reads/greps it instead of receiving the (potentially huge) delta inline —
-# smaller argv, and the model can be selective on big windows.
+# smaller argv, and the model can be selective on big windows. tick.py's prompt
+# pointers interpolate this constant; the packaged prompt defaults
+# (prompts/defaults/{watcher,eval}.md) hardcode "./delta.txt" and must be kept in
+# sync by hand if this ever changes.
 DELTA_FILENAME = "delta.txt"
 
 
@@ -108,11 +111,13 @@ def run_watcher_session(role: str, message: str, resume: str | None,
         return SessionResult(ok=False, watcher_session_id=resume,
                              error=f"unknown role {role!r}")
 
-    work_dir = tempfile.mkdtemp(prefix=_WORKDIR_PREFIX[role])
+    work_dir = None
     try:
+        work_dir = tempfile.mkdtemp(prefix=_WORKDIR_PREFIX[role])
         delta_path = Path(work_dir) / DELTA_FILENAME
         delta_path.write_text(delta or "(no new activity)")
         # Grant read access to exactly that file alongside the role's one verb.
+        # `allow + [...]` builds a NEW list — never mutate the module ROLE_ALLOWLIST.
         write_agent_settings(Path(work_dir), allow + [f"Read({delta_path})"])
         env = os.environ.copy()
         env[WATCHER_CHILD_ENV] = "1"
@@ -128,8 +133,14 @@ def run_watcher_session(role: str, message: str, resume: str | None,
             env=env,
             claude_bin=CLAUDE_BIN,
         )
+    except Exception as e:
+        # Sandbox setup failed (mkdtemp / delta write / settings). Fail open so
+        # the tick finalizes the run row as error instead of crashing.
+        return SessionResult(ok=False, watcher_session_id=resume,
+                             error=f"session setup failed: {e}")
     finally:
-        shutil.rmtree(work_dir, ignore_errors=True)
+        if work_dir:
+            shutil.rmtree(work_dir, ignore_errors=True)
 
     if result.error or result.returncode != 0:
         return SessionResult(ok=False, watcher_session_id=resume,

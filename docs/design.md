@@ -231,7 +231,10 @@ that file (alongside the role's one verb); the prompt tells the model to read it
 keeps the `claude -p` argv tiny regardless of window size, and — critically for eval —
 lets the model *grep* a large forward window for the surfaces it cares about instead of
 ingesting tens of thousands of characters in one shot (which was timing out the model).
-The same file hand-off serves the evaluation watcher.
+The same file hand-off serves the evaluation watcher. The `./delta.txt` pointer is
+appended by the tick *outside* the overridable prompt body, so a user who has overridden
+`watcher.md`/`eval.md` from before this change still receives the pointer (their stale
+body may also say "the transcript below" — harmless contradiction, not a lost pointer).
 
 Two mechanisms keep formation safe:
 
