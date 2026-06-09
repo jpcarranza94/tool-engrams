@@ -10,7 +10,9 @@ requires-python = ">=3.10"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "Juan Pablo Carranza Hurtado" }]
-dependencies = []
+# The hot path (hooks) is stdlib + sqlite3 only. `rich` is used solely by the
+# `engram monitor` dashboard and is imported lazily there (see ADR-0003).
+dependencies = ["rich>=13"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]

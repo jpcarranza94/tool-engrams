@@ -270,7 +270,48 @@ memory while preserving its `useful_count` / `noise_count` history (a `forget` +
 
 ---
 
-## 8. Key decisions
+## 8. Live monitor
+
+`engram monitor` is a live dashboard over the watchers. Because ticks are detached and
+sub-minute, there is no long-lived process to inspect — so the monitor records **runs**
+and reads them back, rather than probing processes.
+
+Two tables (the `watcher/runs_store.py` seam):
+
+- **`watcher_runs`** — one row per *model-calling* tick: `(work_session_id, role, status
+  ∈ {running, ok, error, crashed}, pid, started_ts, ended_ts, model, flush, cursor_from,
+  cursor_to, delta_chars, cwd, error)`. Ticks that gate out (chat turn, no new lines, eval
+  defer, coalesced, lock-contended) are non-events and write nothing.
+- **`watcher_run_events`** — one row per CLI action a run produced: `(run_id, ts, kind ∈
+  {created, judged}, memory_id, memory_name, outcome)`. This is the decision stream.
+
+**Capture (the blind-parent problem).** After ADR-0001 the run process can't see what its
+`claude -p` did — formation/eval act through the CLI in a child process. So
+`run_watcher_session` inserts the run row (status `running`) and **commits it before
+spawning claude**, then sets `ENGRAM_RUN_ID` in the session env. That id rides the same
+propagation path as `ENGRAM_IN_WATCHER` down to the model's `engram remember` / `engram
+judge` Bash calls, which record a `watcher_run_events` row against it. On return, the
+parent finalizes the run row (`ok`/`error`, `ended_ts`, `error`). Manual or consolidation
+`engram` calls carry no `ENGRAM_RUN_ID`, so they record no events.
+
+**Liveness without a heartbeat.** A `running` row is ambiguous — executing, or a tick that
+died before finalizing. The lock resolves it: only one tick per `(session, role)` runs at
+once, so when a new `run_tick` acquires the lock it marks any prior `running` row for that
+pair `crashed` (a new run starting proves the old one is gone). The dashboard is read-only;
+it uses `pid` liveness (`os.kill(pid, 0)`) plus the `claude -p` timeout window only to
+*display* a `running` row as active vs. stale.
+
+**The view.** Three panes, auto-refreshing (`rich.Live`): **active now** (running rows,
+plus eval-waiting and lock-contention as live status), **last 24h** (run history with
+duration / Δchars / created+judged counts), and the **decision stream**
+(created-vs-judged events, newest first). Piped (non-TTY) it falls back to a one-shot JSON
+snapshot. `rich` is a hard dependency, imported only in `cli/monitor.py` — the hot path
+stays stdlib + sqlite3. Old runs are pruned (>14 days) by the nightly consolidation. See
+ADR-0003.
+
+---
+
+## 9. Key decisions
 
 Recorded as ADRs in `docs/adr/`:
 
@@ -278,3 +319,5 @@ Recorded as ADRs in `docs/adr/`:
   a constrained JSON schema. Safety is the command surface, not a schema.
 - **ADR-0002** — recency is removed from ranking. Event-driven surfacing makes age a
   backwards signal; staleness is consolidation's job.
+- **ADR-0003** — the live monitor takes `rich` as a hard dependency, confined to the
+  dashboard renderer; the hot path stays dependency-free.

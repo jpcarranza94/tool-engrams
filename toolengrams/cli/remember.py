@@ -32,6 +32,7 @@ from ..formation import (
     update_existing_memory,
 )
 from ..utils import slugify_cwd
+from ..watcher import runs_store
 
 VALID_KINDS = {"block", "hint"}
 VALID_SCOPES = {"global", "project"}
@@ -114,6 +115,10 @@ def main(argv: list[str] | None = None) -> int:
             memory_id = _insert(conn=conn, **common)
             action = "inserted"
             existing = None
+
+        # If a formation watcher run spawned this call, record it for the monitor.
+        runs_store.record_cli_event(conn, kind="created",
+                                    memory_id=memory_id, memory_name=name)
 
         payload = _build_payload(
             memory_id=memory_id, action=action,

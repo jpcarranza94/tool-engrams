@@ -27,6 +27,7 @@ import os
 
 from .. import db, memory_store
 from ..retrieval import session_state
+from ..watcher import runs_store
 from ..watcher.log import _log
 
 _OUTCOMES = ("helpful", "unused", "noise")
@@ -78,6 +79,12 @@ def main(argv: list[str] | None = None) -> int:
             # One verdict = one counter bump, only when a pending surface closed.
             if updated and args.outcome in _BUMP:
                 _BUMP[args.outcome](conn, [args.memory_id])
+
+        # If an eval watcher run spawned this call, record it for the monitor.
+        if updated:
+            runs_store.record_cli_event(conn, kind="judged",
+                                        memory_id=args.memory_id,
+                                        memory_name=mem.name, outcome=args.outcome)
 
     if not updated:
         _log(f"JUDGE-NOOP memory_id={args.memory_id} session={session_id} "

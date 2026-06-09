@@ -28,6 +28,7 @@ import fcntl
 import os
 import subprocess
 import sys
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -37,8 +38,8 @@ from ..prompts.eval import EVAL_SUBSEQUENT_HEADER, build_eval_prompt
 from ..prompts.watcher import WATCHER_SUBSEQUENT_HEADER, build_watcher_prompt
 from ..retrieval import session_state
 from ..utils import WATCHER_CHILD_ENV
-from . import state
-from .agent import CLAUDE_BIN, run_watcher_session
+from . import runs_store, state
+from .agent import CLAUDE_BIN, _watcher_model, run_watcher_session
 from .log import LOG_PATH, _log
 from .state import ensure_row
 from .transcript_format import _format_delta, _read_lines_from
@@ -290,6 +291,38 @@ def _eval_message(session_id: str, pending_rows, delta: str, flush: bool,
 _DECIDERS = {"formation": _formation_decision, "eval": _eval_decision}
 
 
+def _open_run(session_id: str, role: str, cwd: str, flush: bool,
+              cursor_from: int) -> int | None:
+    """Insert a 'running' watcher_runs row (autocommit `db.session` commits it
+    immediately, before claude spawns) and return its id. Fail-open: the run log
+    is monitoring — it must never break a tick."""
+    try:
+        with db.session() as conn:
+            return runs_store.start_run(
+                conn, work_session_id=session_id, role=role, pid=os.getpid(),
+                started_ts=int(time.time()), model=_watcher_model(), flush=flush,
+                cursor_from=cursor_from, cwd=cwd,
+            )
+    except Exception:
+        return None
+
+
+def _close_run(run_id: int | None, *, ok: bool, cursor_to: int,
+               delta_chars: int, error: str | None) -> None:
+    """Finalize the run row to ok/error. Fail-open."""
+    if run_id is None:
+        return
+    try:
+        with db.session() as conn:
+            runs_store.finish_run(
+                conn, run_id, status="ok" if ok else "error",
+                ended_ts=int(time.time()), cursor_to=cursor_to,
+                delta_chars=delta_chars, error=None if ok else (error or "")[:300],
+            )
+    except Exception:
+        pass
+
+
 def run_tick(session_id: str, transcript_path: str, cwd: str,
              role: str = "formation", flush: bool = False) -> int:
     """One event-driven tick for (session, role). See module docstring."""
@@ -301,6 +334,14 @@ def run_tick(session_id: str, transcript_path: str, cwd: str,
         if not got:
             _log(f"TICK-LOCKED session={session_id} role={role}")
             return 0
+
+        # We hold the lock, so any prior 'running' run row for this (session,
+        # role) belongs to a tick that died before finalizing — reap it.
+        try:
+            with db.session() as conn:
+                runs_store.reap_stale(conn, session_id, role, int(time.time()))
+        except Exception:
+            pass
 
         st = state.read(session_id, role)
         last_line = st.last_line_read
@@ -323,9 +364,18 @@ def run_tick(session_id: str, transcript_path: str, cwd: str,
             return 0
 
         attempt = fail_streak + 1
-        result = run_watcher_session(role, decision.message, resume=watcher_session_id)
+        # Open the run row and commit it BEFORE spawning claude, so the model's
+        # engram CLI calls can record events against it via $ENGRAM_RUN_ID.
+        run_id = _open_run(session_id, role, cwd, flush, last_line)
+        result = run_watcher_session(role, decision.message,
+                                     resume=watcher_session_id, run_id=run_id)
         watcher_session_id = result.watcher_session_id
         failed = not result.ok
+        # cursor_to records the window this run READ (last_line..+new_lines); on a
+        # failure the persisted cursor is held below this — the run log shows what
+        # was attempted, not what was committed.
+        _close_run(run_id, ok=not failed, cursor_to=last_line + len(new_lines),
+                   delta_chars=len(delta), error=result.error)
         if failed:
             _log(f"MODEL-ERROR session={session_id} role={role} "
                  f"delta_chars={len(delta)} attempt={attempt} flush={int(flush)}")
