@@ -220,10 +220,18 @@ This makes the evaluation watcher the single writer of `useful_count` / `noise_c
 ## 5. Formation via the CLI
 
 Formation is a permissioned `claude -p` whose only granted command is `engram remember`.
-It reads the transcript delta and runs `engram remember …` for patterns worth keeping,
-passing the user's real cwd through `--project-cwd` so a project-scoped memory binds to
-the user's repo rather than the watcher's working directory. Native tool-calling is the
-model's robust path; there is no JSON to parse and nothing for the harness to marshal.
+It runs `engram remember …` for patterns worth keeping, passing the user's real cwd
+through `--project-cwd` so a project-scoped memory binds to the user's repo rather than
+the watcher's working directory. Native tool-calling is the model's robust path; there
+is no JSON to parse and nothing for the harness to marshal.
+
+**The transcript delta is handed over as a file, not inline.** The watcher writes the
+delta to `./delta.txt` in the session's sandbox cwd and grants a `Read` scoped to exactly
+that file (alongside the role's one verb); the prompt tells the model to read it. This
+keeps the `claude -p` argv tiny regardless of window size, and — critically for eval —
+lets the model *grep* a large forward window for the surfaces it cares about instead of
+ingesting tens of thousands of characters in one shot (which was timing out the model).
+The same file hand-off serves the evaluation watcher.
 
 Two mechanisms keep formation safe:
 

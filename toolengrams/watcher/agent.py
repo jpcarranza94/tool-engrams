@@ -82,15 +82,22 @@ def _watcher_timeout() -> int:
     return val if val > 0 else DEFAULT_WATCHER_TIMEOUT
 
 
+# Filename of the transcript delta dropped into the session's sandbox cwd. The
+# model reads/greps it instead of receiving the (potentially huge) delta inline —
+# smaller argv, and the model can be selective on big windows.
+DELTA_FILENAME = "delta.txt"
+
+
 def run_watcher_session(role: str, message: str, resume: str | None,
-                        run_id: int | None = None) -> SessionResult:
+                        run_id: int | None = None, delta: str = "") -> SessionResult:
     """Run one permissioned `claude -p` turn for `role`, resuming `resume` if set.
 
-    Builds a throwaway sandbox cwd granting the role's allowlist, sets ENGRAM_DB
-    + ENGRAM_IN_WATCHER (and ENGRAM_RUN_ID, when given, so the model's `engram`
-    CLI calls record run events) in the env, and shells out via the shared seam.
-    Returns `ok=False` (held window) on any process failure. The side effects
-    happen in-band via the model's `engram` calls — there is nothing to parse.
+    Builds a throwaway sandbox cwd granting the role's allowlist, writes the
+    transcript `delta` to `./delta.txt` there (the prompt tells the model to read
+    it), sets ENGRAM_DB + ENGRAM_IN_WATCHER (and ENGRAM_RUN_ID, when given) in the
+    env, and shells out via the shared seam. Returns `ok=False` (held window) on
+    any process failure. The side effects happen in-band via the model's `engram`
+    calls — there is nothing to parse.
     """
     if not CLAUDE_BIN:
         return SessionResult(ok=False, watcher_session_id=resume,
@@ -103,7 +110,10 @@ def run_watcher_session(role: str, message: str, resume: str | None,
 
     work_dir = tempfile.mkdtemp(prefix=_WORKDIR_PREFIX[role])
     try:
-        write_agent_settings(Path(work_dir), allow)
+        delta_path = Path(work_dir) / DELTA_FILENAME
+        delta_path.write_text(delta or "(no new activity)")
+        # Grant read access to exactly that file alongside the role's one verb.
+        write_agent_settings(Path(work_dir), allow + [f"Read({delta_path})"])
         env = os.environ.copy()
         env[WATCHER_CHILD_ENV] = "1"
         env["ENGRAM_DB"] = str(db.db_path())

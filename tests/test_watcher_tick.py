@@ -35,7 +35,7 @@ def _bash_line(cmd: str) -> str:
 
 def _ok(sid="w1"):
     """A runner that always succeeds, returning session id `sid`."""
-    def _runner(role, message, resume, run_id=None):
+    def _runner(role, message, resume, run_id=None, **kw):
         return SessionResult(ok=True, watcher_session_id=sid)
     return _runner
 
@@ -130,7 +130,7 @@ def test_run_tick_gate_skips_pure_chat(temp_db, tmp_path, monkeypatch):
     transcript.write_text(_user_line("hello there, how are you"))
     calls = []
     _wire(monkeypatch, tmp_path,
-          lambda role, msg, resume, run_id=None: calls.append(role) or SessionResult(True, "w1"))
+          lambda role, msg, resume, run_id=None, **kw: calls.append(role) or SessionResult(True, "w1"))
     tick.ensure_row("s", str(transcript), "/cwd")
 
     tick.run_tick("s", str(transcript), "/cwd")
@@ -144,7 +144,7 @@ def test_run_tick_armed_forces_model_on_chat(temp_db, tmp_path, monkeypatch):
     transcript.write_text(_user_line("ok thanks"))
     calls = []
     _wire(monkeypatch, tmp_path,
-          lambda role, msg, resume, run_id=None: calls.append(role) or SessionResult(True, "w1"))
+          lambda role, msg, resume, run_id=None, **kw: calls.append(role) or SessionResult(True, "w1"))
     tick.ensure_row("s", str(transcript), "/cwd")
     tick.arm("s")
 
@@ -159,7 +159,7 @@ def test_run_tick_calls_model_on_tool_activity(temp_db, tmp_path, monkeypatch):
     transcript.write_text(_bash_line("gh pr create --title x"))
     seen = []
     _wire(monkeypatch, tmp_path,
-          lambda role, msg, resume, run_id=None: seen.append((role, resume)) or SessionResult(True, "w1"))
+          lambda role, msg, resume, run_id=None, **kw: seen.append((role, resume)) or SessionResult(True, "w1"))
     tick.ensure_row("s", str(transcript), "/cwd")
 
     tick.run_tick("s", str(transcript), "/cwd")
@@ -173,7 +173,7 @@ def test_run_tick_holds_cursor_and_persists_streak_on_failure(temp_db, tmp_path,
     transcript = tmp_path / "t.jsonl"
     transcript.write_text(_bash_line("gh pr create"))
     _wire(monkeypatch, tmp_path,
-          lambda role, msg, resume, run_id=None: SessionResult(ok=False, watcher_session_id=resume))
+          lambda role, msg, resume, run_id=None, **kw: SessionResult(ok=False, watcher_session_id=resume))
     tick.ensure_row("s", str(transcript), "/cwd")
 
     tick.run_tick("s", str(transcript), "/cwd")
@@ -187,7 +187,7 @@ def test_run_tick_lock_prevents_concurrent_processing(temp_db, tmp_path, monkeyp
     transcript.write_text(_bash_line("gh pr create"))
     calls = []
     _wire(monkeypatch, tmp_path,
-          lambda role, msg, resume, run_id=None: calls.append(role) or SessionResult(True, "w1"))
+          lambda role, msg, resume, run_id=None, **kw: calls.append(role) or SessionResult(True, "w1"))
     tick.ensure_row("s", str(transcript), "/cwd")
 
     # Hold the per-(session, role) lock, then a second tick must no-op.
@@ -209,7 +209,7 @@ def test_run_tick_holds_then_gives_up_across_events(temp_db, tmp_path, monkeypat
     transcript.write_text(_bash_line("gh pr create"))
     calls = {"n": 0}
 
-    def boom(role, msg, resume, run_id=None):
+    def boom(role, msg, resume, run_id=None, **kw):
         calls["n"] += 1
         return SessionResult(ok=False, watcher_session_id=resume)
 
@@ -232,7 +232,7 @@ def test_run_tick_resets_session_on_failure_across_events(temp_db, tmp_path, mon
     route = []
     script = iter([True, False, True])  # window1 ok, window2 fails, window2 retried ok
 
-    def fake(role, msg, resume, run_id=None):
+    def fake(role, msg, resume, run_id=None, **kw):
         route.append(resume)
         ok = next(script)
         return SessionResult(ok=ok, watcher_session_id="w1" if ok else resume)
@@ -258,7 +258,7 @@ def test_eval_tick_skips_when_no_pending(temp_db, tmp_path, monkeypatch):
     transcript.write_text(_bash_line("git push"))
     calls = []
     _wire(monkeypatch, tmp_path,
-          lambda role, msg, resume, run_id=None: calls.append(role) or SessionResult(True, "e1"))
+          lambda role, msg, resume, run_id=None, **kw: calls.append(role) or SessionResult(True, "e1"))
     tick.ensure_row("s", str(transcript), "/cwd", role="eval")
 
     tick.run_tick("s", str(transcript), "/cwd", role="eval")
@@ -273,7 +273,7 @@ def test_eval_tick_runs_when_pending(temp_db, tmp_path, monkeypatch):
     _seed_pending_surface("s")
     seen = []
     _wire(monkeypatch, tmp_path,
-          lambda role, msg, resume, run_id=None: seen.append((role, resume)) or SessionResult(True, "e1"))
+          lambda role, msg, resume, run_id=None, **kw: seen.append((role, resume)) or SessionResult(True, "e1"))
     tick.ensure_row("s", str(transcript), "/cwd", role="eval")
 
     tick.run_tick("s", str(transcript), "/cwd", role="eval")
@@ -289,7 +289,7 @@ def test_eval_tick_defers_when_no_new_evidence(temp_db, tmp_path, monkeypatch):
     _seed_pending_surface("s")
     calls = []
     _wire(monkeypatch, tmp_path,
-          lambda role, msg, resume, run_id=None: calls.append(role) or SessionResult(True, "e1"))
+          lambda role, msg, resume, run_id=None, **kw: calls.append(role) or SessionResult(True, "e1"))
     tick.ensure_row("s", str(transcript), "/cwd", role="eval")
 
     tick.run_tick("s", str(transcript), "/cwd", role="eval")
@@ -304,7 +304,7 @@ def test_eval_tick_flush_forces_run_without_new_lines(temp_db, tmp_path, monkeyp
     _seed_pending_surface("s")
     seen = []
     _wire(monkeypatch, tmp_path,
-          lambda role, msg, resume, run_id=None: seen.append(role) or SessionResult(True, "e1"))
+          lambda role, msg, resume, run_id=None, **kw: seen.append(role) or SessionResult(True, "e1"))
     tick.ensure_row("s", str(transcript), "/cwd", role="eval")
 
     tick.run_tick("s", str(transcript), "/cwd", role="eval", flush=True)
@@ -357,6 +357,32 @@ def test_sweep_idle_sessions_fires_flush_tick(temp_db, tmp_path, monkeypatch):
     assert n == 1
     # No pending surfaces → only the formation flush fires (eval self-gates out).
     assert spawned == [("abandoned", True, "formation")]
+
+
+def test_sweep_caps_spawns_to_avoid_herd(temp_db, tmp_path, monkeypatch):
+    """Many abandoned sessions → the sweep re-fires at most MAX_SWEEP_SPAWN of
+    them (oldest first), so SessionStart can't thunder-herd the API."""
+    now = int(time.time())
+    for i in range(5):
+        f = tmp_path / f"s{i}.jsonl"
+        f.write_text(_bash_line("a") + _bash_line("b"))
+        state.ensure_row(f"s{i}", str(f), "/cwd")
+        with db.session() as conn:
+            conn.execute(
+                "UPDATE watcher_state SET last_line_read = 0, last_tick_ts = ? "
+                "WHERE work_session_id = ? AND role = 'formation'",
+                (now - 3600 - i, f"s{i}"),   # s4 is the oldest
+            )
+
+    spawned = []
+    monkeypatch.setattr(tick, "spawn_tick",
+                        lambda sid, tp, cwd, flush=False, role="formation": spawned.append(sid))
+
+    n = tick.sweep_idle_sessions("current-session")
+
+    assert n == tick.MAX_SWEEP_SPAWN          # not all 5
+    assert len(spawned) == tick.MAX_SWEEP_SPAWN
+    assert spawned == ["s4"]                  # oldest tail recovered first
 
 
 def test_sweep_does_not_refire_after_tail_processed(temp_db, tmp_path, monkeypatch):
