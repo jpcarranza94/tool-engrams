@@ -83,6 +83,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("stop", help="Stop hook handler — primary event-driven watcher trigger (reads JSON on stdin)")
     sub.add_parser("flush", help="SessionEnd/PreCompact hook handler — final watcher flush tick (reads JSON on stdin)")
     sub.add_parser("seed", help="Insert example memories for smoke testing")
+    sub.add_parser("cleanup", help="Reap cold watcher residue: dead watcher_state rows, stale sandboxes, internal transcripts")
 
     # Listed so --help shows them, but dispatch goes through _SELF_PARSING above.
     sub.add_parser("remember", help="Extract triggers from body text and insert a memory", add_help=False)
@@ -115,6 +116,7 @@ def main(argv: list[str] | None = None) -> int:
         "stop": stop.main,
         "flush": flush.main,
         "seed": seed.main,
+        "cleanup": watcher.cleanup.run_cleanup,
         "export": _stub_unimpl("export"),
     }
 

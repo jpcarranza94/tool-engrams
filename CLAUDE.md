@@ -50,6 +50,7 @@ Read per tick (each tick is a fresh process), so changes apply to the next event
 - `$ENGRAM_WATCHER_TIMEOUT` — per-call `claude -p` timeout in seconds (default `300`).
 - `$ENGRAM_TICK_COALESCE_SEC` — min seconds between ticks for one session; a burst of triggers coalesces into one model call (default `45`; flush triggers ignore it).
 - `$ENGRAM_IDLE_SWEEP_SEC` — how old a tracked session's last tick must be before the SessionStart idle-sweep treats its unread tail as abandoned and re-fires a flush tick (default `1800`).
+- `$ENGRAM_CLEANUP_TTL_SEC` — how cold watcher residue must be before the once-daily `engram cleanup` (spawned detached from SessionStart, marker-gated) reaps it: dead `watcher_state` rows (transcript deleted), stale sandbox cwds, old internal transcript dirs (default `604800` = 7 days).
 
 `MAX_FORM_RETRIES` (tick.py) bounds how many ticks a failed transcript window is retried (cursor held, `fail_streak` persisted in `watcher_state`) before giving up and advancing past it; it is a correctness bound, not an env knob.
 

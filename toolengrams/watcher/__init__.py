@@ -12,9 +12,10 @@ Module layout:
   - state.py             — watcher_state persistence, keyed (session, role)
   - log.py               — watcher log sink
   - tick.py              — event-driven tick engine + coalesce + idle sweep
+  - cleanup.py           — once-daily reaper of cold watcher residue
 """
 
-from . import tick
+from . import cleanup, tick
 from .agent import (
     CLAUDE_BIN,
     DEFAULT_WATCHER_MODEL,
@@ -42,6 +43,7 @@ from .transcript_format import (
 
 __all__ = [
     # Public API
+    "cleanup",
     "tick",
     "derive_transcript_path",
     "run_watcher_session",

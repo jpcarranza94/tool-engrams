@@ -2,8 +2,10 @@
 
 Injects formation guidance: tells Claude how and when to use `engram remember`
 to form tool-bound memories. Also registers the session in watcher_state (so the
-event-driven ticks have a cursor) and runs the idle-sweep that recovers tails of
-sessions that died before their final flush. Spawns no long-running process.
+event-driven ticks have a cursor), runs the idle-sweep that recovers tails of
+sessions that died before their final flush, and at most once a day spawns the
+detached residue cleanup. Everything in-hook is cheap; model work and filesystem
+sweeps happen in detached processes.
 
 Input JSON on stdin (subset):
     {
@@ -29,7 +31,7 @@ import sys
 
 from ..prompts.session_start import FORMATION_GUIDANCE
 from ..utils import is_watcher_child
-from ..watcher import derive_transcript_path, tick
+from ..watcher import cleanup, derive_transcript_path, tick
 from ._skip import is_internal_cwd
 
 
@@ -80,6 +82,10 @@ def _ensure_session_tracked(payload: dict) -> None:
     transcript_path = derive_transcript_path(session_id, cwd)
     tick.ensure_row(session_id, transcript_path, cwd)
     tick.sweep_idle_sessions(session_id)
+    # Once a day (marker-gated; one stat on the common path), reap cold watcher
+    # residue in a detached process: dead watcher_state rows, stale sandbox
+    # cwds, and the watcher sessions' own old transcripts.
+    cleanup.maybe_spawn_cleanup()
 
 
 def _emit(obj: dict) -> None:

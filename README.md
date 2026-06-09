@@ -313,6 +313,7 @@ engram rebuild-triggers           Re-extract triggers from bodies (post-migratio
 | `ENGRAM_WATCHER_TIMEOUT` | `300` | Per-call `claude -p` timeout (seconds) for a watcher tick |
 | `ENGRAM_TICK_COALESCE_SEC` | `45` | Min seconds between ticks for one (session, role); a burst of triggers coalesces into one call (flush triggers ignore it) |
 | `ENGRAM_IDLE_SWEEP_SEC` | `1800` | How old a tracked session's last tick must be before the SessionStart idle-sweep treats its unread tail as abandoned and re-fires a flush tick |
+| `ENGRAM_CLEANUP_TTL_SEC` | `604800` (7 days) | How cold watcher residue must be before the once-daily `engram cleanup` reaps it (dead `watcher_state` rows, stale sandbox cwds, old internal transcript dirs) |
 | `ENGRAM_WATCHER_PROMPT_PATH` | unset | Override the formation prompt file |
 | `ENGRAM_EVAL_PROMPT_PATH` | unset | Override the evaluation prompt file |
 | `ENGRAM_CONSOLIDATION_PROMPT_PATH` | unset | Override the consolidation prompt file |
