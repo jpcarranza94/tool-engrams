@@ -5,9 +5,10 @@ path ever reclaims them:
 
   1. `watcher_state` rows for sessions whose transcript Claude Code has since
      deleted — dead cursors that the idle-sweep keeps re-statting forever.
-  2. The stable sandbox cwds (`agent._work_dir`) in the system temp dir. The OS
-     reaps these on macOS, but Linux `/tmp` policies vary and the legacy
-     per-tick `mkdtemp` dirs leaked on crash were never reaped anywhere.
+  2. The stable sandbox cwds (`agent._work_dir`) under `agent._sandbox_root()`
+     — user-only territory that no OS policy reaps, so this is their ONLY
+     reaper. Plus legacy residue in the system temp dir (pre-stable-root
+     sandboxes, crash-leaked mkdtemp dirs).
   3. The watcher sessions' own transcripts under `~/.claude/projects` (one
      internal project slug per sandbox cwd).
 
@@ -40,6 +41,7 @@ from .. import db
 from ..consolidation.collect import CLAUDE_PROJECTS_DIR, _is_internal_project
 from ..utils import WATCHER_CHILD_ENV
 from . import state
+from .agent import _sandbox_root
 from .log import _log
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -114,11 +116,14 @@ def run_cleanup() -> int:
     `engram cleanup` process; each step is independent and best-effort."""
     ttl = _cleanup_ttl_sec()
     cutoff = time.time() - ttl
+    is_ours = lambda name: name.startswith(_REAP_PREFIXES)
     rows = state.prune_dead_sessions(ttl)
-    sandboxes = _reap_stale_dirs(Path(tempfile.gettempdir()), cutoff,
-                                 lambda name: name.startswith(_REAP_PREFIXES))
+    sandboxes = _reap_stale_dirs(_sandbox_root(), cutoff, is_ours)
+    # Legacy residue in the system temp dir: pre-stable-root sandboxes and
+    # crash-leaked mkdtemp dirs from the other internal agents.
+    temp_dirs = _reap_stale_dirs(Path(tempfile.gettempdir()), cutoff, is_ours)
     slugs = _reap_stale_dirs(CLAUDE_PROJECTS_DIR, cutoff, _is_internal_project)
-    _log(f"CLEANUP state_rows={rows} sandboxes={sandboxes} "
+    _log(f"CLEANUP state_rows={rows} sandboxes={sandboxes} temp_dirs={temp_dirs} "
          f"watcher_transcripts={slugs} ttl_sec={ttl}")
     return 0
 

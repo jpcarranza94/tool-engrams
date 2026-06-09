@@ -26,13 +26,13 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import tempfile
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 
 from .. import db
 from ..claude_invoke import invoke_claude_agent, write_agent_settings
-from ..utils import WATCHER_CHILD_ENV
+from ..utils import WATCHER_CHILD_ENV, safe_filename_id
 
 CLAUDE_BIN = shutil.which("claude")
 
@@ -63,17 +63,27 @@ ROLE_ALLOWLIST: dict[str, list[str]] = {
 _WORKDIR_PREFIX = {"formation": "engram-formation-", "eval": "engram-eval-"}
 
 
+def _sandbox_root() -> Path:
+    """Root for the stable sandbox cwds. Keyed off the DB dir rather than the
+    system temp root: it's user-only territory (no shared-/tmp dir squatting),
+    and it follows $ENGRAM_DB so tests isolate automatically. Nothing reaps it
+    but us — the once-daily `engram cleanup` removes cold sandboxes."""
+    return db.db_path().parent / "sandboxes"
+
+
 def _work_dir(role: str, work_session_id: str) -> Path:
     """The stable sandbox cwd for one (work session, role).
 
     Stability is what makes `--resume` work: Claude Code stores conversations
-    under a per-project slug derived from the cwd, and `--resume <id>` only
-    resolves within the current project. The dir lives under the system temp
-    root, so the OS reaps it once the session goes cold; if it vanishes while a
-    resume id is still persisted, the resume fails and tick.py falls back to a
-    fresh session on the retry.
+    under a per-project slug derived from the cwd *path string*, and
+    `--resume <id>` only resolves within the current project — so the path must
+    be the same every tick (recreating a deleted dir yields the same slug and
+    still resolves). What does orphan a persisted resume id is Claude Code's
+    own transcript cleanup; tick.py then falls back to a fresh session on the
+    retry. The session id is sanitized so a hostile or malformed id can't
+    traverse out of the sandbox root.
     """
-    return Path(tempfile.gettempdir()) / f"{_WORKDIR_PREFIX[role]}{work_session_id}"
+    return _sandbox_root() / f"{_WORKDIR_PREFIX[role]}{safe_filename_id(work_session_id)}"
 
 
 @dataclass(slots=True)
@@ -134,7 +144,15 @@ def run_watcher_session(role: str, message: str, resume: str | None,
 
     try:
         work_dir = _work_dir(role, work_session_id)
-        work_dir.mkdir(parents=True, exist_ok=True)
+        work_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        # exist_ok accepts a pre-existing path silently — refuse one that isn't
+        # a plain directory we own (symlink swap / squatting): the sandbox holds
+        # transcript excerpts and the settings.local.json permission boundary.
+        info = work_dir.lstat()
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid():
+            return SessionResult(
+                ok=False, watcher_session_id=resume,
+                error=f"sandbox is not a directory we own: {work_dir}")
         delta_path = work_dir / DELTA_FILENAME
         delta_path.write_text(delta or "(no new activity)")
         # Grant read access to exactly that file alongside the role's one verb.

@@ -37,7 +37,7 @@ from .. import db
 from ..prompts.eval import EVAL_SUBSEQUENT_HEADER, build_eval_prompt
 from ..prompts.watcher import WATCHER_SUBSEQUENT_HEADER, build_watcher_prompt
 from ..retrieval import session_state
-from ..utils import WATCHER_CHILD_ENV
+from ..utils import WATCHER_CHILD_ENV, safe_filename_id as _safe
 from . import runs_store, state
 from .agent import CLAUDE_BIN, DELTA_FILENAME, _watcher_model, run_watcher_session
 from .log import LOG_PATH, _log
@@ -196,10 +196,6 @@ def sweep_idle_sessions(current_session_id: str) -> int:
 
 
 # ---------- tick body (runs in the detached process) ----------
-
-
-def _safe(name: str) -> str:
-    return "".join(c if c.isalnum() or c in "-_" else "_" for c in name)[:120]
 
 
 @contextmanager
@@ -385,6 +381,9 @@ def run_tick(session_id: str, transcript_path: str, cwd: str,
         # Open the run row and commit it BEFORE spawning claude, so the model's
         # engram CLI calls can record events against it via $ENGRAM_RUN_ID.
         run_id = _open_run(session_id, role, cwd, flush, last_line)
+        # The PR thesis "resume resolves" must be field-verifiable: log whether
+        # this call resumed the watcher session or started fresh.
+        resumed = int(watcher_session_id is not None)
         result = run_watcher_session(role, decision.message,
                                      resume=watcher_session_id,
                                      work_session_id=session_id, run_id=run_id,
@@ -399,9 +398,10 @@ def run_tick(session_id: str, transcript_path: str, cwd: str,
         if failed:
             _log(f"MODEL-ERROR session={session_id} role={role} "
                  f"delta_chars={len(delta)} attempt={attempt} flush={int(flush)} "
-                 f"error={(result.error or '')[:200]}")
+                 f"resumed={resumed} error={(result.error or '')[:200]}")
         else:
-            _log(f"MODEL-OK session={session_id} role={role} lines={len(new_lines)}")
+            _log(f"MODEL-OK session={session_id} role={role} "
+                 f"lines={len(new_lines)} resumed={resumed}")
 
         # Hold the window on failure, give up after the cap (fail_streak persisted).
         advance, fail_streak = _retry_decision(failed, fail_streak, MAX_FORM_RETRIES)

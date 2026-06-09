@@ -17,8 +17,8 @@ from toolengrams.watcher import SessionResult, agent, log as wlog, tick
 @pytest.fixture(autouse=True)
 def _sandbox_root(tmp_path, monkeypatch):
     """The stable sandbox dirs persist across calls by design — root them under
-    tmp_path so tests don't leave engram-* dirs in the real temp dir."""
-    monkeypatch.setattr(agent.tempfile, "gettempdir", lambda: str(tmp_path))
+    tmp_path so tests don't touch the real ~/.claude/tool-engrams/sandboxes."""
+    monkeypatch.setattr(agent, "_sandbox_root", lambda: tmp_path)
 
 
 def _bash_line(cmd: str) -> str:
@@ -119,6 +119,49 @@ def test_sandbox_cwd_is_stable_per_session_and_role(monkeypatch):
     assert Path(cwds[0]).name == "engram-formation-sess-a"
     # The delta file is overwritten in place, not accumulated.
     assert (Path(cwds[0]) / "delta.txt").read_text() == "b"
+
+
+def test_sandbox_id_is_sanitized_against_traversal(tmp_path, monkeypatch):
+    """A hostile or malformed session id must not escape the sandbox root."""
+    cwds = []
+    monkeypatch.setattr(agent, "invoke_claude_agent",
+                        lambda message, **kw: (cwds.append(kw["cwd"]),
+                                               ClaudeResult(stdout='{"session_id": "w"}',
+                                                            returncode=0))[1])
+    monkeypatch.setattr(agent, "CLAUDE_BIN", "/usr/bin/claude")
+
+    r = agent.run_watcher_session("formation", "p", resume=None,
+                                  work_session_id="../../../etc/evil", delta="x")
+
+    assert r.ok
+    cwd = Path(cwds[0])
+    assert cwd.parent == tmp_path                  # still under the root
+    assert ".." not in cwd.name and "/" not in cwd.name
+
+
+def test_sandbox_created_user_only_and_symlink_rejected(tmp_path, monkeypatch):
+    """The sandbox holds transcript excerpts and the settings.local.json
+    permission boundary: 0700 on create, and a pre-existing symlink (squat /
+    swap) is refused rather than silently used."""
+    monkeypatch.setattr(agent, "invoke_claude_agent",
+                        lambda message, **kw: ClaudeResult(stdout='{"session_id": "w"}',
+                                                           returncode=0))
+    monkeypatch.setattr(agent, "CLAUDE_BIN", "/usr/bin/claude")
+
+    r = agent.run_watcher_session("formation", "p", resume=None,
+                                  work_session_id="sess-perm", delta="x")
+    assert r.ok
+    mode = (tmp_path / "engram-formation-sess-perm").stat().st_mode & 0o777
+    assert mode == 0o700
+
+    victim = tmp_path / "victim"
+    victim.mkdir()
+    (tmp_path / "engram-eval-sess-link").symlink_to(victim)
+    r = agent.run_watcher_session("eval", "p", resume="sid",
+                                  work_session_id="sess-link", delta="x")
+    assert r.ok is False
+    assert "not a directory we own" in (r.error or "")
+    assert r.watcher_session_id == "sid"           # resume id preserved
 
 
 def test_tick_routes_activity_through_delta_not_inline(temp_db, tmp_path, monkeypatch):

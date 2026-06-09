@@ -23,6 +23,15 @@ def slugify_cwd(cwd: str) -> str:
     return cwd.replace("/", "-")
 
 
+def safe_filename_id(name: str) -> str:
+    """Sanitize an externally-supplied id (e.g. a hook's session_id) for use as
+    a filename component: alnum / `-` / `_` pass through, anything else becomes
+    `_`, capped at 120 chars. Real session ids are UUIDs and pass unchanged;
+    this exists so a hostile or malformed id can't traverse out of the dir it
+    names (lock files, sandbox cwds)."""
+    return "".join(c if c.isalnum() or c in "-_" else "_" for c in name)[:120]
+
+
 def unslugify_candidates(slug: str) -> list[Path]:
     """Enumerate candidate paths that could have produced this Claude Code slug.
 
