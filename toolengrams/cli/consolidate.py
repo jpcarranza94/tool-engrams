@@ -20,10 +20,13 @@ from ..consolidation.agent import run_consolidation_agent
 from ..consolidation.collect import collect_sessions
 from ..consolidation.schedule import install_schedule, uninstall_schedule
 from ..retrieval import session_state
+from ..watcher import runs_store
 
 
 # Session surfaces older than this are cleaned up.
 SURFACES_TTL_DAYS = 30
+# Watcher run-log rows (monitor history) older than this are cleaned up.
+WATCHER_RUNS_TTL_DAYS = 14
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -56,9 +59,12 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps({"status": "no_sessions", "run_date": target.isoformat()}))
             return 0
 
-        # Housekeeping: clean old session_surfaces.
-        cutoff = int(time.time()) - (SURFACES_TTL_DAYS * 86400)
-        cleaned = session_state.prune_surfaces_before(conn, cutoff)
+        # Housekeeping: clean old session_surfaces + watcher run-log rows.
+        now_ts = int(time.time())
+        cleaned = session_state.prune_surfaces_before(
+            conn, now_ts - SURFACES_TTL_DAYS * 86400)
+        runs_cleaned = runs_store.prune_runs_before(
+            conn, now_ts - WATCHER_RUNS_TTL_DAYS * 86400)
 
         if args.dry_run:
             print(json.dumps({
@@ -66,6 +72,7 @@ def main(argv: list[str] | None = None) -> int:
                 "run_date": target.isoformat(),
                 "sessions_found": len(sessions),
                 "surfaces_would_clean": cleaned,
+                "watcher_runs_would_clean": runs_cleaned,
             }))
             return 0
 

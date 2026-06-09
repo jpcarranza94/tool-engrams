@@ -64,6 +64,7 @@ class SessionResult:
 
     ok: bool
     watcher_session_id: str | None
+    error: str | None = None
 
 
 def _watcher_model() -> str:
@@ -81,20 +82,24 @@ def _watcher_timeout() -> int:
     return val if val > 0 else DEFAULT_WATCHER_TIMEOUT
 
 
-def run_watcher_session(role: str, message: str, resume: str | None) -> SessionResult:
+def run_watcher_session(role: str, message: str, resume: str | None,
+                        run_id: int | None = None) -> SessionResult:
     """Run one permissioned `claude -p` turn for `role`, resuming `resume` if set.
 
     Builds a throwaway sandbox cwd granting the role's allowlist, sets ENGRAM_DB
-    + ENGRAM_IN_WATCHER in the env, and shells out via the shared seam. Returns
-    `ok=False` (held window) on any process failure. The side effects happen
-    in-band via the model's `engram` calls — there is nothing to parse here.
+    + ENGRAM_IN_WATCHER (and ENGRAM_RUN_ID, when given, so the model's `engram`
+    CLI calls record run events) in the env, and shells out via the shared seam.
+    Returns `ok=False` (held window) on any process failure. The side effects
+    happen in-band via the model's `engram` calls — there is nothing to parse.
     """
     if not CLAUDE_BIN:
-        return SessionResult(ok=False, watcher_session_id=resume)
+        return SessionResult(ok=False, watcher_session_id=resume,
+                             error="claude CLI not found")
 
     allow = ROLE_ALLOWLIST.get(role)
     if allow is None:
-        return SessionResult(ok=False, watcher_session_id=resume)
+        return SessionResult(ok=False, watcher_session_id=resume,
+                             error=f"unknown role {role!r}")
 
     work_dir = tempfile.mkdtemp(prefix=_WORKDIR_PREFIX[role])
     try:
@@ -102,6 +107,8 @@ def run_watcher_session(role: str, message: str, resume: str | None) -> SessionR
         env = os.environ.copy()
         env[WATCHER_CHILD_ENV] = "1"
         env["ENGRAM_DB"] = str(db.db_path())
+        if run_id is not None:
+            env["ENGRAM_RUN_ID"] = str(run_id)
         result = invoke_claude_agent(
             message,
             timeout=_watcher_timeout(),
@@ -115,7 +122,8 @@ def run_watcher_session(role: str, message: str, resume: str | None) -> SessionR
         shutil.rmtree(work_dir, ignore_errors=True)
 
     if result.error or result.returncode != 0:
-        return SessionResult(ok=False, watcher_session_id=resume)
+        return SessionResult(ok=False, watcher_session_id=resume,
+                             error=result.error or f"exit {result.returncode}")
     # Reuse the existing session for the next --resume. We extract the id from the
     # JSON envelope (always present) rather than pinning a caller --session-id:
     # extraction is the proven path and composes with the permissioned session.

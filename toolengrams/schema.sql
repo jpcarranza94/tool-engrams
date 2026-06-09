@@ -115,6 +115,48 @@ CREATE TABLE IF NOT EXISTS watcher_state (
     PRIMARY KEY (work_session_id, role)
 );
 
+-- Live-monitor run log: one row per model-calling tick, read back by
+-- `engram monitor`. Ticks that gate out write nothing.
+CREATE TABLE IF NOT EXISTS watcher_runs (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    work_session_id  TEXT NOT NULL,
+    role             TEXT NOT NULL CHECK (role IN ('formation','eval')),
+    status           TEXT NOT NULL CHECK (status IN ('running','ok','error','crashed'))
+                       DEFAULT 'running',
+    pid              INTEGER,
+    started_ts       INTEGER NOT NULL,
+    ended_ts         INTEGER,
+    model            TEXT,
+    flush            INTEGER NOT NULL DEFAULT 0,
+    cursor_from      INTEGER,
+    cursor_to        INTEGER,
+    delta_chars      INTEGER,
+    cwd              TEXT,
+    error            TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_watcher_runs_recent
+    ON watcher_runs(started_ts DESC);
+CREATE INDEX IF NOT EXISTS idx_watcher_runs_session
+    ON watcher_runs(work_session_id, role, status);
+
+-- One row per memory a run created/judged (via the engram CLI, tied by
+-- $ENGRAM_RUN_ID) — the decision stream.
+CREATE TABLE IF NOT EXISTS watcher_run_events (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id       INTEGER NOT NULL REFERENCES watcher_runs(id) ON DELETE CASCADE,
+    ts           INTEGER NOT NULL,
+    kind         TEXT NOT NULL CHECK (kind IN ('created','judged')),
+    memory_id    INTEGER,
+    memory_name  TEXT,
+    outcome      TEXT CHECK (outcome IN ('helpful','unused','noise') OR outcome IS NULL)
+);
+
+CREATE INDEX IF NOT EXISTS idx_watcher_run_events_run
+    ON watcher_run_events(run_id);
+CREATE INDEX IF NOT EXISTS idx_watcher_run_events_ts
+    ON watcher_run_events(ts DESC);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
     name, description, body,
     content='memories',

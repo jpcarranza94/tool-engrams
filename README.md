@@ -237,7 +237,7 @@ toolengrams/
 
 Each table has exactly one persistence seam: `memories`/`triggers`/`memories_fts` → `memory_store.py`; `session_surfaces`/`session_turns` → `retrieval/session_state.py`; `consolidation_runs` → `consolidation/runs.py`; `watcher_state` → `watcher/state.py`.
 
-The hot path (hooks) has **no external dependencies** — stdlib + sqlite3 only. LLMs run only in the watcher ticks and the consolidation agent, all out-of-band from the tool-call path.
+The hot path (hooks) has **no external dependencies** — stdlib + sqlite3 only. The one runtime dependency, `rich`, is used solely by the `engram monitor` dashboard and is imported lazily there, so hooks never load it. LLMs run only in the watcher ticks and the consolidation agent, all out-of-band from the tool-call path.
 
 ## Install
 
@@ -262,7 +262,7 @@ The installer:
 
 ### Requirements
 
-- Python 3.10+ (stdlib + sqlite3, no deps on the hot path)
+- Python 3.10+ (hot path is stdlib + sqlite3; `rich` is the only runtime dep, used by the dashboard)
 - Claude Code ≥ 2.1.117 (needs the `PostToolUseFailure` hook event)
 
 ## CLI
@@ -288,7 +288,8 @@ engram mark-noise "<name>"        Retroactively mark surfaces 'noise'
 engram verify "<name>"            Mark a memory's body still accurate (staleness audit)
 engram status                     Memory health JSON
 engram dashboard                  HTML dashboard in browser
-engram monitor                    Watcher process health + recent activity
+engram monitor                    Live watcher dashboard (active runs / 24h / decision stream)
+                                    --json for a one-shot snapshot (auto when piped)
 engram consolidate                Run the nightly agent now
 engram seed                       Insert example memories for smoke-testing
 engram rebuild-triggers           Re-extract triggers from bodies (post-migration repair)
