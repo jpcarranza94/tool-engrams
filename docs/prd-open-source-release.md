@@ -57,9 +57,11 @@ that greps skill docs for flags and asserts they exist in the parser (cheap drif
 ### 1.2 Kill switch **[UX — trust grade D+ driver]**
 No way to stop the system short of hand-editing `~/.claude/settings.json`. A tool that
 auto-denies tool calls and spawns paid `claude -p` processes needs a one-command off.
-**Do:** honor `ENGRAM_DISABLED=1` at the top of every hook entry point and
-`watcher/tick.py` (fail-open exit); add `engram pause` / `engram resume` (a flag file
-next to the DB) checked in the same places. Document on the README's first screen.
+**Do:** `engram pause` / `engram resume` toggle a flag file next to the DB — the
+primary mechanism, checked at the top of every hook entry point and `watcher/tick.py`
+(fail-open exit). `ENGRAM_DISABLED=1` is honored in the same check as a scripting/CI
+override; precedence: env var beats flag file. `engram doctor` reports both. Document
+on the README's first screen.
 **Accept:** `engram pause` → no surfacing, no ticks, no spend; `engram resume` restores.
 
 ### 1.3 Fresh-machine installer **[OSS — blockers 1–3]**
@@ -67,6 +69,8 @@ next to the DB) checked in the same places. Document on the README's first scree
 - No PEP 668 handling → Homebrew/Debian Python rejects bare `pip install -e`, and
   `2>&1 | tail -1` under `set -e` swallows the real error. Fall back to
   `--user` / venv / pipx with a clear message.
+- The `uv pip install --system` branch (tried before pip) has its own managed-Python
+  failure modes — same treatment: clear error, documented fallback.
 - `engram status >/dev/null 2>&1` dies silently (exit 127, output swallowed) when
   `engram` is not on PATH after a `--user` install.
 - No version checks: enforce Python ≥ 3.10 and `claude` ≥ 2.1.117 up front with
@@ -78,26 +82,43 @@ actionable error.
 ### 1.4 De-employer the repo **[OSS — blocker 4]**
 `jenkins.ergeon.in` (`retrieval/extract.py:89-90`, `tests/test_extract_compound_expansion.py`),
 `jira.ergeon.in` (`tests/test_trigger_validation.py`), `ergeon` examples
-(README, `tests/test_pretool.py`, `tests/test_rank.py`, `migrations/v6.sql`,
-`tests/test_hooks_skip.py`), `/Users/jpcar` literals (~8 test files,
+(README, `retrieval/rank.py:73` docstring, `tests/test_pretool.py`, `tests/test_rank.py`,
+`migrations/v6.sql`, `tests/test_hooks_skip.py`), `/Users/jpcar` literals (3 test files:
+`test_collect_sessions.py`, `test_hooks_skip.py`, `test_session_start.py`, plus
 `toolengrams/utils.py` + `cli/resolve_slug.py` docstrings). Replace with generic
 equivalents (`jenkins.example.com`, `mycli`, `/Users/dev`).
-**Accept:** `git grep -iE 'ergeon|jpcar'` returns nothing.
+**Accept:** `git grep -iE 'ergeon|/Users/jpcar' -- ':!docs/prd-open-source-release.md'`
+returns nothing. (`jpcarranza94` is the repo handle and stays — clone URLs and the
+plugin marketplace command legitimately contain it; this PRD's own receipts are
+excluded from the gate.)
 
 ### 1.5 True up the docs **[OSS — blocker 5]**
-`CLAUDE.md`: 133 tests → drop the count, opus → sonnet, 120s → 300s. README: drop the
-"~420 tests" number. Delete `TODO-open-source.md` (this PRD supersedes it). Remove the
-stray empty `hooks/` dir at repo root.
-**Accept:** no stale numbers; CI-able doc drift kept to zero counts.
+`CLAUDE.md`: "133 unit tests" → drop the count (the model/timeout defaults were
+already trued up by PR #34). README: drop the "~420 tests" number. Delete
+`TODO-open-source.md` (done in this PRD's own PR).
+**Accept:** no test-count literals anywhere; doc numbers that can drift are removed,
+not refreshed.
 
 ### 1.6 Cost & privacy section in README **[UX + OSS]**
 The biggest undisclosed surprise. State: what runs in the background (one sonnet
-`claude -p` per coalesced Stop event per role), measured spend (~$1/day moderate use;
-eval ≈ 5× formation per call), the levers (`ENGRAM_WATCHER_MODEL=haiku`, per-role
+`claude -p` per coalesced Stop event per role), spend (~$1/day moderate use —
+preliminary, one day of mixed-model data; see open question 4; eval ≈ 5× formation
+per call), the levers (`ENGRAM_WATCHER_MODEL=haiku`, per-role
 overrides, `engram pause`), live visibility (`engram monitor`), what is stored where
 (transcript deltas in sandbox cwds, excerpts in the DB, 7-day residue TTL), and the
 secrets gate.
 **Accept:** a reader knows the daily cost and the data flows before installing.
+
+### 1.7 Threat-model paragraph **[review of this PRD]**
+The system injects memory bodies into Claude's context at PreToolUse and can DENY
+tool calls; memories form autonomously from transcripts via a background LLM. That
+makes poisoned / prompt-injecting memory content a real attack surface for a public
+release. **Do:** a short SECURITY section in the README covering: memory bodies are
+untrusted input to future sessions (the `block` deny text especially); the watcher's
+per-role `claude -p` command allowlist (`Bash(engram remember *)` / `Bash(engram
+judge *)`) as the containment boundary; the secrets gate; and how to audit what
+formed (`engram recall`, `engram monitor` decision stream).
+**Accept:** SECURITY section exists; the allowlist boundary is documented.
 
 ---
 
@@ -128,17 +149,33 @@ stamp-compare `pyproject.toml` against a copy in `${CLAUDE_PLUGIN_DATA}`; on mis
 `python3 -m venv ${CLAUDE_PLUGIN_DATA}/venv && pip install ${CLAUDE_PLUGIN_ROOT}`.
 All hook commands invoke `${CLAUDE_PLUGIN_DATA}/venv/bin/engram …`.
 
+The first-run install takes tens of seconds and a SessionStart hook has a single-digit
+timeout budget — the bootstrap must NOT run inline. The stamp check stays in-hook
+(one diff, ms); on mismatch it spawns the venv build **detached** (the
+`spawn_tick` pattern), sets a `statusMessage`, and exits 0. Hooks fail open while the
+venv is absent (memory system dark for that first session, live from the next one);
+`engram doctor` and the SessionStart context both surface "bootstrap in progress".
+
 ### 2.3 DB location
 `${CLAUDE_PLUGIN_DATA}/db.sqlite` (`~/.claude/plugins/data/tool-engrams/`) — survives
-plugin updates, removed on uninstall (with prompt). `$ENGRAM_DB` already makes this a
-one-line change; keep `~/.claude/tool-engrams/` for the legacy install path and
-document a migration note (`mv` the DB or set `$ENGRAM_DB`).
+plugin updates, removed on uninstall (with prompt). Source: the official plugin
+reference (code.claude.com/docs/en/plugins-reference.md) documents
+`${CLAUDE_PLUGIN_DATA}` and its persistence/uninstall semantics — **verify against
+live docs at Phase 2 start before building on it**, since both 2.2 and 2.3 hinge on
+it. `$ENGRAM_DB` already makes this a one-line change; keep `~/.claude/tool-engrams/`
+for the legacy install path and document a migration note (`mv` the DB or set
+`$ENGRAM_DB`).
 
 ### 2.4 What NOT to copy from caveman
 Its installer *also* copies hooks into `~/.claude/hooks/` and edits settings.json with
 absolute paths — a legacy cross-agent artifact that double-fires hooks. Plugin path and
 `install.sh` path must be mutually exclusive and documented as such (install.sh gains
 a check: if the plugin is installed, refuse).
+
+Migration for existing `install.sh` users goes the other way too: an
+`install.sh --uninstall` (or `engram doctor --fix`) that removes the 8 settings.json
+hook entries (marker-based, like the install) and the skill symlinks, so switching to
+the plugin is: uninstall script → install plugin → point `$ENGRAM_DB` (or `mv` the DB).
 
 ### 2.5 Record the decision
 Write `docs/adr/0004-plugin-packaging.md` when implemented (DB under
@@ -172,7 +209,8 @@ refuses to double-install.
 
 CONTRIBUTING.md (20 lines), GitHub Actions CI (pytest on push) + badges, issue
 templates, `CHANGELOG.md` + `v0.1.0` tag, `py.typed`, author contact in
-`pyproject.toml`, `.gitignore` additions (`*.log`, `.coverage`, `.idea/`, `.vscode/`).
+`pyproject.toml`, `.gitignore` additions (`*.log`, `.coverage`, `.idea/`, `.vscode/`,
+`.eggs/`, `*.egg`, `htmlcov/`).
 
 ---
 
@@ -193,5 +231,7 @@ templates, `CHANGELOG.md` + `v0.1.0` tag, `py.typed`, author contact in
    from day one? Leaning: explicit `0.1.0` at announcement, unset until then.
 3. Does the marketplace listing need `defaultEnabled: false` given the system spends
    money once enabled? Leaning yes + first-run cost notice via SessionStart context.
-4. Measured-spend numbers for the README: collect a full week of `engram monitor`
-   data on sonnet before publishing the cost table?
+4. The 1.6 "~$1/day" figure is one day of mixed opus/sonnet data — preliminary.
+   Collect a week of sonnet-only `engram monitor` data before the README cost table
+   is presented as measured fact (gate on this only for the announcement, not the
+   repo going public).
