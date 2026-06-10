@@ -35,19 +35,20 @@ settings = json.loads(settings_path.read_text())
 hooks = settings.get("hooks", {})
 removed = 0
 for event in list(hooks):
-    kept = []
+    kept_entries = []
     for entry in hooks[event]:
-        cmds = [h.get("command", "") for h in entry.get("hooks", [])]
+        entry_hooks = entry.get("hooks", [])
         # Marker: the same "engram <subcommand>" commands install.sh writes.
-        # Drops the WHOLE entry when any command matches — a hand-merged entry
-        # mixing engram with another tool's hook loses both (install.sh never
-        # writes such entries; only hand edits can create them).
-        if any(c.startswith("engram ") for c in cmds):
-            removed += 1
-        else:
-            kept.append(entry)
-    if kept:
-        hooks[event] = kept
+        # Filter at the individual-hook level so a hand-merged entry mixing
+        # engram with another tool's hook keeps the other tool's hooks.
+        kept_hooks = [h for h in entry_hooks
+                      if not h.get("command", "").startswith("engram ")]
+        removed += len(entry_hooks) - len(kept_hooks)
+        if kept_hooks:
+            entry["hooks"] = kept_hooks
+            kept_entries.append(entry)
+    if kept_entries:
+        hooks[event] = kept_entries
     else:
         hooks.pop(event, None)
 perms = settings.get("permissions", {}).get("allow", [])
@@ -346,16 +347,16 @@ for skill in engram-remember engram-forget engram-recall; do
 done
 echo ""
 
-# 4. Initialize DB.
-echo "4. Initializing database..."
+# 4. Initialize DB + verify the wiring end-to-end. Opening the DB runs the
+#    migrations; doctor then re-checks everything steps 0-3 set up.
+echo "4. Initializing database + verifying wiring..."
 mkdir -p "$DB_DIR"
-if ! engram status >/dev/null; then
-    echo "ERROR: 'engram status' failed — database initialization did not complete."
-    echo "  See the error above; fix it and re-run this script."
+if ! engram doctor; then
+    echo ""
+    echo "ERROR: 'engram doctor' reported failures above — fix them and re-run this script."
     exit 1
 fi
 echo "  Database ready at $DB_DIR/db.sqlite"
-echo "  (Run 'engram seed' if you want example memories to explore)"
 echo ""
 
 # 5. Optional: install nightly consolidation schedule.
@@ -382,14 +383,20 @@ case "$OS" in
         OS="unsupported"
         ;;
 esac
+# Prompt only on a tty: under `set -e` a non-interactive `read` dies on EOF,
+# killing headless installs at the final step.
 if [ "$OS" != "unsupported" ]; then
-    read -p "   Install the 8 AM daily schedule? [y/N] " -n 1 -r
-    echo ""
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        engram consolidate --install-schedule
-        echo "   Schedule installed."
+    if [ -t 0 ]; then
+        read -p "   Install the 8 AM daily schedule? [y/N] " -n 1 -r
+        echo ""
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            engram consolidate --install-schedule
+            echo "   Schedule installed."
+        else
+            echo "   Skipped. Run 'engram consolidate --install-schedule' later."
+        fi
     else
-        echo "   Skipped. Run 'engram consolidate --install-schedule' later."
+        echo "   Non-interactive install — skipped. Run 'engram consolidate --install-schedule' later."
     fi
 fi
 echo ""
@@ -398,11 +405,23 @@ echo ""
 echo "====================="
 echo "ToolEngrams installed!"
 echo ""
+echo "IMPORTANT: hooks load at session start — open a NEW Claude Code session."
+echo "Sessions already running will not pick them up."
+echo ""
+echo "Verify it's working (see README, 'Verify it's working'):"
+echo "  1. engram seed                       — plant demo memories"
+echo "  2. In a NEW session, ask Claude to run: ssh deploy@production"
+echo "  3. engram status                     — total_surfaces incremented"
+echo "  4. engram seed --remove              — clean up the demos"
+echo ""
 echo "Commands:"
+echo "  engram doctor          — wiring + liveness diagnostics"
 echo "  engram recall          — browse memories"
 echo "  engram dashboard       — visual overview (browser)"
-echo "  engram monitor         — resource usage"
+echo "  engram monitor         — watcher activity + per-run cost"
 echo "  engram status          — health summary"
 echo "  engram consolidate     — run nightly consolidation now"
 echo ""
-echo "Memories will form automatically as you use Claude Code."
+echo "Memories form automatically as you use Claude Code. The first day can be"
+echo "quiet — organic memories need real failure→recovery episodes. Watch the"
+echo "watcher's decisions live with 'engram monitor'."

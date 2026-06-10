@@ -6,6 +6,19 @@
 
 > **Off switch:** `engram pause` stops everything with one command — no surfacing, no background watchers, no spend. `engram resume` turns it back on (`ENGRAM_DISABLED=1` does the same per shell). This system runs background LLM sessions that cost real money — read [Cost, privacy & the off switch](#cost-privacy--the-off-switch) before installing.
 
+## Quickstart
+
+```bash
+git clone https://github.com/jpcarranza94/tool-engrams.git
+cd tool-engrams
+./install.sh        # wires hooks, initializes the DB, verifies with `engram doctor`
+engram seed         # plants demo memories for the smoke test
+```
+
+Then **open a new Claude Code session** — hooks load at session start, so an
+already-running session won't have them — and walk through
+[Verify it's working](#verify-its-working).
+
 ## The problem
 
 Claude Code is great at well-known CLIs. It's not great at:
@@ -291,8 +304,38 @@ The installer:
    - `PostToolUse` (turn counter + recovery tick)
    - `PostToolUseFailure` (hint surfacing + arms the watcher)
 3. Symlinks skills (`/engram-remember`, `/engram-forget`, `/engram-recall`)
-4. Initializes the SQLite DB at `~/.claude/tool-engrams/db.sqlite`
-5. Optionally schedules the nightly consolidation agent
+4. Initializes the SQLite DB at `~/.claude/tool-engrams/db.sqlite` and verifies
+   the whole wiring with `engram doctor`
+5. Optionally schedules the nightly consolidation agent (skipped automatically
+   on non-interactive installs)
+
+### Verify it's working
+
+Hooks load at session start — **open a new Claude Code session** after
+installing. The session you ran `./install.sh` from won't have them.
+
+```bash
+engram seed                        # 1. plant three demo hint memories
+export ENGRAM_SURFACE_NOTICE=1     # 2. optional: print a visible line when a memory fires
+```
+
+3. In the new session, ask Claude to run `ssh deploy@production`. The seeded
+   VPN hint is injected alongside the call — ask Claude what context it
+   received, or watch for the `ToolEngrams surfaced: …` line if you enabled
+   the notice.
+4. `engram status` — the surfaces count incremented.
+5. `engram doctor` — wiring + liveness diagnostics (hooks present, `engram` on
+   PATH, claude version, DB schema, when a hook last fired). Exit code 1 on
+   any failure, so it's scriptable.
+6. `engram seed --remove` — delete the demo memories again.
+
+Want to see the deny path? `engram seed --with-block` adds one `block` memory
+on `git push --force` (a call you won't trip by accident): Claude's forced
+push is denied and redirected to `--force-with-lease`.
+
+**Expect the first day to be quiet.** Organic memories form from real
+failure→recovery episodes, not from every turn. Watch formation decisions
+live with `engram monitor`.
 
 ### Requirements
 
@@ -322,12 +365,17 @@ engram mark-noise "<name>"        Retroactively mark surfaces 'noise'
 engram verify "<name>"            Mark a memory's body still accurate (staleness audit)
 engram pause                      Kill switch: stop surfacing, ticks, and spend
 engram resume                     Turn the system back on
-engram status                     Memory health JSON (includes kill-switch state)
+engram status                     Memory health (human on a tty; JSON when piped
+                                    or with --json — pipe-safe for scripts)
+engram doctor                     Wiring + liveness diagnostics: hooks present,
+                                    PATH, claude version, DB, last hook fire.
+                                    Exit 1 on failure (--json available)
 engram dashboard                  HTML dashboard in browser
 engram monitor                    Live watcher dashboard (active runs / 24h / decision stream)
                                     --json for a one-shot snapshot (auto when piped)
 engram consolidate                Run the nightly agent now
-engram seed                       Insert example memories for smoke-testing
+engram seed [--with-block]        Insert example memories for smoke-testing
+engram seed --remove              Delete the seeded examples (exact names only)
 engram rebuild-triggers           Re-extract triggers from bodies (post-migration repair)
 ```
 
@@ -346,6 +394,7 @@ engram rebuild-triggers           Re-extract triggers from bodies (post-migratio
 |---|---|---|
 | `ENGRAM_DB` | `~/.claude/tool-engrams/db.sqlite` | SQLite DB path |
 | `ENGRAM_DISABLED` | unset | `1`/`true` disables the whole system (beats the `engram pause` flag file; `0`/`false` force-enables) |
+| `ENGRAM_SURFACE_NOTICE` | unset | `1`/`true` adds a visible `ToolEngrams surfaced: …` line to the transcript whenever a memory is injected — for the post-install smoke test and surfacing debugging |
 | `ENGRAM_WATCHER_MODEL` | `sonnet` | Model passed to `claude -p` for both watcher roles (e.g. `haiku` for a cheaper, faster watcher) |
 | `ENGRAM_FORMATION_MODEL` | unset | Model for the formation role only; beats `ENGRAM_WATCHER_MODEL` |
 | `ENGRAM_EVAL_MODEL` | unset | Model for the evaluation role only; beats `ENGRAM_WATCHER_MODEL` |

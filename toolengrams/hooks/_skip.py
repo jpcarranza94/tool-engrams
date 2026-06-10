@@ -43,6 +43,23 @@ def max_memories_per_call() -> int:
         return DEFAULT_MAX_MEMORIES_PER_CALL
     return max(1, min(n, MAX_MEMORIES_PER_CALL_CEILING))
 
+
+_NOTICE_TRUE = {"1", "true", "yes"}
+
+
+def surface_notice(names: list[str]) -> str | None:
+    """User-visible one-liner for the hook's systemMessage when memories
+    surface, gated by $ENGRAM_SURFACE_NOTICE. Off by default — injection is
+    deliberately invisible; this exists so the post-install smoke test (and
+    anyone debugging surfacing) can SEE a memory fire in the transcript."""
+    if os.environ.get("ENGRAM_SURFACE_NOTICE", "").strip().lower() not in _NOTICE_TRUE:
+        return None
+    if not names:
+        return None
+    listed = ", ".join(f"'{n}'" for n in names)
+    return f"ToolEngrams surfaced: {listed}"
+
+
 # Temp dir basenames that identify non-user (ToolEngrams-internal) sessions.
 # Match by prefix on the cwd basename.
 _INTERNAL_CWD_PREFIXES: tuple[str, ...] = (

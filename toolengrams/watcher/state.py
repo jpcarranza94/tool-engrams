@@ -151,6 +151,19 @@ def seconds_since_tick(session_id: str, role: str = "formation") -> int:
         return _NEVER
 
 
+def last_tick_ts_any() -> int:
+    """Most recent last_tick_ts across all (session, role) rows; 0 if none.
+    The doctor's watcher-liveness signal. Never raises."""
+    try:
+        with db.session() as conn:
+            row = conn.execute(
+                "SELECT MAX(last_tick_ts) AS ts FROM watcher_state"
+            ).fetchone()
+        return (row["ts"] if row else 0) or 0
+    except Exception:
+        return 0
+
+
 def sweep_idle(idle_sec: int, exclude_session_id: str = "",
                limit: int = DEFAULT_SWEEP_LIMIT) -> list[IdleSession]:
     """Tracked FORMATION sessions that ticked at least once, whose transcript

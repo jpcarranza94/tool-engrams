@@ -50,7 +50,7 @@ from ..retrieval.session_state import (
 )
 from ..utils import is_watcher_child, slugify_cwd
 from ..watcher import tick
-from ._skip import WHITELIST, max_memories_per_call
+from ._skip import WHITELIST, max_memories_per_call, surface_notice
 
 
 def main() -> int:
@@ -142,12 +142,16 @@ def _run(payload: dict[str, Any]) -> int:
                      first_token=first_token)
         memory_store.bump_surface(conn, memory_ids, now_ts)
 
-    _emit({
+    out: dict[str, Any] = {
         "hookSpecificOutput": {
             "hookEventName": "PostToolUseFailure",
             "additionalContext": format_injection(fresh),
         }
-    })
+    }
+    notice = surface_notice([c.name for c in fresh])
+    if notice:
+        out["systemMessage"] = notice
+    _emit(out)
     return 0
 
 

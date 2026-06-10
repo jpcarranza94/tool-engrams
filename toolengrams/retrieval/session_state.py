@@ -73,6 +73,16 @@ def get_session_turn(conn: sqlite3.Connection, session_id: str) -> int:
     return row["turn_count"] if row else 0
 
 
+def last_activity_ts(conn: sqlite3.Connection) -> int:
+    """Most recent session_turns.updated_ts across all sessions; 0 if none.
+    Every PostToolUse bumps a row, so this is "when did a hook last fire" —
+    the doctor's hook-liveness signal, with no extra writes."""
+    row = conn.execute(
+        "SELECT MAX(updated_ts) AS ts FROM session_turns"
+    ).fetchone()
+    return (row["ts"] if row else 0) or 0
+
+
 def increment_session_turn(
     conn: sqlite3.Connection,
     session_id: str,
