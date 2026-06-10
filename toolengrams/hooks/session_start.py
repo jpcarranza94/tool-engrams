@@ -27,9 +27,7 @@ Output:
 from __future__ import annotations
 
 import json
-import os
 import sys
-from pathlib import Path
 
 from .. import pause
 from ..prompts.session_start import FORMATION_GUIDANCE
@@ -56,7 +54,7 @@ def main() -> int:
         _emit({
             "hookSpecificOutput": {
                 "hookEventName": "SessionStart",
-                "additionalContext": FORMATION_GUIDANCE + _double_install_warning(),
+                "additionalContext": FORMATION_GUIDANCE,
             }
         })
         return 0
@@ -92,35 +90,6 @@ def _ensure_session_tracked(payload: dict) -> None:
     # residue in a detached process: dead watcher_state rows, stale sandbox
     # cwds, and the watcher sessions' own old transcripts.
     cleanup.maybe_spawn_cleanup()
-
-
-def _double_install_warning() -> str:
-    """Plugin + legacy script installs wire the same hooks — detect and warn.
-
-    Only the plugin shim sets ENGRAM_PLUGIN; legacy hooks in settings.json are
-    plain `engram <subcommand>` commands. Both present means every hook fires
-    twice. install.sh refuses in the other direction; this covers users who
-    installed the plugin without running `install.sh --uninstall` first.
-    """
-    if os.environ.get("ENGRAM_PLUGIN") != "1":
-        return ""
-    try:
-        settings_path = Path.home() / ".claude" / "settings.json"
-        settings = json.loads(settings_path.read_text())
-        for entries in (settings.get("hooks") or {}).values():
-            for entry in entries:
-                for hook in entry.get("hooks") or []:
-                    if str(hook.get("command", "")).startswith("engram "):
-                        return (
-                            "\n\n[ToolEngrams WARNING] Both the plugin AND the legacy "
-                            "script install are active — every hook fires twice. "
-                            "Fix: run ./install.sh --uninstall in the tool-engrams "
-                            "repo (keeps the DB), or remove the engram hook entries "
-                            "from ~/.claude/settings.json."
-                        )
-    except Exception:
-        pass  # advisory only — never block the hook
-    return ""
 
 
 def _emit(obj: dict) -> None:

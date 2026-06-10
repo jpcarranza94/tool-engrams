@@ -18,9 +18,9 @@ from toolengrams.cli import forget, recall, remember
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 SKILL_PARSERS = {
-    "remember": ("remember", remember._build_parser),
-    "recall": ("recall", recall._build_parser),
-    "forget": ("forget", forget._build_parser),
+    "engram-remember": ("remember", remember._build_parser),
+    "engram-recall": ("recall", recall._build_parser),
+    "engram-forget": ("forget", forget._build_parser),
 }
 
 _CODE_BLOCK = re.compile(r"```(?:bash|sh)?\n(.*?)```", re.DOTALL)
@@ -46,6 +46,18 @@ def _documented_flags(skill_md: str, subcommand: str) -> set[str]:
                 if token.startswith("--"):
                     flags.add(token)
     return flags
+
+
+@pytest.mark.parametrize("skill_name", sorted(SKILL_PARSERS))
+def test_skill_has_no_frontmatter_name(skill_name):
+    """Skill naming comes from the folder/symlink basename (documented in
+    CLAUDE.md); a frontmatter `name` would silently override it."""
+    skill_md = (REPO_ROOT / "skills" / skill_name / "SKILL.md").read_text()
+    frontmatter = skill_md.split("---")[1]
+    assert not re.search(r"^name:", frontmatter, re.M), (
+        f"skills/{skill_name}: remove the frontmatter `name` — the folder/"
+        "symlink basename is the skill name."
+    )
 
 
 @pytest.mark.parametrize("skill_name", sorted(SKILL_PARSERS))
