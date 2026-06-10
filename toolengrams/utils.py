@@ -24,9 +24,9 @@ def prepend_engram_bin(env: dict[str, str]) -> dict[str, str]:
 
     The watcher and consolidation agents grant their `claude -p` child an
     allowlist of `engram` verbs — the child shell must resolve `engram` by
-    name. Under the plugin install, engram lives only in a private venv, so
-    the global PATH doesn't have it; the venv's bin dir (next to
-    sys.executable, where console scripts land) does.
+    name. Under install.sh's venv fallback (PEP 668 machines), engram lives
+    in a private venv the global PATH may not have; the venv's bin dir (next
+    to sys.executable, where console scripts land) does.
     """
     bin_dir = str(Path(sys.executable).parent)
     path = env.get("PATH", "")

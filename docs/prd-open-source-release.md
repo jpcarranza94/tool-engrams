@@ -122,7 +122,7 @@ formed (`engram recall`, `engram monitor` decision stream).
 
 ---
 
-## Phase 2 — Plugin packaging **[PLG + CAV]**
+## Phase 2 — Plugin packaging **[PLG + CAV]** — *implemented in PR #37, then REJECTED; see `docs/adr/0004`. install.sh is the single install path; goal 2's "two slash commands" is superseded by investing in install.sh DX (Phase 3).*
 
 The plugin system supports everything we need: all 8 hook events, skills, agents.
 Target install UX:
