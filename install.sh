@@ -13,9 +13,71 @@ DB_DIR="$HOME/.claude/tool-engrams"
 MIN_PYTHON="3.10"
 MIN_CLAUDE="2.1.117"
 
+# --uninstall: remove what this script wired up (hooks, permission, skill
+# symlinks). The DB and the Python package stay — memories are user data.
+if [ "${1:-}" = "--uninstall" ]; then
+    echo "ToolEngrams uninstaller (script-install path)"
+    if [ -f "$SETTINGS" ]; then
+        python3 - "$SETTINGS" << 'PYEOF'
+import json
+import sys
+from pathlib import Path
+
+settings_path = Path(sys.argv[1])
+settings = json.loads(settings_path.read_text())
+hooks = settings.get("hooks", {})
+removed = 0
+for event in list(hooks):
+    kept = []
+    for entry in hooks[event]:
+        cmds = [h.get("command", "") for h in entry.get("hooks", [])]
+        # Marker: the same "engram <subcommand>" commands install.sh writes.
+        if any(c.startswith("engram ") for c in cmds):
+            removed += 1
+        else:
+            kept.append(entry)
+    if kept:
+        hooks[event] = kept
+    else:
+        hooks.pop(event, None)
+perms = settings.get("permissions", {}).get("allow", [])
+if "Bash(engram *)" in perms:
+    perms.remove("Bash(engram *)")
+    removed += 1
+settings_path.write_text(json.dumps(settings, indent=2) + "\n")
+print(f"  Removed {removed} engram entries from settings.json")
+PYEOF
+    fi
+    for link in engram-remember engram-forget engram-recall; do
+        [ -L "$SKILLS_DIR/$link" ] && rm "$SKILLS_DIR/$link" && echo "  Removed skill symlink $link"
+    done
+    command -v engram &>/dev/null && engram consolidate --uninstall-schedule >/dev/null 2>&1 || true
+    echo "  Done. Kept: the DB at $DB_DIR and the Python package"
+    echo "  (pip uninstall toolengrams to remove it)."
+    echo "  To switch to the plugin: /plugin marketplace add jpcarranza94/tool-engrams"
+    echo "  then /plugin install tool-engrams@tool-engrams — the DB carries over as-is."
+    exit 0
+fi
+
 echo "ToolEngrams installer"
 echo "====================="
 echo ""
+
+# Mutual exclusivity: the plugin install wires the same 8 hooks via
+# plugin.json — running both double-fires every hook.
+if [ -f "$SETTINGS" ] && python3 -c '
+import json, sys
+from pathlib import Path
+s = json.loads(Path(sys.argv[1]).read_text())
+enabled = s.get("enabledPlugins") or {}
+sys.exit(0 if any(k.split("@")[0] == "tool-engrams" and v for k, v in enabled.items()) else 1)
+' "$SETTINGS" 2>/dev/null; then
+    echo "ERROR: the tool-engrams Claude Code plugin is already installed and enabled."
+    echo "  Running install.sh too would register every hook twice."
+    echo "  Either keep the plugin (recommended) or remove it first:"
+    echo "  /plugin uninstall tool-engrams"
+    exit 1
+fi
 
 # 0. Preflight: required tool versions, with actionable errors.
 echo "0. Checking prerequisites..."
@@ -271,17 +333,25 @@ print("  Settings saved")
 PYEOF
 echo ""
 
-# 3. Symlink skills.
+# 3. Symlink skills. Folder names are short (remember/recall/forget) for the
+#    plugin's namespacing; the legacy link names keep the engram- prefix so the
+#    un-namespaced skills can't collide with built-ins like /remember.
 echo "3. Symlinking skills..."
 mkdir -p "$SKILLS_DIR"
-for skill in engram-remember engram-forget engram-recall; do
-    target="$REPO_DIR/skills/$skill"
-    link="$SKILLS_DIR/$skill"
-    if [ -L "$link" ] || [ -d "$link" ]; then
-        echo "  $skill already linked"
+for pair in "engram-remember:remember" "engram-forget:forget" "engram-recall:recall"; do
+    link_name="${pair%%:*}"
+    folder="${pair##*:}"
+    target="$REPO_DIR/skills/$folder"
+    link="$SKILLS_DIR/$link_name"
+    # Re-point an existing symlink (it may reference the pre-rename folder).
+    if [ -L "$link" ]; then
+        ln -sfn "$target" "$link"
+        echo "  $link_name re-linked"
+    elif [ -d "$link" ]; then
+        echo "  $link_name exists as a real directory — left untouched"
     else
-        ln -sf "$target" "$link"
-        echo "  Linked $skill"
+        ln -s "$target" "$link"
+        echo "  Linked $link_name"
     fi
 done
 echo ""

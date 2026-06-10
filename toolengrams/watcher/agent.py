@@ -32,7 +32,7 @@ from pathlib import Path
 
 from .. import db
 from ..claude_invoke import invoke_claude_agent, write_agent_settings
-from ..utils import WATCHER_CHILD_ENV, safe_filename_id
+from ..utils import WATCHER_CHILD_ENV, prepend_engram_bin, safe_filename_id
 
 CLAUDE_BIN = shutil.which("claude")
 
@@ -179,7 +179,7 @@ def run_watcher_session(role: str, message: str, resume: str | None,
         # Grant read access to exactly that file alongside the role's one verb.
         # `allow + [...]` builds a NEW list — never mutate the module ROLE_ALLOWLIST.
         write_agent_settings(Path(work_dir), allow + [f"Read({delta_path})"])
-        env = os.environ.copy()
+        env = prepend_engram_bin(os.environ.copy())
         env[WATCHER_CHILD_ENV] = "1"
         env["ENGRAM_DB"] = str(db.db_path())
         if run_id is not None:

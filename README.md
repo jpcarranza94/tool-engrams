@@ -272,11 +272,41 @@ ToolEngrams injects stored text into Claude's context and can deny tool calls �
 
 ## Install
 
+### Plugin (recommended)
+
+```
+/plugin marketplace add jpcarranza94/tool-engrams
+/plugin install tool-engrams@tool-engrams
+```
+
+The plugin installs **disabled** (it spends money once running) — enable it in
+`/plugin`. The first session after enabling bootstraps a private Python venv in
+the background (`~/.claude/plugins/data/tool-engrams*/`); the memory system is
+dark for that one session and live from the next. `engram` is linked into
+`~/.local/bin` so skills and your shell can call it — make sure that's on PATH
+(it is by default on Ubuntu; on macOS add `export PATH="$HOME/.local/bin:$PATH"`
+if needed).
+
+Skills are namespaced: `/tool-engrams:remember`, `/tool-engrams:recall`,
+`/tool-engrams:forget`. `/plugin uninstall tool-engrams` removes hooks and the
+venv but **keeps your memories** — the DB lives at `~/.claude/tool-engrams/`,
+not inside the plugin (see `docs/adr/0004`).
+
+Requires Python ≥ 3.10 with `venv` available (`apt install python3-venv` on
+Debian/Ubuntu).
+
+### Script (non-plugin fallback)
+
 ```bash
 git clone https://github.com/jpcarranza94/tool-engrams.git
 cd tool-engrams
 ./install.sh
 ```
+
+The two paths are mutually exclusive — `install.sh` refuses to run while the
+plugin is enabled (both would wire the same hooks twice). Migrating script →
+plugin: `./install.sh --uninstall`, then install the plugin; the DB carries
+over untouched.
 
 The installer:
 
@@ -287,7 +317,9 @@ The installer:
    - `PreToolUse` (block + hint surfacing)
    - `PostToolUse` (turn counter + recovery tick)
    - `PostToolUseFailure` (hint surfacing + arms the watcher)
-3. Symlinks skills (`/engram-remember`, `/engram-forget`, `/engram-recall`)
+3. Symlinks skills (`/engram-remember`, `/engram-forget`, `/engram-recall` — the
+   `engram-` prefix avoids colliding with built-ins; the plugin path uses
+   `/tool-engrams:remember` etc.)
 4. Initializes the SQLite DB at `~/.claude/tool-engrams/db.sqlite`
 5. Optionally schedules the nightly consolidation agent
 
@@ -383,10 +415,17 @@ pytest tests/e2e/ -m e2e        # E2E tests (spawns real `claude -p` sessions, o
 
 ## Uninstall
 
+Plugin install:
+
+```
+/plugin uninstall tool-engrams        # removes hooks + venv; keeps the DB
+rm -rf ~/.claude/tool-engrams/        # only if you also want the memories gone
+```
+
+Script install:
+
 ```bash
-# Remove hooks from ~/.claude/settings.json (manually or re-run install.sh flags)
-rm ~/.claude/skills/engram-{remember,forget,recall}
-engram consolidate --uninstall-schedule
-rm -rf ~/.claude/tool-engrams/
+./install.sh --uninstall              # removes hooks, permission, skill symlinks
+rm -rf ~/.claude/tool-engrams/        # only if you also want the memories gone
 pip uninstall toolengrams
 ```

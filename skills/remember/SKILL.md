@@ -1,5 +1,4 @@
 ---
-name: engram-remember
 description: "Save a tool-bound memory to ToolEngrams. Use ONLY for facts about how to use specific commands, CLIs, or files."
 ---
 

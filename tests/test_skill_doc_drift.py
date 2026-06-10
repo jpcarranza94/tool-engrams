@@ -18,9 +18,9 @@ from toolengrams.cli import forget, recall, remember
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 SKILL_PARSERS = {
-    "engram-remember": ("remember", remember._build_parser),
-    "engram-recall": ("recall", recall._build_parser),
-    "engram-forget": ("forget", forget._build_parser),
+    "remember": ("remember", remember._build_parser),
+    "recall": ("recall", recall._build_parser),
+    "forget": ("forget", forget._build_parser),
 }
 
 _CODE_BLOCK = re.compile(r"```(?:bash|sh)?\n(.*?)```", re.DOTALL)

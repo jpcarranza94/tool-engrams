@@ -1,5 +1,4 @@
 ---
-name: engram-recall
 description: "Browse and search ToolEngrams memories. Use when user asks 'what do you remember about X', 'show my memories', or you need to check what's stored."
 ---
 
