@@ -1,5 +1,4 @@
 ---
-name: engram-forget
 description: "Soft-demote or archive a ToolEngrams memory. Use when user says 'forget X', 'don't remember X', or a memory is no longer relevant."
 ---
 

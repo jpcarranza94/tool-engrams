@@ -20,6 +20,7 @@ from ..claude_invoke import invoke_claude_agent, parse_claude_json_output, write
 from ..prompts.consolidation import build_consolidation_prompt
 from ..retrieval import session_state
 from ..reinforcement.scoring import q
+from ..utils import prepend_engram_bin
 from .collect import SessionFile
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -153,7 +154,7 @@ def run_consolidation_agent(
     )
     prompt = build_consolidation_prompt(session_list, memory_summary, target_date)
 
-    env = os.environ.copy()
+    env = prepend_engram_bin(os.environ.copy())
     env["ENGRAM_DB"] = str(db_path)
 
     # invoke_claude_agent never raises — process failures come back on the result.
