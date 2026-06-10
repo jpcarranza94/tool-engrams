@@ -249,7 +249,7 @@ The hot path (hooks) has **no external dependencies** — stdlib + sqlite3 only.
 
 **The levers.**
 
-- `engram pause` / `engram resume` — the kill switch. Paused, every hook and watcher tick stands down: no surfacing, no ticks, no spend. `ENGRAM_DISABLED=1` does the same via env (it beats the flag file, so `ENGRAM_DISABLED=0` force-enables for scripts).
+- `engram pause` / `engram resume` — the kill switch. Paused, every hook, watcher tick, and the nightly consolidation stand down: no surfacing, no ticks, no spend. `ENGRAM_DISABLED=1` does the same via env (it beats the flag file, so `ENGRAM_DISABLED=0` force-enables for scripts). One caveat: pausing freezes the watcher's transcript cursor rather than discarding it — after `engram resume`, the next tick reads the delta that accumulated during the pause. If you paused to keep a sensitive session out of the store, keep it paused until that session is over, or audit with `engram recall` after resuming.
 - `ENGRAM_WATCHER_MODEL=haiku` — cheaper watcher; `ENGRAM_FORMATION_MODEL` / `ENGRAM_EVAL_MODEL` override per role.
 - `engram monitor` — live dashboard of watcher runs with per-run USD cost and the decision stream.
 

@@ -62,7 +62,7 @@ If neither `--trigger` nor `--path` is provided, triggers are auto-extracted fro
 ## Kinds
 
 - `--kind block` — enforced rules. **Denies the tool call** at PreToolUse and injects the memory body so Claude retries correctly. Rare; use for must-not-happen patterns.
-- `--kind hint` — informational (default). Injected as context at PostToolUseFailure when a matching tool call fails (no blocking).
+- `--kind hint` — informational (default). Injected as context alongside matching tool calls (PreToolUse) and again when a matching call fails (PostToolUseFailure). Never blocks.
 
 ## Dedup
 

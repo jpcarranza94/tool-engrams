@@ -56,6 +56,8 @@ def test_skill_flags_exist_in_parser(skill_name):
     documented = _documented_flags(skill_md, subcommand)
     assert documented, f"{skill_name}/SKILL.md documents no engram {subcommand} flags"
 
+    # _option_string_actions is argparse-private but stable; this guard checks
+    # flag NAMES only — a valid flag with a bad value still passes.
     known = set(build_parser()._option_string_actions)
     unknown = documented - known
     assert not unknown, (

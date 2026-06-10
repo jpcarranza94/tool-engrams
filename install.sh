@@ -24,7 +24,9 @@ if ! command -v python3 &>/dev/null; then
     echo "  macOS: brew install python3    Debian/Ubuntu: apt install python3 python3-pip"
     exit 1
 fi
-if ! python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)'; then
+if ! python3 -c 'import sys
+need = tuple(int(x) for x in sys.argv[1].split("."))
+sys.exit(0 if sys.version_info[:len(need)] >= need else 1)' "$MIN_PYTHON"; then
     echo "ERROR: Python >= $MIN_PYTHON required, found $(python3 --version 2>&1)."
     exit 1
 fi
@@ -65,16 +67,18 @@ if command -v uv &>/dev/null; then
     fi
 fi
 if [ "$install_ok" -eq 0 ]; then
-    if ! command -v pip3 &>/dev/null; then
-        echo "ERROR: pip3 not found. Install it first:"
+    # `python3 -m pip` (not a bare pip3 shim) so the install targets the same
+    # interpreter the version preflight just validated.
+    if ! python3 -m pip --version &>/dev/null; then
+        echo "ERROR: pip not available for $(command -v python3). Install it first:"
         echo "  macOS: python3 -m ensurepip --upgrade    Debian/Ubuntu: apt install python3-pip"
         exit 1
     fi
-    if pip3 install -e "$REPO_DIR"; then
+    if python3 -m pip install -e "$REPO_DIR"; then
         install_ok=1
     else
-        echo "  pip3 install failed (PEP 668 externally-managed environment?). Retrying with --user..."
-        if pip3 install --user -e "$REPO_DIR"; then
+        echo "  pip install failed (PEP 668 externally-managed environment?). Retrying with --user..."
+        if python3 -m pip install --user -e "$REPO_DIR"; then
             install_ok=1
         else
             echo ""
@@ -111,9 +115,13 @@ echo ""
 echo "2. Configuring Claude Code hooks..."
 mkdir -p "$(dirname "$SETTINGS")"
 
+# Back up only the FIRST time, so a re-run can't clobber the pre-engram
+# original with already-modified settings.
 if [ -f "$SETTINGS" ]; then
-    cp -p "$SETTINGS" "$SETTINGS.bak"
-    echo "  Backed up settings.json to settings.json.bak"
+    if [ ! -f "$SETTINGS.bak" ]; then
+        cp -p "$SETTINGS" "$SETTINGS.bak"
+        echo "  Backed up settings.json to settings.json.bak"
+    fi
 else
     echo '{}' > "$SETTINGS"
 fi

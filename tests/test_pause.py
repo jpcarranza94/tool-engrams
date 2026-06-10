@@ -7,6 +7,7 @@ import json
 import sys
 
 from toolengrams import pause
+from toolengrams.cli import consolidate, status
 from toolengrams.hooks import pretool
 from toolengrams.watcher import tick
 
@@ -80,6 +81,26 @@ def test_watcher_tick_short_circuits_when_paused(tmp_path, monkeypatch, capsys):
 
     # Paused: no usage error for missing args, no work — immediate 0.
     assert tick.main([]) == 0
+
+
+def test_status_reports_kill_switch(tmp_path, monkeypatch, capsys):
+    _use_tmp_db(tmp_path, monkeypatch)
+    pause.run_pause()
+    capsys.readouterr()
+
+    assert status.main([]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["kill_switch"]["disabled"] is True
+    assert out["kill_switch"]["pause_flag"] is True
+
+
+def test_consolidate_skipped_when_paused(tmp_path, monkeypatch, capsys):
+    _use_tmp_db(tmp_path, monkeypatch)
+    pause.run_pause()
+    capsys.readouterr()
+
+    assert consolidate.main([]) == 0
+    assert json.loads(capsys.readouterr().out) == {"action": "skipped", "reason": "paused"}
 
 
 def test_is_disabled_never_raises(tmp_path, monkeypatch):

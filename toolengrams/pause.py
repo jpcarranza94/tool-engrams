@@ -58,10 +58,9 @@ def run_resume() -> int:
     """CLI: `engram resume` — remove the flag file."""
     path = flag_path()
     existed = path.exists()
-    if existed:
-        path.unlink()
+    path.unlink(missing_ok=True)
     payload = {"action": "resumed", "flag": str(path), "was_paused": existed}
-    if os.environ.get("ENGRAM_DISABLED"):
+    if is_disabled():  # only a force-disabling env value can still hold it off
         payload["warning"] = ("ENGRAM_DISABLED is set in the environment and "
                               "overrides the flag file; unset it to fully resume.")
     print(json.dumps(payload))

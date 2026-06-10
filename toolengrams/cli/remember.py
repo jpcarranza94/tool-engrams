@@ -192,7 +192,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--kind", default=DEFAULT_KIND,
                         help=(f"block|hint (default {DEFAULT_KIND}). "
                               "block: PreToolUse denies + injects context. "
-                              "hint: PostToolUseFailure injects context on error."))
+                              "hint: injected as context alongside matching calls "
+                              "(PreToolUse) and on matching failures (non-blocking)."))
     parser.add_argument("--scope", default=DEFAULT_SCOPE,
                         help=f"global|project (default {DEFAULT_SCOPE})")
     parser.add_argument("--project-slug", default=None,

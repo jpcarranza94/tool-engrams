@@ -437,6 +437,7 @@ def main(argv: list[str] | None = None) -> int:
     # Kill switch: a paused system spawns no model work. Checked here too (not
     # just in the hooks) so an already-scheduled detached tick also stands down.
     if pause.is_disabled():
+        _log("TICK-PAUSED kill switch active; skipping")
         return 0
     argv = list(sys.argv[1:] if argv is None else argv)
     flush = "--flush" in argv
