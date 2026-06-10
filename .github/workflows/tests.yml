@@ -1,0 +1,67 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Floor (pyproject requires-python) + current.
+        python: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pip install -e ".[dev]"
+      # addopts in pyproject already excludes the e2e marker (spawns real
+      # `claude -p` sessions — no auth on runners, costs money).
+      - run: pytest -q
+
+  # Headless end-to-end of install.sh on a clean HOME: preflight, pip install,
+  # settings.json surgery, DB init + doctor, the tty-gated schedule prompt
+  # (stdin is /dev/null — this job pins the "read -p killed headless installs"
+  # fix behaviorally), then uninstall.
+  install-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Stub claude CLI (installer preflight requires >= 2.1.117)
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          printf '#!/bin/sh\necho "2.1.170 (Claude Code)"\n' > "$RUNNER_TEMP/bin/claude"
+          chmod +x "$RUNNER_TEMP/bin/claude"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: Headless install into a clean HOME
+        run: |
+          export HOME="$RUNNER_TEMP/home"
+          mkdir -p "$HOME"
+          bash install.sh < /dev/null
+      - name: Doctor passes after install
+        run: |
+          export HOME="$RUNNER_TEMP/home"
+          engram doctor
+      - name: Uninstall leaves settings clean
+        run: |
+          export HOME="$RUNNER_TEMP/home"
+          bash install.sh --uninstall
+          python3 -c "
+          import json, os
+          settings = json.load(open(os.path.expanduser('~/.claude/settings.json')))
+          leftovers = [h for entries in settings.get('hooks', {}).values()
+                       for e in entries for h in e.get('hooks', [])
+                       if h.get('command', '').startswith('engram ')]
+          assert not leftovers, leftovers
+          "

@@ -1,5 +1,7 @@
 # ToolEngrams
 
+[![tests](https://github.com/jpcarranza94/tool-engrams/actions/workflows/tests.yml/badge.svg)](https://github.com/jpcarranza94/tool-engrams/actions/workflows/tests.yml)
+
 **Tool-bound memory for Claude Code.** Agent-facing tools become self-documenting through interaction: Claude fails a call, the system remembers why, and next session (or next month) arrives with that knowledge in hand.
 
 > **Status:** alpha. Breaking changes expected; no stable users to protect. See `docs/design.md` for the design (and `docs/adr/` for the load-bearing decisions).
@@ -436,6 +438,9 @@ Variable interpolation uses `str.format` — the formation prompt expects `{cwd}
 pytest                          # Unit tests (fast — no network, no LLM)
 pytest tests/e2e/ -m e2e        # E2E tests (spawns real `claude -p` sessions, opt-in)
 ```
+
+CI (`.github/workflows/tests.yml`) runs the unit suite on Python 3.10 and
+3.13 plus a headless `install.sh` smoke test on every PR; e2e stays local.
 
 ## Uninstall
 
