@@ -19,15 +19,17 @@ installer (settings.json surgery, skill symlinks) natively.
 
 1. A stranger on a fresh macOS or Linux machine reaches a working install — and *sees
    a memory fire* — in under 5 minutes.
-2. Install UX is two slash commands via the plugin system; `install.sh` remains as the
-   non-plugin fallback.
+2. ~~Install UX is two slash commands via the plugin system; `install.sh` remains as the
+   non-plugin fallback.~~ *Superseded: the plugin packaging was built and rejected
+   (`docs/adr/0004`); `install.sh` is the single install path, with Phase 3 investing
+   in its DX.*
 3. The autonomy is governable: one command pauses everything; cost and privacy are
    documented before the first dollar is spent.
 4. The repo is presentable: no employer strings, no stale docs, no broken skills.
 
 ## Non-goals
 
-- PyPI distribution (editable/plugin install only for the alpha).
+- PyPI distribution (editable install only for the alpha).
 - Windows support.
 - Multi-user / team memory sharing.
 - Renaming the project or the core concepts (keep: engram, hint, block, trigger, pin).
@@ -200,8 +202,7 @@ refuses to double-install.
   "<name>")` to injected hints — answers "why did this appear" and "how do I push
   back" in one line.
 - **3.4 `engram doctor`:** hooks wired? `claude` on PATH and ≥ min version? DB
-  writable? watcher ran recently? plugin/script double-install? Prints one line per
-  check.
+  writable? watcher ran recently? Prints one line per check.
 
 ---
 
@@ -219,14 +220,14 @@ templates, `CHANGELOG.md` + `v0.1.0` tag, `py.typed`, author contact in
 | Phase | Effort | Gate |
 |---|---|---|
 | 1 — blockers | ~1 day | nothing publishes before this |
-| 2 — plugin | ~1 day | can ship after Phase 1 with install.sh only; plugin is the headline though |
+| 2 — plugin | ~1 day | built, then rejected — see `docs/adr/0004` |
 | 3 — DX polish | ~½ day | pre-announcement |
 | 4 — trust signals | ~½ day | pre-announcement, parallelizable with 3 |
 
 ## Open questions
 
-1. Plugin name: `tool-engrams` vs `engrams` (namespace prefix length affects every
-   skill invocation).
+1. ~~Plugin name: `tool-engrams` vs `engrams`.~~ *Moot — plugin rejected
+   (`docs/adr/0004`).*
 2. Keep `version` unset during alpha (every commit = update, caveman-style) or semver
    from day one? Leaning: explicit `0.1.0` at announcement, unset until then.
 3. Does the marketplace listing need `defaultEnabled: false` given the system spends

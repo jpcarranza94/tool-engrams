@@ -39,6 +39,9 @@ for event in list(hooks):
     for entry in hooks[event]:
         cmds = [h.get("command", "") for h in entry.get("hooks", [])]
         # Marker: the same "engram <subcommand>" commands install.sh writes.
+        # Drops the WHOLE entry when any command matches — a hand-merged entry
+        # mixing engram with another tool's hook loses both (install.sh never
+        # writes such entries; only hand edits can create them).
         if any(c.startswith("engram ") for c in cmds):
             removed += 1
         else:
@@ -59,8 +62,13 @@ PYEOF
         [ -L "$SKILLS_DIR/$link" ] && rm "$SKILLS_DIR/$link" && echo "  Removed skill symlink $link"
     done
     command -v engram &>/dev/null && engram consolidate --uninstall-schedule >/dev/null 2>&1 || true
-    echo "  Done. Kept: the DB at $DB_DIR (your memories) and the Python package"
-    echo "  (pip uninstall toolengrams to remove it)."
+    echo "  Done. Kept: the DB at $DB_DIR (your memories) and the Python package."
+    if [ -d "$HOME/.local/share/toolengrams/venv" ]; then
+        echo "  This was a venv-fallback install; to remove the package:"
+        echo "    rm -rf ~/.local/share/toolengrams/venv ~/.local/bin/engram"
+    else
+        echo "  (pip uninstall toolengrams to remove the package.)"
+    fi
     exit 0
 fi
 
@@ -333,7 +341,7 @@ for skill in engram-remember engram-forget engram-recall; do
         ln -sfn "$target" "$link"
         echo "  Linked $skill"
     else
-        echo "  $skill exists as a real directory — left untouched"
+        echo "  $skill exists as a real (non-symlink) path — left untouched"
     fi
 done
 echo ""

@@ -389,5 +389,6 @@ pytest tests/e2e/ -m e2e        # E2E tests (spawns real `claude -p` sessions, o
 ```bash
 ./install.sh --uninstall              # removes hooks, permission, skill symlinks
 rm -rf ~/.claude/tool-engrams/        # only if you also want the memories gone
-pip uninstall toolengrams
+pip uninstall toolengrams             # venv-fallback installs instead:
+                                      #   rm -rf ~/.local/share/toolengrams/venv ~/.local/bin/engram
 ```

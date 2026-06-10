@@ -49,6 +49,18 @@ def _documented_flags(skill_md: str, subcommand: str) -> set[str]:
 
 
 @pytest.mark.parametrize("skill_name", sorted(SKILL_PARSERS))
+def test_skill_has_no_frontmatter_name(skill_name):
+    """Skill naming comes from the folder/symlink basename (documented in
+    CLAUDE.md); a frontmatter `name` would silently override it."""
+    skill_md = (REPO_ROOT / "skills" / skill_name / "SKILL.md").read_text()
+    frontmatter = skill_md.split("---")[1]
+    assert not re.search(r"^name:", frontmatter, re.M), (
+        f"skills/{skill_name}: remove the frontmatter `name` — the folder/"
+        "symlink basename is the skill name."
+    )
+
+
+@pytest.mark.parametrize("skill_name", sorted(SKILL_PARSERS))
 def test_skill_flags_exist_in_parser(skill_name):
     subcommand, build_parser = SKILL_PARSERS[skill_name]
     skill_md = (REPO_ROOT / "skills" / skill_name / "SKILL.md").read_text()

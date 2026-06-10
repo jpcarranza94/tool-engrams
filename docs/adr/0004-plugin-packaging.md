@@ -35,8 +35,8 @@ What tipped it, with the implementation in hand rather than on paper:
    buried in plugin data, failures in a background log.
 5. **The author can't use it.** The plugin venv install is non-editable —
    every local change needs a stamp-busting rebuild — so the developer
-   install is `install.sh -e` regardless, leaving the plugin path
-   second-class and undertested in daily use.
+   install is install.sh's editable `pip install -e` regardless, leaving the
+   plugin path second-class and undertested in daily use.
 
 ## What survives from the Phase 2 work
 
