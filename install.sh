@@ -53,9 +53,11 @@ fi
 echo ""
 
 # 1. Install the Python package.
-#    Order: uv (if present) -> pip3 -> pip3 --user. Failures fall through with
-#    the real error visible — PEP 668 "externally-managed-environment" rejects
-#    are expected on Homebrew/Debian Python and the fallbacks handle them.
+#    Order: uv (if present) -> pip -> pip --user -> dedicated venv. PEP 668
+#    "externally-managed-environment" rejects pip AND --user on stock
+#    Debian/Ubuntu/Homebrew Python, so the venv fallback is the one that makes
+#    a stock machine actually work — engram gets symlinked into ~/.local/bin.
+VENV_DIR="$HOME/.local/share/toolengrams/venv"
 echo "1. Installing toolengrams package..."
 install_ok=0
 if command -v uv &>/dev/null; then
@@ -63,32 +65,47 @@ if command -v uv &>/dev/null; then
     if uv pip install --system -e "$REPO_DIR"; then
         install_ok=1
     else
-        echo "  uv install failed (common with uv-managed Pythons); falling back to pip3."
+        echo "  uv install failed (common with uv-managed Pythons); falling back to pip."
     fi
 fi
-if [ "$install_ok" -eq 0 ]; then
+if [ "$install_ok" -eq 0 ] && python3 -m pip --version &>/dev/null; then
     # `python3 -m pip` (not a bare pip3 shim) so the install targets the same
     # interpreter the version preflight just validated.
-    if ! python3 -m pip --version &>/dev/null; then
-        echo "ERROR: pip not available for $(command -v python3). Install it first:"
-        echo "  macOS: python3 -m ensurepip --upgrade    Debian/Ubuntu: apt install python3-pip"
-        exit 1
-    fi
     if python3 -m pip install -e "$REPO_DIR"; then
         install_ok=1
     else
         echo "  pip install failed (PEP 668 externally-managed environment?). Retrying with --user..."
         if python3 -m pip install --user -e "$REPO_DIR"; then
             install_ok=1
-        else
-            echo ""
-            echo "ERROR: could not install the package. On a PEP 668 managed Python, use one of:"
-            echo "  pipx:  pipx install -e $REPO_DIR"
-            echo "  venv:  python3 -m venv ~/.toolengrams-venv && ~/.toolengrams-venv/bin/pip install -e $REPO_DIR"
-            echo "         (then add ~/.toolengrams-venv/bin to PATH)"
-            exit 1
         fi
     fi
+fi
+if [ "$install_ok" -eq 0 ]; then
+    echo "  Falling back to a dedicated venv at $VENV_DIR..."
+    # --clear so a partial venv left by an earlier failed run can't poison this one.
+    if ! python3 -m venv --clear "$VENV_DIR"; then
+        echo ""
+        echo "ERROR: could not create a venv. On Debian/Ubuntu install it first:"
+        echo "  apt install python3-venv python3-pip"
+        echo "Then re-run this script. (Alternative: pipx install -e $REPO_DIR)"
+        exit 1
+    fi
+    if ! "$VENV_DIR/bin/pip" install -e "$REPO_DIR"; then
+        echo ""
+        echo "ERROR: venv pip install failed — see the error above."
+        echo "  (Alternative: pipx install -e $REPO_DIR)"
+        exit 1
+    fi
+    mkdir -p "$HOME/.local/bin"
+    ln -sf "$VENV_DIR/bin/engram" "$HOME/.local/bin/engram"
+    echo "  Installed into $VENV_DIR; linked engram -> ~/.local/bin/engram"
+    install_ok=1
+    # The hooks invoke plain `engram`, so ~/.local/bin must be on PATH (it is
+    # by default on Ubuntu login shells; the check below catches it if not).
+    case ":$PATH:" in
+        *":$HOME/.local/bin:"*) ;;
+        *) export PATH="$HOME/.local/bin:$PATH" ;;
+    esac
 fi
 
 # Rehash if using pyenv.
@@ -103,6 +120,9 @@ if ! command -v engram &>/dev/null; then
     if [ -x "$USER_BIN/engram" ]; then
         echo "  It was installed to $USER_BIN (a --user install)."
         echo "  Add it to PATH and re-run: export PATH=\"$USER_BIN:\$PATH\""
+    elif [ -x "$HOME/.local/bin/engram" ]; then
+        echo "  It is linked at ~/.local/bin/engram, but ~/.local/bin is not on PATH."
+        echo "  Add it to PATH and re-run: export PATH=\"\$HOME/.local/bin:\$PATH\""
     else
         echo "  Check the pip output above for where the 'engram' script was placed,"
         echo "  add that directory to PATH, and re-run this script."
