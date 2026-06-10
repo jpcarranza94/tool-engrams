@@ -30,12 +30,16 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
+    return _build_parser().parse_args(argv)
+
+
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="engram recall")
     parser.add_argument("query", nargs="?", default=None, help="FTS search query.")
     parser.add_argument("--limit", type=int, default=20, help="Max results (default 20).")
     parser.add_argument("--stats", action="store_true", help="Show summary counts.")
     parser.add_argument("--id", type=int, default=None, help="Show full detail for one memory.")
-    return parser.parse_args(argv)
+    return parser
 
 
 def _list_all(conn, limit: int) -> int:

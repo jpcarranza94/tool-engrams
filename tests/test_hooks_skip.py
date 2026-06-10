@@ -32,8 +32,8 @@ def test_skip_experiment_cwd():
 
 
 def test_do_not_skip_user_project_cwd():
-    assert not is_internal_cwd("/Users/jpcar/projects/srv-ergeon")
-    assert not is_internal_cwd("/Users/jpcar/personal-projects/tool-engrams")
+    assert not is_internal_cwd("/Users/dev/projects/my-django-app")
+    assert not is_internal_cwd("/Users/dev/projects/tool-engrams")
     assert not is_internal_cwd("/private/tmp/ssm-fix")
 
 
@@ -73,7 +73,7 @@ def test_session_start_tracks_real_user_cwd(monkeypatch):
     with patch.object(session_start.tick, "ensure_row") as mock, \
          patch.object(session_start.tick, "sweep_idle_sessions"):
         _run_session_start(
-            {"session_id": "s-real", "cwd": "/Users/jpcar/projects/my-app", "source": "startup"},
+            {"session_id": "s-real", "cwd": "/Users/dev/projects/my-app", "source": "startup"},
             monkeypatch,
         )
     mock.assert_called_once()
@@ -84,7 +84,7 @@ def test_session_start_skips_when_watcher_child(monkeypatch):
     monkeypatch.setenv("ENGRAM_IN_WATCHER", "1")
     with patch.object(session_start.tick, "ensure_row") as mock:
         _run_session_start(
-            {"session_id": "s-wc", "cwd": "/Users/jpcar/projects/my-app", "source": "startup"},
+            {"session_id": "s-wc", "cwd": "/Users/dev/projects/my-app", "source": "startup"},
             monkeypatch,
         )
     mock.assert_not_called()
@@ -104,7 +104,7 @@ def test_user_prompt_triggers_tick_on_correction(monkeypatch):
     with patch.object(user_prompt.tick, "ensure_row"), \
          patch.object(user_prompt.tick, "trigger") as trig:
         _run_user_prompt(
-            {"session_id": "s1", "cwd": "/Users/jpcar/projects/x",
+            {"session_id": "s1", "cwd": "/Users/dev/projects/x",
              "transcript_path": "/t.jsonl",
              "prompt": "no, use --force-with-lease instead"},
             monkeypatch,
@@ -116,7 +116,7 @@ def test_user_prompt_no_tick_on_normal_prompt(monkeypatch):
     with patch.object(user_prompt.tick, "ensure_row") as ens, \
          patch.object(user_prompt.tick, "trigger") as trig:
         _run_user_prompt(
-            {"session_id": "s1", "cwd": "/Users/jpcar/projects/x",
+            {"session_id": "s1", "cwd": "/Users/dev/projects/x",
              "transcript_path": "/t.jsonl",
              "prompt": "please add a feature to the dashboard"},
             monkeypatch,
@@ -142,7 +142,7 @@ def test_user_prompt_skips_when_watcher_child(monkeypatch):
     with patch.object(user_prompt.tick, "ensure_row") as ens, \
          patch.object(user_prompt.tick, "trigger") as trig:
         _run_user_prompt(
-            {"session_id": "s1", "cwd": "/Users/jpcar/projects/x",
+            {"session_id": "s1", "cwd": "/Users/dev/projects/x",
              "prompt": "no, that's wrong"},
             monkeypatch,
         )

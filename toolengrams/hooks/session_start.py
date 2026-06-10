@@ -29,6 +29,7 @@ from __future__ import annotations
 import json
 import sys
 
+from .. import pause
 from ..prompts.session_start import FORMATION_GUIDANCE
 from ..utils import is_watcher_child
 from ..watcher import cleanup, derive_transcript_path, tick
@@ -36,6 +37,9 @@ from ._skip import is_internal_cwd
 
 
 def main() -> int:
+    if pause.is_disabled():
+        _emit({})
+        return 0
     try:
         payload = json.loads(sys.stdin.read() or "{}")
     except json.JSONDecodeError:

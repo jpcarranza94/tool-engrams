@@ -4,6 +4,8 @@
 
 > **Status:** alpha. Breaking changes expected; no stable users to protect. See `docs/design.md` for the design (and `docs/adr/` for the load-bearing decisions).
 
+> **Off switch:** `engram pause` stops everything with one command — no surfacing, no background watchers, no spend. `engram resume` turns it back on (`ENGRAM_DISABLED=1` does the same per shell). This system runs background LLM sessions that cost real money — read [Cost, privacy & the off switch](#cost-privacy--the-off-switch) before installing.
+
 ## The problem
 
 Claude Code is great at well-known CLIs. It's not great at:
@@ -127,11 +129,11 @@ tool call JSON on stdin
 A trigger is a list of required tokens in order. The tool call matches if all trigger tokens appear in the tokenization in the same order — **gaps allowed**.
 
 ```
-trigger:   ["ergeon", "order", "reassign"]
-matches:   ergeon order 12345 reassign
-matches:   ergeon --env staging order abc reassign --reason X
-no match:  ergeon reassign order    (wrong order)
-no match:  ergeon customer reassign (missing "order")
+trigger:   ["mycli", "order", "reassign"]
+matches:   mycli order 12345 reassign
+matches:   mycli --env staging order abc reassign --reason X
+no match:  mycli reassign order    (wrong order)
+no match:  mycli customer reassign (missing "order")
 ```
 
 Simple prefix matching breaks for real CLIs because positional IDs sit between verbs: `gh pr 123 comment`, `kubectl get pod-abc123 describe`, `jira sprint 5 add`. Subsequence match handles them naturally.
@@ -239,6 +241,35 @@ Each table has exactly one persistence seam: `memories`/`triggers`/`memories_fts
 
 The hot path (hooks) has **no external dependencies** — stdlib + sqlite3 only. The one runtime dependency, `rich`, is used solely by the `engram monitor` dashboard and is imported lazily there, so hooks never load it. LLMs run only in the watcher ticks and the consolidation agent, all out-of-band from the tool-call path.
 
+## Cost, privacy & the off switch
+
+**What runs in the background.** After a turn completes (Stop), the hooks fire detached `claude -p` sessions: one **formation** tick (forms memories from the transcript delta) and, only when surfaced memories are pending judgment, one **evaluation** tick. Rapid turns coalesce (default 45s window), so it's at most one model call per role per coalesced Stop event — not per tool call. A nightly **consolidation** agent (Opus) reviews the day's sessions. Nothing model-driven runs on the tool-call hot path.
+
+**What it costs.** Preliminary figure from one day of mixed opus/sonnet data: **~$1/day** at moderate use with the default `sonnet` watcher. Evaluation calls cost roughly 5× formation calls (they re-read surfaced context). Treat this as an estimate, not a measured fact, until more sonnet-only data is in.
+
+**The levers.**
+
+- `engram pause` / `engram resume` — the kill switch. Paused, every hook and watcher tick stands down: no surfacing, no ticks, no spend. `ENGRAM_DISABLED=1` does the same via env (it beats the flag file, so `ENGRAM_DISABLED=0` force-enables for scripts).
+- `ENGRAM_WATCHER_MODEL=haiku` — cheaper watcher; `ENGRAM_FORMATION_MODEL` / `ENGRAM_EVAL_MODEL` override per role.
+- `engram monitor` — live dashboard of watcher runs with per-run USD cost and the decision stream.
+
+**What is stored where.** Everything is local; nothing leaves your machine except the `claude -p` calls themselves (same data path as your normal Claude Code usage).
+
+- Memory bodies, triggers, and surface history: SQLite at `~/.claude/tool-engrams/db.sqlite`.
+- Transcript deltas the watcher reads: written to per-(session, role) sandbox working dirs; transcript excerpts may appear in watcher decision logs.
+- Watcher residue (sandbox cwds, internal transcripts, dead state rows) is reaped by a once-daily cleanup after 7 days (`ENGRAM_CLEANUP_TTL_SEC`).
+
+**Secrets gate.** `engram remember` rejects bodies that look like credentials (API keys, tokens, passwords, connection strings), so the formation watcher can't store them as memories.
+
+## Security
+
+ToolEngrams injects stored text into Claude's context and can deny tool calls — treat its data as part of your attack surface:
+
+- **Memory bodies are untrusted input to future sessions.** They form autonomously from transcripts via a background LLM, and they're injected at PreToolUse — a poisoned or prompt-injecting memory body would speak with the system's voice. `block`-kind memories deserve the most scrutiny: their body is delivered alongside a denied tool call, the moment Claude is most likely to comply. Audit what's stored with `engram recall` and watch formation decisions in `engram monitor`.
+- **The watcher's containment boundary is a command allowlist, not trust in the model.** Each watcher role runs `claude -p` with a per-role allowlist — the formation session may only run `engram remember`, the evaluation session only `engram judge`. A hijacked watcher can write bad memories (auditable, reversible) but can't run arbitrary commands.
+- **The secrets gate** (above) keeps credentials out of the store, so a leaked DB or surfaced memory can't replay them.
+- **The kill switch** (`engram pause`) takes the whole system offline in one command while you investigate anything suspicious.
+
 ## Install
 
 ```bash
@@ -286,7 +317,9 @@ engram trigger <id> --remove <tid> --add-path "<glob>"
 engram skip "<name>"              Mark the latest surface 'unused' (negative signal)
 engram mark-noise "<name>"        Retroactively mark surfaces 'noise'
 engram verify "<name>"            Mark a memory's body still accurate (staleness audit)
-engram status                     Memory health JSON
+engram pause                      Kill switch: stop surfacing, ticks, and spend
+engram resume                     Turn the system back on
+engram status                     Memory health JSON (includes kill-switch state)
 engram dashboard                  HTML dashboard in browser
 engram monitor                    Live watcher dashboard (active runs / 24h / decision stream)
                                     --json for a one-shot snapshot (auto when piped)
@@ -309,6 +342,7 @@ engram rebuild-triggers           Re-extract triggers from bodies (post-migratio
 | Env var | Default | Effect |
 |---|---|---|
 | `ENGRAM_DB` | `~/.claude/tool-engrams/db.sqlite` | SQLite DB path |
+| `ENGRAM_DISABLED` | unset | `1`/`true` disables the whole system (beats the `engram pause` flag file; `0`/`false` force-enables) |
 | `ENGRAM_WATCHER_MODEL` | `sonnet` | Model passed to `claude -p` for both watcher roles (e.g. `haiku` for a cheaper, faster watcher) |
 | `ENGRAM_FORMATION_MODEL` | unset | Model for the formation role only; beats `ENGRAM_WATCHER_MODEL` |
 | `ENGRAM_EVAL_MODEL` | unset | Model for the evaluation role only; beats `ENGRAM_WATCHER_MODEL` |
@@ -343,7 +377,7 @@ Variable interpolation uses `str.format` — the formation prompt expects `{cwd}
 ## Testing
 
 ```bash
-pytest                          # Unit tests (~420, fast — no network, no LLM)
+pytest                          # Unit tests (fast — no network, no LLM)
 pytest tests/e2e/ -m e2e        # E2E tests (spawns real `claude -p` sessions, opt-in)
 ```
 

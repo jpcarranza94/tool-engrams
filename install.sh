@@ -10,19 +10,81 @@ SETTINGS="$HOME/.claude/settings.json"
 SKILLS_DIR="$HOME/.claude/skills"
 DB_DIR="$HOME/.claude/tool-engrams"
 
+MIN_PYTHON="3.10"
+MIN_CLAUDE="2.1.117"
+
 echo "ToolEngrams installer"
 echo "====================="
 echo ""
 
-# 1. Install the Python package.
-echo "1. Installing toolengrams package..."
-if command -v uv &>/dev/null; then
-    uv pip install --system -e "$REPO_DIR" 2>&1 | tail -1
-elif command -v pip &>/dev/null; then
-    pip install -e "$REPO_DIR" 2>&1 | tail -1
-else
-    echo "ERROR: Neither uv nor pip found. Install one first."
+# 0. Preflight: required tool versions, with actionable errors.
+echo "0. Checking prerequisites..."
+if ! command -v python3 &>/dev/null; then
+    echo "ERROR: python3 not found. Install Python >= $MIN_PYTHON first."
+    echo "  macOS: brew install python3    Debian/Ubuntu: apt install python3 python3-pip"
     exit 1
+fi
+if ! python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)'; then
+    echo "ERROR: Python >= $MIN_PYTHON required, found $(python3 --version 2>&1)."
+    exit 1
+fi
+echo "  $(python3 --version 2>&1) OK"
+
+if ! command -v claude &>/dev/null; then
+    echo "ERROR: Claude Code CLI ('claude') not found on PATH."
+    echo "  Install it first: https://claude.com/claude-code"
+    exit 1
+fi
+CLAUDE_VERSION="$(claude --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
+if [ -z "$CLAUDE_VERSION" ]; then
+    echo "WARNING: could not parse 'claude --version' output; continuing."
+elif ! python3 -c 'import sys
+have = [int(x) for x in sys.argv[1].split(".")[:3]]
+need = [int(x) for x in sys.argv[2].split(".")[:3]]
+sys.exit(0 if have >= need else 1)' "$CLAUDE_VERSION" "$MIN_CLAUDE"; then
+    echo "ERROR: claude >= $MIN_CLAUDE required (for the hook events ToolEngrams uses), found $CLAUDE_VERSION."
+    echo "  Update Claude Code, then re-run this script."
+    exit 1
+else
+    echo "  claude $CLAUDE_VERSION OK"
+fi
+echo ""
+
+# 1. Install the Python package.
+#    Order: uv (if present) -> pip3 -> pip3 --user. Failures fall through with
+#    the real error visible — PEP 668 "externally-managed-environment" rejects
+#    are expected on Homebrew/Debian Python and the fallbacks handle them.
+echo "1. Installing toolengrams package..."
+install_ok=0
+if command -v uv &>/dev/null; then
+    echo "  Trying uv..."
+    if uv pip install --system -e "$REPO_DIR"; then
+        install_ok=1
+    else
+        echo "  uv install failed (common with uv-managed Pythons); falling back to pip3."
+    fi
+fi
+if [ "$install_ok" -eq 0 ]; then
+    if ! command -v pip3 &>/dev/null; then
+        echo "ERROR: pip3 not found. Install it first:"
+        echo "  macOS: python3 -m ensurepip --upgrade    Debian/Ubuntu: apt install python3-pip"
+        exit 1
+    fi
+    if pip3 install -e "$REPO_DIR"; then
+        install_ok=1
+    else
+        echo "  pip3 install failed (PEP 668 externally-managed environment?). Retrying with --user..."
+        if pip3 install --user -e "$REPO_DIR"; then
+            install_ok=1
+        else
+            echo ""
+            echo "ERROR: could not install the package. On a PEP 668 managed Python, use one of:"
+            echo "  pipx:  pipx install -e $REPO_DIR"
+            echo "  venv:  python3 -m venv ~/.toolengrams-venv && ~/.toolengrams-venv/bin/pip install -e $REPO_DIR"
+            echo "         (then add ~/.toolengrams-venv/bin to PATH)"
+            exit 1
+        fi
+    fi
 fi
 
 # Rehash if using pyenv.
@@ -30,11 +92,18 @@ if command -v pyenv &>/dev/null; then
     pyenv rehash
 fi
 
-# Verify engram is on PATH.
+# Verify engram is on PATH — everything downstream (hooks, DB init) needs it.
 if ! command -v engram &>/dev/null; then
-    echo "WARNING: 'engram' not found on PATH after install."
-    echo "You may need to add your Python bin directory to PATH."
-    echo "Try: export PATH=\"\$(python3 -m site --user-base)/bin:\$PATH\""
+    USER_BIN="$(python3 -m site --user-base)/bin"
+    echo "ERROR: 'engram' is not on PATH after install."
+    if [ -x "$USER_BIN/engram" ]; then
+        echo "  It was installed to $USER_BIN (a --user install)."
+        echo "  Add it to PATH and re-run: export PATH=\"$USER_BIN:\$PATH\""
+    else
+        echo "  Check the pip output above for where the 'engram' script was placed,"
+        echo "  add that directory to PATH, and re-run this script."
+    fi
+    exit 1
 fi
 echo ""
 
@@ -42,7 +111,10 @@ echo ""
 echo "2. Configuring Claude Code hooks..."
 mkdir -p "$(dirname "$SETTINGS")"
 
-if [ ! -f "$SETTINGS" ]; then
+if [ -f "$SETTINGS" ]; then
+    cp -p "$SETTINGS" "$SETTINGS.bak"
+    echo "  Backed up settings.json to settings.json.bak"
+else
     echo '{}' > "$SETTINGS"
 fi
 
@@ -189,7 +261,11 @@ echo ""
 # 4. Initialize DB.
 echo "4. Initializing database..."
 mkdir -p "$DB_DIR"
-engram status >/dev/null 2>&1
+if ! engram status >/dev/null; then
+    echo "ERROR: 'engram status' failed — database initialization did not complete."
+    echo "  See the error above; fix it and re-run this script."
+    exit 1
+fi
 echo "  Database ready at $DB_DIR/db.sqlite"
 echo "  (Run 'engram seed' if you want example memories to explore)"
 echo ""

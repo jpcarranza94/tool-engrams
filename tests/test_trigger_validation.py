@@ -26,9 +26,9 @@ def test_valid_first_tokens_pass():
     assert first_token_looks_like_cli("aws")
     assert first_token_looks_like_cli("python3")
     assert first_token_looks_like_cli("openai.com")  # WebFetch host
-    assert first_token_looks_like_cli("ergeon-cli")  # hyphenated CLI name
+    assert first_token_looks_like_cli("acme-cli")  # hyphenated CLI name
     assert first_token_looks_like_cli("_internal")
-    assert first_token_looks_like_cli("jira.ergeon.in")
+    assert first_token_looks_like_cli("jira.example.com")
 
 
 def test_invalid_first_tokens_rejected():

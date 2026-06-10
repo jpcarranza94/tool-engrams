@@ -26,11 +26,12 @@ ToolEngrams is a tool-bound memory system for Claude Code. Memories bind to comm
 3. **Scoring** (`reinforcement/scoring.py`) — `q = (useful_count + 1) / (useful_count + noise_count + 2)` (noise-aware, Laplace-smoothed) drives both ranking and the surfacing gate. `useful_count` / `noise_count` are written **only** by the evaluation watcher via `engram judge`; `unused` verdicts enter neither, so situational memories aren't punished. Recency was removed from ranking (event-driven surfacing makes age a backwards signal).
 4. **Watcher** (`watcher/tick.py`) — detached `engram watcher-tick` per meaningful event, role-dispatched. **Formation** (`engram remember`) fires on **Stop**, failure→success **recovery**, a likely **UserPromptSubmit** correction, and **SessionEnd/PreCompact** flush; it gates out pure-chat turns unless armed by a prior failure. **Evaluation** (`engram judge`) fires at the Stop/flush **after** a surface, *only when surfaces are pending*, reads the transcript **forward**, judges each surfaced memory `helpful`/`unused`/`noise`, defers by not-judging, and is forced to closure on flush. Each role runs a permissioned `claude -p --resume` that calls the engram CLI itself (a per-role allowlist, no JSON schema; recursion-guarded by `ENGRAM_IN_WATCHER` + an internal cwd). Ticks are coalesced and serialized per `(session, role)`; state lives in `watcher_state` via `watcher/state.py`. **Tail recovery:** the next **SessionStart** idle-sweep re-fires a formation flush (and an eval flush if surfaces are still pending) for an abandoned session.
 5. **Consolidation** (`consolidation/agent.py`) — nightly Opus agent that reviews the day's sessions; aggregates per-memory `helpful`/`unused`/`noise` outcomes and prefers **narrowing a noisy trigger** (`engram trigger`, counters preserved) over archiving.
+6. **Kill switch** (`pause.py`) — `engram pause`/`resume` toggle a flag file next to the DB; `$ENGRAM_DISABLED` beats the flag (`1` force-off, `0` force-on). Every hook entry point and `watcher/tick.py` check `pause.is_disabled()` first and stand down fail-open. `engram status` reports the state.
 
 ## Running tests
 
 ```bash
-pytest                        # unit tests (133, fast)
+pytest                        # unit tests (fast)
 pytest tests/e2e/ -m e2e     # E2E tests (spawns claude -p, slow)
 ```
 

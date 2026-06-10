@@ -11,7 +11,7 @@ import argparse
 import sys
 from typing import Callable
 
-from . import watcher
+from . import pause, watcher
 from .cli import (
     consolidate,
     dashboard,
@@ -84,6 +84,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("flush", help="SessionEnd/PreCompact hook handler — final watcher flush tick (reads JSON on stdin)")
     sub.add_parser("seed", help="Insert example memories for smoke testing")
     sub.add_parser("cleanup", help="Reap cold watcher residue: dead watcher_state rows, stale sandboxes, internal transcripts")
+    sub.add_parser("pause", help="Kill switch: stop all surfacing, watcher ticks, and background spend")
+    sub.add_parser("resume", help="Undo 'engram pause' — turn the memory system back on")
 
     # Listed so --help shows them, but dispatch goes through _SELF_PARSING above.
     sub.add_parser("remember", help="Extract triggers from body text and insert a memory", add_help=False)
@@ -117,6 +119,8 @@ def main(argv: list[str] | None = None) -> int:
         "flush": flush.main,
         "seed": seed.main,
         "cleanup": watcher.cleanup.run_cleanup,
+        "pause": pause.run_pause,
+        "resume": pause.run_resume,
         "export": _stub_unimpl("export"),
     }
 

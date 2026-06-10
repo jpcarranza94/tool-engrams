@@ -85,10 +85,10 @@ def test_pretool_block_memory_denies_and_injects_context(temp_db, monkeypatch):
 
 
 def test_pretool_subseq_match_skips_positional_arg(temp_db, monkeypatch):
-    """`ergeon order 12345 reassign` matches trigger
-    `[ergeon, order, reassign]` because subseq allows gaps."""
+    """`mycli order 12345 reassign` matches trigger
+    `[mycli, order, reassign]` because subseq allows gaps."""
     _seed_token_memory(
-        temp_db, "reassign rule", "Reassign body", ["ergeon", "order", "reassign"]
+        temp_db, "reassign rule", "Reassign body", ["mycli", "order", "reassign"]
     )
 
     payload = {
@@ -96,7 +96,7 @@ def test_pretool_subseq_match_skips_positional_arg(temp_db, monkeypatch):
         "cwd": "/tmp/any",
         "hook_event_name": "PreToolUse",
         "tool_name": "Bash",
-        "tool_input": {"command": "ergeon order 12345 reassign --reason Y"},
+        "tool_input": {"command": "mycli order 12345 reassign --reason Y"},
         "tool_use_id": "tu-subseq",
     }
     result = _run_pretool(payload, monkeypatch)

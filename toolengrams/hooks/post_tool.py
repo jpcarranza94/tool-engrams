@@ -24,7 +24,7 @@ import sys
 import time
 from typing import Any
 
-from .. import db
+from .. import db, pause
 from ..retrieval.extract import extract_hints
 from ..retrieval.session_state import (
     get_prior_failure_surfaces,
@@ -36,6 +36,9 @@ from ._skip import is_internal_cwd
 
 
 def main() -> int:
+    if pause.is_disabled():
+        _emit({})
+        return 0
     try:
         payload = json.loads(sys.stdin.read() or "{}")
     except json.JSONDecodeError as e:

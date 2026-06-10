@@ -23,8 +23,8 @@ def test_short_flag_with_value():
 
 def test_url_host_extraction():
     """https://host/path/v1 yields 'host' and the first path segment."""
-    out = _expand_compound_tokens(["curl", "https://jenkins.ergeon.in/api/v1"])
-    assert "jenkins.ergeon.in" in out
+    out = _expand_compound_tokens(["curl", "https://jenkins.example.com/api/v1"])
+    assert "jenkins.example.com" in out
     assert "api" in out
 
 
@@ -57,8 +57,8 @@ def test_env_var_assignment_not_flag_split():
 
 def test_extract_hints_chains_url_expansion():
     """End-to-end: a curl call with a URL produces host+segment tokens."""
-    h = extract_hints("Bash", {"command": "curl https://jenkins.ergeon.in/api/v1"})
-    assert "jenkins.ergeon.in" in h.tokens
+    h = extract_hints("Bash", {"command": "curl https://jenkins.example.com/api/v1"})
+    assert "jenkins.example.com" in h.tokens
     assert "api" in h.tokens
 
 
