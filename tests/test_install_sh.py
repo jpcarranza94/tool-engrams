@@ -77,3 +77,48 @@ def test_uninstall_removes_exactly_the_engram_entries(tmp_path):
 
     assert (claude_dir / "settings.json.uninstall.bak").exists()
     assert not any(skills_dir.iterdir())  # all three symlinks removed
+
+
+def test_uninstall_preserves_foreign_hooks_in_mixed_entries(tmp_path):
+    """A hand-merged entry mixing engram with another tool's hook keeps the
+    other tool's hook — surgery is per-hook, not per-entry."""
+    claude_dir = tmp_path / ".claude"
+    claude_dir.mkdir(parents=True)
+
+    settings = {
+        "hooks": {
+            "Stop": [
+                {"hooks": [
+                    {"type": "command", "command": "engram stop"},
+                    {"type": "command", "command": "other-tool stop"},
+                ]},
+            ],
+        },
+    }
+    settings_path = claude_dir / "settings.json"
+    settings_path.write_text(json.dumps(settings))
+
+    proc = subprocess.run(
+        ["bash", str(INSTALL_SH), "--uninstall"],
+        capture_output=True, text=True,
+        env={"HOME": str(tmp_path), "PATH": "/usr/bin:/bin"},
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+    after = json.loads(settings_path.read_text())
+    stop_cmds = [h["command"] for e in after["hooks"]["Stop"] for h in e["hooks"]]
+    assert stop_cmds == ["other-tool stop"]
+
+
+def test_schedule_prompt_is_tty_gated():
+    """`read -p` under `set -e` kills non-interactive installs at the final
+    step; the prompt must be guarded by a tty check."""
+    text = INSTALL_SH.read_text()
+    read_idx = text.index("read -p")
+    gate_idx = text.index("[ -t 0 ]")
+    assert gate_idx < read_idx, "schedule prompt not guarded by [ -t 0 ]"
+
+
+def test_step4_runs_doctor():
+    text = INSTALL_SH.read_text()
+    assert "engram doctor" in text, "install.sh step 4 no longer verifies via doctor"

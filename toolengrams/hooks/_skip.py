@@ -13,6 +13,9 @@
   - `max_memories_per_call()` returns the per-call cap on injected memories.
     Char-bounded truncation downstream still kicks in, but a hard count cap
     prevents a noisy first-token bucket from spraying Claude's context.
+
+  - `surface_notice()` is the $ENGRAM_SURFACE_NOTICE-gated systemMessage line
+    pretool.py and post_tool_failure.py attach when memories surface.
 """
 
 from __future__ import annotations
@@ -42,6 +45,23 @@ def max_memories_per_call() -> int:
     except ValueError:
         return DEFAULT_MAX_MEMORIES_PER_CALL
     return max(1, min(n, MAX_MEMORIES_PER_CALL_CEILING))
+
+
+_NOTICE_TRUE = {"1", "true", "yes"}
+
+
+def surface_notice(names: list[str]) -> str | None:
+    """User-visible one-liner for the hook's systemMessage when memories
+    surface, gated by $ENGRAM_SURFACE_NOTICE. Off by default — injection is
+    deliberately invisible; this exists so the post-install smoke test (and
+    anyone debugging surfacing) can SEE a memory fire in the transcript."""
+    if os.environ.get("ENGRAM_SURFACE_NOTICE", "").strip().lower() not in _NOTICE_TRUE:
+        return None
+    if not names:
+        return None
+    listed = ", ".join(f"'{n}'" for n in names)
+    return f"ToolEngrams surfaced: {listed}"
+
 
 # Temp dir basenames that identify non-user (ToolEngrams-internal) sessions.
 # Match by prefix on the cwd basename.

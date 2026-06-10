@@ -46,7 +46,7 @@ from ..retrieval.session_state import (
     log_surfaces,
 )
 from ..utils import is_watcher_child, slugify_cwd
-from ._skip import WHITELIST, max_memories_per_call
+from ._skip import WHITELIST, max_memories_per_call, surface_notice
 
 
 def main() -> int:
@@ -138,13 +138,17 @@ def _run(payload: dict[str, Any]) -> int:
     # Deny if ANY block matches; allow (with context) if only hints.
     has_block = any(c.kind == "block" for c in fresh)
 
-    _emit({
+    out: dict[str, Any] = {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "additionalContext": format_injection(fresh),
             "permissionDecision": "deny" if has_block else "allow",
         }
-    })
+    }
+    notice = surface_notice([c.name for c in fresh])
+    if notice:
+        out["systemMessage"] = notice
+    _emit(out)
     return 0
 
 

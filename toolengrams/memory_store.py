@@ -339,6 +339,14 @@ def update_memory(
     )
 
 
+def set_kind(conn: sqlite3.Connection, memory_id: int, kind: str) -> None:
+    """Change only a memory's kind (seed realigns legacy demo memories)."""
+    conn.execute(
+        "UPDATE memories SET kind = ? WHERE id = ?",
+        (kind, memory_id),
+    )
+
+
 def set_pinned(conn: sqlite3.Connection, memory_id: int, pinned: bool) -> None:
     conn.execute(
         "UPDATE memories SET pinned = ? WHERE id = ?",

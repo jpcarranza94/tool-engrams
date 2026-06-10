@@ -15,6 +15,7 @@ from . import pause, watcher
 from .cli import (
     consolidate,
     dashboard,
+    doctor,
     forget,
     judge,
     mark_noise,
@@ -57,6 +58,8 @@ _SELF_PARSING = {
     "recall": recall.main,
     "consolidate": consolidate.main,
     "status": status.main,
+    "doctor": doctor.main,
+    "seed": seed.main,
     "dashboard": dashboard.main,
     "watcher-tick": watcher.tick.main,
     "monitor": monitor.main,
@@ -82,7 +85,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("user-prompt", help="UserPromptSubmit hook handler — fires a watcher tick on a likely correction (reads JSON on stdin)")
     sub.add_parser("stop", help="Stop hook handler — primary event-driven watcher trigger (reads JSON on stdin)")
     sub.add_parser("flush", help="SessionEnd/PreCompact hook handler — final watcher flush tick (reads JSON on stdin)")
-    sub.add_parser("seed", help="Insert example memories for smoke testing")
+    sub.add_parser("seed", help="Insert example memories for smoke testing "
+                                "(--with-block, --remove)", add_help=False)
     sub.add_parser("cleanup", help="Reap cold watcher residue: dead watcher_state rows, stale sandboxes, internal transcripts")
     sub.add_parser("pause", help="Kill switch: stop all surfacing, watcher ticks, and background spend")
     sub.add_parser("resume", help="Undo 'engram pause' — turn the memory system back on")
@@ -99,7 +103,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("pin", help="Pin/unpin a memory", add_help=False)
     sub.add_parser("recall", help="Browse and search the memory store", add_help=False)
     sub.add_parser("consolidate", help="Nightly consolidation — replay and prune", add_help=False)
-    sub.add_parser("status", help="Memory health JSON", add_help=False)
+    sub.add_parser("status", help="Memory health (human on tty, JSON when piped or --json)", add_help=False)
+    sub.add_parser("doctor", help="Wiring + liveness diagnostics (hooks, PATH, claude version, DB, activity)", add_help=False)
     sub.add_parser("dashboard", help="Open HTML dashboard in browser")
     sub.add_parser("monitor", help="Resource usage and watcher activity", add_help=False)
     sub.add_parser("migrate-v1-to-v2", help="One-shot migration from a v1-era DB to the v2 schema", add_help=False)
@@ -117,7 +122,6 @@ def main(argv: list[str] | None = None) -> int:
         "user-prompt": user_prompt.main,
         "stop": stop.main,
         "flush": flush.main,
-        "seed": seed.main,
         "cleanup": watcher.cleanup.run_cleanup,
         "pause": pause.run_pause,
         "resume": pause.run_resume,

@@ -49,7 +49,7 @@ def _seed_token_memory(conn, name: str, body: str, tokens: list[str], *,
 
 def test_pretool_hint_memory_surfaces_as_allow(temp_db, monkeypatch):
     """Seed's psql replica memory is kind=hint → surfaces with allow (not deny)."""
-    seed.main()
+    seed.main([])
 
     payload = {
         "session_id": "sess-abc",
@@ -66,22 +66,76 @@ def test_pretool_hint_memory_surfaces_as_allow(temp_db, monkeypatch):
 
 
 def test_pretool_block_memory_denies_and_injects_context(temp_db, monkeypatch):
-    """Seed's git-commit memory is kind=block → denies + injects body."""
-    seed.main()
+    """Seed's opt-in force-push memory is kind=block → denies + injects body."""
+    seed.main(["--with-block"])
 
     payload = {
         "session_id": "sess-xyz",
         "cwd": "/tmp/test-projects/myapp",
         "hook_event_name": "PreToolUse",
         "tool_name": "Bash",
-        "tool_input": {"command": "git commit -m 'fix bug'"},
+        "tool_input": {"command": "git push --force origin main"},
         "tool_use_id": "tu-2",
     }
     result = _run_pretool(payload, monkeypatch)
 
     hso = result["hookSpecificOutput"]
     assert hso["permissionDecision"] == "deny"
+    assert "force-with-lease" in hso["additionalContext"]
+
+
+def test_pretool_default_seed_never_denies_git_commit(temp_db, monkeypatch):
+    """The default seed set is hint-only — a plain git commit must not be
+    denied by freshly seeded demo memories (first-run safety)."""
+    seed.main([])
+
+    payload = {
+        "session_id": "sess-commit",
+        "cwd": "/tmp/test-projects/myapp",
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": {"command": "git commit -m 'fix bug'"},
+        "tool_use_id": "tu-commit",
+    }
+    result = _run_pretool(payload, monkeypatch)
+    hso = result["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "allow"
     assert "HEREDOC" in hso["additionalContext"]
+
+
+def test_pretool_surface_notice_emits_system_message(temp_db, monkeypatch):
+    """ENGRAM_SURFACE_NOTICE=1 → a visible systemMessage names what surfaced."""
+    seed.main([])
+    monkeypatch.setenv("ENGRAM_SURFACE_NOTICE", "1")
+
+    payload = {
+        "session_id": "sess-notice",
+        "cwd": "/tmp/test-projects/foo",
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": {"command": "psql -h replica.internal -c 'SELECT 1'"},
+        "tool_use_id": "tu-notice",
+    }
+    result = _run_pretool(payload, monkeypatch)
+    assert result["systemMessage"] == (
+        "ToolEngrams surfaced: 'psql replica is read-only'"
+    )
+
+
+def test_pretool_no_system_message_by_default(temp_db, monkeypatch):
+    seed.main([])
+    monkeypatch.delenv("ENGRAM_SURFACE_NOTICE", raising=False)
+
+    payload = {
+        "session_id": "sess-no-notice",
+        "cwd": "/tmp/test-projects/foo",
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": {"command": "psql -h replica.internal -c 'SELECT 1'"},
+        "tool_use_id": "tu-no-notice",
+    }
+    result = _run_pretool(payload, monkeypatch)
+    assert "systemMessage" not in result
 
 
 def test_pretool_subseq_match_skips_positional_arg(temp_db, monkeypatch):
@@ -128,7 +182,7 @@ def test_pretool_session_dedup_skips_second_time(temp_db, monkeypatch):
 
 
 def test_pretool_unknown_tool_returns_empty(temp_db, monkeypatch):
-    seed.main()
+    seed.main([])
 
     payload = {
         "session_id": "sess-1",
@@ -143,7 +197,7 @@ def test_pretool_unknown_tool_returns_empty(temp_db, monkeypatch):
 
 
 def test_pretool_no_matching_memory_returns_empty(temp_db, monkeypatch):
-    seed.main()
+    seed.main([])
 
     payload = {
         "session_id": "sess-2",

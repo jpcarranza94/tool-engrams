@@ -1,11 +1,19 @@
-"""Insert a handful of example memories so `engram pretool` has something to find."""
+"""engram seed — example memories for the post-install smoke test.
+
+The default set is hint-only: a seeded `block` would deny real tool calls
+(the old git-commit block denied every commit once per session), which is
+a hostile first-run surprise. `--with-block` opts into one block demo on
+`git push --force` — a call you won't trip by accident. `--remove` deletes
+exactly the seed memories (by exact name) once the smoke test is done.
+"""
 
 from __future__ import annotations
 
-import json
+import argparse
 import time
 
 from .. import db, memory_store
+from ..retrieval.session_state import delete_surfaces_for_memory
 
 
 SEED_MEMORIES = [
@@ -32,7 +40,7 @@ SEED_MEMORIES = [
             "`git commit -m \"$(cat <<'EOF'\\n...\\nEOF\\n)\"` — avoids shell "
             "escaping pitfalls with quotes, backticks, and dollar signs."
         ),
-        "kind": "block",
+        "kind": "hint",
         "scope": "global",
         "triggers": [
             {"kind": "token_subseq", "tokens": ["git", "commit"]},
@@ -54,13 +62,66 @@ SEED_MEMORIES = [
     },
 ]
 
+# Opt-in via --with-block: demonstrates the deny path on a call nobody runs
+# by accident, instead of booby-trapping everyday commands.
+BLOCK_SEED_MEMORIES = [
+    {
+        "name": "git push --force overwrites co-workers' commits",
+        "description": "Block demo: deny --force, suggest --force-with-lease.",
+        "body": (
+            "Use `git push --force-with-lease` instead — `--force` overwrites "
+            "commits co-workers pushed since your last fetch. (This is a "
+            "ToolEngrams seed memory demonstrating the block kind: the call "
+            "was denied and this text injected. Remove with 'engram seed "
+            "--remove'.)"
+        ),
+        "kind": "block",
+        "scope": "global",
+        "triggers": [
+            {"kind": "token_subseq", "tokens": ["git", "push", "--force"]},
+            {"kind": "token_subseq", "tokens": ["git", "push", "-f"]},
+        ],
+    },
+]
 
-def main() -> int:
+
+def main(argv: list[str] | None = None) -> int:
+    args = _build_parser().parse_args(argv)
+    if args.remove:
+        return _remove()
+    return _insert(with_block=args.with_block)
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="engram seed")
+    parser.add_argument("--with-block", action="store_true",
+                        help="Also seed one block-kind demo (denies "
+                             "'git push --force' and suggests --force-with-lease).")
+    parser.add_argument("--remove", action="store_true",
+                        help="Delete the seed memories (exact names only — "
+                             "never touches your own memories).")
+    return parser
+
+
+def _insert(with_block: bool) -> int:
     now_ts = int(time.time())
-    inserted = 0
+    to_seed = SEED_MEMORIES + (BLOCK_SEED_MEMORIES if with_block else [])
+    inserted = []
+    skipped = []
+    fixed = []
     with db.session() as conn, db.transaction(conn):
-        for m in SEED_MEMORIES:
-            if memory_store.name_exists(conn, m["name"]):
+        for m in to_seed:
+            existing = memory_store.find_by_name(conn, m["name"],
+                                                 include_archived=True)
+            if existing is not None and existing.name == m["name"]:
+                # A DB seeded under an older version may hold this memory with
+                # a different kind (the git-commit seed used to be a block that
+                # denied every commit). Align it with the shipped kind.
+                if existing.kind != m["kind"]:
+                    memory_store.set_kind(conn, existing.id, m["kind"])
+                    fixed.append((m, existing.kind))
+                else:
+                    skipped.append(m)
                 continue
             mid = memory_store.insert_memory(
                 conn,
@@ -74,10 +135,47 @@ def main() -> int:
                 created_ts=now_ts,
             )
             _insert_triggers(conn, mid, m["triggers"])
-            inserted += 1
+            inserted.append(m)
 
-    print(json.dumps({"inserted": inserted, "total_seed": len(SEED_MEMORIES)}))
+    for m in inserted:
+        print(f"  seeded  [{m['kind']}] {m['name']}  (trigger: {_trigger_label(m)})")
+    for m, old_kind in fixed:
+        print(f"  fixed   [{old_kind}→{m['kind']}] {m['name']}")
+    for m in skipped:
+        print(f"  exists  [{m['kind']}] {m['name']}")
+    print(f"\n{len(inserted)} seeded, {len(skipped) + len(fixed)} already present.")
+    print("Smoke test: in a NEW Claude Code session, ask Claude to run "
+          "`ssh deploy@production` — the VPN hint should arrive with the call.")
+    print("Clean up afterwards with: engram seed --remove")
     return 0
+
+
+def _remove() -> int:
+    names = [m["name"] for m in SEED_MEMORIES + BLOCK_SEED_MEMORIES]
+    removed = 0
+    with db.session() as conn, db.transaction(conn):
+        for name in names:
+            mem = memory_store.find_by_name(conn, name, include_archived=True)
+            # find_by_name falls back to fuzzy matching; only an exact name
+            # hit may be deleted, or a near-miss would nuke a user memory.
+            if mem is None or mem.name != name:
+                continue
+            # Hard delete must also clear surface rows: an orphaned
+            # outcome=NULL surface keeps the eval watcher pending forever.
+            delete_surfaces_for_memory(conn, mem.id)
+            memory_store.delete_memory(conn, mem.id)
+            removed += 1
+            print(f"  removed  {name}")
+    noun = "memory" if removed == 1 else "memories"
+    print(f"\n{removed} seed {noun} removed.")
+    return 0
+
+
+def _trigger_label(m: dict) -> str:
+    first = m["triggers"][0]
+    if first["kind"] == "token_subseq":
+        return " ".join(first["tokens"])
+    return first.get("path_pattern", "?")
 
 
 def _insert_triggers(conn, memory_id: int, triggers: list[dict]) -> None:
