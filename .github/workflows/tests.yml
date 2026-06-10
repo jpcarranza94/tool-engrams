@@ -5,21 +5,29 @@ on:
     branches: [main]
   pull_request:
 
+# Default token is read-only by repo setting; declare it so least-privilege
+# survives a settings change.
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Cancel superseded PR runs, but never a main run mid-flight (a cancelled
+  # main run leaves a misleading badge).
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   unit:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
         # Floor (pyproject requires-python) + current.
         python: ["3.10", "3.13"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python }}
       - run: pip install -e ".[dev]"
@@ -33,9 +41,10 @@ jobs:
   # fix behaviorally), then uninstall.
   install-smoke:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Stub claude CLI (installer preflight requires >= 2.1.117)
@@ -57,11 +66,11 @@ jobs:
         run: |
           export HOME="$RUNNER_TEMP/home"
           bash install.sh --uninstall
-          python3 -c "
-          import json, os
-          settings = json.load(open(os.path.expanduser('~/.claude/settings.json')))
-          leftovers = [h for entries in settings.get('hooks', {}).values()
-                       for e in entries for h in e.get('hooks', [])
-                       if h.get('command', '').startswith('engram ')]
-          assert not leftovers, leftovers
-          "
+          # Raw-text assert: stronger than re-using the uninstaller's own
+          # startswith('engram ') predicate (a shared blind spot would pass
+          # both), and it covers the Bash(engram *) permission too.
+          python3 - <<'EOF'
+          import os
+          text = open(os.path.expanduser('~/.claude/settings.json')).read()
+          assert 'engram' not in text, text
+          EOF
