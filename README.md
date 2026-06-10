@@ -440,7 +440,8 @@ pytest tests/e2e/ -m e2e        # E2E tests (spawns real `claude -p` sessions, o
 ```
 
 CI (`.github/workflows/tests.yml`) runs the unit suite on Python 3.10 and
-3.13 plus a headless `install.sh` smoke test on every PR; e2e stays local.
+3.13 plus a headless `install.sh` smoke test on Linux and macOS on every PR;
+e2e stays local.
 
 ## Uninstall
 
