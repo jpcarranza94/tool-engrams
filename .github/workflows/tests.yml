@@ -40,7 +40,13 @@ jobs:
   # (stdin is /dev/null — this job pins the "read -p killed headless installs"
   # fix behaviorally), then uninstall.
   install-smoke:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # ubuntu exercises the cron branch of the schedule step; macos the
+        # launchd branch — and macOS is the platform the maintainer runs.
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
