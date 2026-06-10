@@ -13,6 +13,9 @@
   - `max_memories_per_call()` returns the per-call cap on injected memories.
     Char-bounded truncation downstream still kicks in, but a hard count cap
     prevents a noisy first-token bucket from spraying Claude's context.
+
+  - `surface_notice()` is the $ENGRAM_SURFACE_NOTICE-gated systemMessage line
+    pretool.py and post_tool_failure.py attach when memories surface.
 """
 
 from __future__ import annotations

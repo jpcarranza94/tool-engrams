@@ -22,7 +22,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from .. import db, pause
+from .. import db, memory_store, pause
 from ..retrieval.session_state import last_activity_ts
 from ..watcher import state as watcher_state
 
@@ -122,7 +122,10 @@ def _check_hooks() -> dict:
                if not _event_has_marker(hooks, event, marker)]
     if missing:
         return _check("hooks", FAIL,
-                      f"hooks missing for {', '.join(sorted(missing))} — re-run ./install.sh")
+                      f"hooks missing for {', '.join(sorted(missing))} — re-run "
+                      "./install.sh (doctor checks the user-level settings "
+                      "install.sh writes; project-level .claude/settings.json "
+                      "wiring is not checked)")
     total = len(HOOK_MARKERS)
     return _check("hooks", PASS,
                   f"hooks wired ({total}/{total} events in {_settings_path()})")
@@ -180,12 +183,12 @@ def _version_tuple(version: str) -> tuple[int, ...]:
 
 
 def _check_db() -> dict:
+    # Opening the connection creates the DB and runs migrations on first
+    # touch — install.sh step 4 relies on exactly that side effect.
     try:
         with db.session() as conn:
             schema_version = conn.execute("PRAGMA user_version").fetchone()[0]
-            active = conn.execute(
-                "SELECT COUNT(*) FROM memories WHERE archived_ts IS NULL"
-            ).fetchone()[0]
+            active = memory_store.health_stats(conn)["active"]
     except Exception as e:
         return _check("db", FAIL, f"cannot open DB at {db.db_path()}: {e}")
     return _check("db", PASS,
@@ -217,7 +220,10 @@ def _check_hook_liveness() -> dict:
 
 
 def _check_watcher_liveness() -> dict:
-    last_ts = watcher_state.last_tick_ts_any()
+    try:
+        last_ts = watcher_state.last_tick_ts_any()
+    except Exception as e:
+        return _check("watcher_liveness", WARN, f"could not read watcher state: {e}")
     if last_ts <= 0:
         return _check("watcher_liveness", WARN,
                       "watcher has never ticked — expected on a fresh install; "

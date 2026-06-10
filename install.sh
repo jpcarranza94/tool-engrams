@@ -56,7 +56,7 @@ if "Bash(engram *)" in perms:
     perms.remove("Bash(engram *)")
     removed += 1
 settings_path.write_text(json.dumps(settings, indent=2) + "\n")
-print(f"  Removed {removed} engram entries from settings.json")
+print(f"  Removed {removed} engram hooks/permissions from settings.json")
 PYEOF
     fi
     for link in engram-remember engram-forget engram-recall; do
@@ -347,8 +347,8 @@ for skill in engram-remember engram-forget engram-recall; do
 done
 echo ""
 
-# 4. Initialize DB + verify the wiring end-to-end. Opening the DB runs the
-#    migrations; doctor then re-checks everything steps 0-3 set up.
+# 4. Initialize DB + verify the wiring. Opening the DB runs the migrations;
+#    doctor then re-checks the hook wiring, PATH, claude version, and DB.
 echo "4. Initializing database + verifying wiring..."
 mkdir -p "$DB_DIR"
 if ! engram doctor; then

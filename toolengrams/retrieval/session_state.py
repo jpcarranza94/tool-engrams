@@ -73,6 +73,16 @@ def get_session_turn(conn: sqlite3.Connection, session_id: str) -> int:
     return row["turn_count"] if row else 0
 
 
+def delete_surfaces_for_memory(conn: sqlite3.Connection, memory_id: int) -> int:
+    """Remove all surface rows for a memory that is being hard-deleted.
+    Orphaned outcome=NULL rows would keep has_pending_surfaces() true forever,
+    spawning eval ticks that find nothing. Returns the number of rows removed."""
+    cur = conn.execute(
+        "DELETE FROM session_surfaces WHERE memory_id = ?", (memory_id,)
+    )
+    return cur.rowcount
+
+
 def last_activity_ts(conn: sqlite3.Connection) -> int:
     """Most recent session_turns.updated_ts across all sessions; 0 if none.
     Every PostToolUse bumps a row, so this is "when did a hook last fire" —

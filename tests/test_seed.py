@@ -12,6 +12,11 @@ import time
 
 from toolengrams import memory_store
 from toolengrams.cli import seed
+from toolengrams.retrieval.session_state import (
+    HOOK_PRE_TOOL_USE,
+    has_pending_surfaces,
+    log_surfaces,
+)
 
 
 def test_default_seed_is_hint_only(temp_db, capsys):
@@ -79,6 +84,47 @@ def test_remove_does_not_fuzzy_match(temp_db):
     assert seed.main(["--remove"]) == 0
     count = temp_db.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
     assert count == 1
+
+
+def test_seed_realigns_legacy_block_kind(temp_db, capsys):
+    """A DB seeded under the old version holds the git-commit memory as a
+    block (denying every commit). Re-running seed must downgrade it to the
+    shipped hint kind instead of skipping it."""
+    legacy = seed.SEED_MEMORIES[1]
+    assert "git commit" in legacy["name"]
+    memory_store.insert_memory(
+        temp_db,
+        name=legacy["name"],
+        description=legacy["description"],
+        body=legacy["body"],
+        kind="block",
+        scope="global",
+        project_slug=None,
+        pinned=False,
+        created_ts=int(time.time()),
+    )
+
+    assert seed.main([]) == 0
+    row = temp_db.execute(
+        "SELECT kind FROM memories WHERE name = ?", (legacy["name"],)
+    ).fetchone()
+    assert row["kind"] == "hint"
+    assert "fixed   [block→hint]" in capsys.readouterr().out
+
+
+def test_remove_clears_pending_surfaces(temp_db, capsys):
+    """Hard-deleting a surfaced seed must not leave outcome=NULL surface rows
+    behind — they keep has_pending_surfaces() true forever."""
+    seed.main([])
+    mem = memory_store.find_by_name(temp_db, seed.SEED_MEMORIES[0]["name"])
+    log_surfaces(temp_db, "sess-rm", [mem.id], "tu-1",
+                 HOOK_PRE_TOOL_USE, 1, int(time.time()))
+    assert has_pending_surfaces(temp_db, "sess-rm")
+
+    assert seed.main(["--remove"]) == 0
+    assert not has_pending_surfaces(temp_db, "sess-rm")
+    count = temp_db.execute("SELECT COUNT(*) FROM session_surfaces").fetchone()[0]
+    assert count == 0
 
 
 def test_seed_output_lists_kind_and_trigger(temp_db, capsys):

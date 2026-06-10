@@ -13,6 +13,7 @@ import argparse
 import time
 
 from .. import db, memory_store
+from ..retrieval.session_state import delete_surfaces_for_memory
 
 
 SEED_MEMORIES = [
@@ -107,10 +108,20 @@ def _insert(with_block: bool) -> int:
     to_seed = SEED_MEMORIES + (BLOCK_SEED_MEMORIES if with_block else [])
     inserted = []
     skipped = []
+    fixed = []
     with db.session() as conn, db.transaction(conn):
         for m in to_seed:
-            if memory_store.name_exists(conn, m["name"]):
-                skipped.append(m)
+            existing = memory_store.find_by_name(conn, m["name"],
+                                                 include_archived=True)
+            if existing is not None and existing.name == m["name"]:
+                # A DB seeded under an older version may hold this memory with
+                # a different kind (the git-commit seed used to be a block that
+                # denied every commit). Align it with the shipped kind.
+                if existing.kind != m["kind"]:
+                    memory_store.set_kind(conn, existing.id, m["kind"])
+                    fixed.append((m, existing.kind))
+                else:
+                    skipped.append(m)
                 continue
             mid = memory_store.insert_memory(
                 conn,
@@ -128,9 +139,11 @@ def _insert(with_block: bool) -> int:
 
     for m in inserted:
         print(f"  seeded  [{m['kind']}] {m['name']}  (trigger: {_trigger_label(m)})")
+    for m, old_kind in fixed:
+        print(f"  fixed   [{old_kind}→{m['kind']}] {m['name']}")
     for m in skipped:
         print(f"  exists  [{m['kind']}] {m['name']}")
-    print(f"\n{len(inserted)} seeded, {len(skipped)} already present.")
+    print(f"\n{len(inserted)} seeded, {len(skipped) + len(fixed)} already present.")
     print("Smoke test: in a NEW Claude Code session, ask Claude to run "
           "`ssh deploy@production` — the VPN hint should arrive with the call.")
     print("Clean up afterwards with: engram seed --remove")
@@ -147,6 +160,9 @@ def _remove() -> int:
             # hit may be deleted, or a near-miss would nuke a user memory.
             if mem is None or mem.name != name:
                 continue
+            # Hard delete must also clear surface rows: an orphaned
+            # outcome=NULL surface keeps the eval watcher pending forever.
+            delete_surfaces_for_memory(conn, mem.id)
             memory_store.delete_memory(conn, mem.id)
             removed += 1
             print(f"  removed  {name}")

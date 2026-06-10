@@ -319,6 +319,10 @@ engram seed                        # 1. plant three demo hint memories
 export ENGRAM_SURFACE_NOTICE=1     # 2. optional: print a visible line when a memory fires
 ```
 
+(Hooks inherit the `claude` process environment — export
+`ENGRAM_SURFACE_NOTICE` in the same shell you launch the new session from,
+or it silently does nothing.)
+
 3. In the new session, ask Claude to run `ssh deploy@production`. The seeded
    VPN hint is injected alongside the call — ask Claude what context it
    received, or watch for the `ToolEngrams surfaced: …` line if you enabled
