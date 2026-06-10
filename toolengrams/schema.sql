@@ -132,7 +132,12 @@ CREATE TABLE IF NOT EXISTS watcher_runs (
     cursor_to        INTEGER,
     delta_chars      INTEGER,
     cwd              TEXT,
-    error            TEXT
+    error            TEXT,
+    cost_usd         REAL,                                 -- from the claude -p JSON envelope
+    input_tokens     INTEGER,                              -- (all NULL when the call errored
+    output_tokens    INTEGER,                              --  or predates v14)
+    cache_read_tokens     INTEGER,
+    cache_creation_tokens INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS idx_watcher_runs_recent

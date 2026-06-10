@@ -151,7 +151,7 @@ Memories are born three ways, in decreasing automation. All converge at `tooleng
 
 | Source | Code | How |
 |---|---|---|
-| **Formation watcher** (background `claude -p`) | `toolengrams/watcher/` + `toolengrams/prompts/defaults/watcher.md` | A permissioned session (model via `$ENGRAM_WATCHER_MODEL`, default opus) whose only allowed command is `engram remember`. It reads the transcript delta and runs `engram remember …` for patterns worth keeping — native tool-calling, no JSON schema. |
+| **Formation watcher** (background `claude -p`) | `toolengrams/watcher/` + `toolengrams/prompts/defaults/watcher.md` | A permissioned session (model via `$ENGRAM_WATCHER_MODEL`, default sonnet) whose only allowed command is `engram remember`. It reads the transcript delta and runs `engram remember …` for patterns worth keeping — native tool-calling, no JSON schema. |
 | **Consolidation** (Opus nightly) | `toolengrams/consolidation/agent.py` + `toolengrams/prompts/defaults/consolidation.md` | Opus issues `engram remember / forget / trigger` commands directly after reviewing yesterday's sessions. |
 | **Manual** | `toolengrams/cli/remember.py` | `--trigger "<tokens>"` / `--path "<glob>"` flags, or triggers extracted from the body via `formation/candidates.py` (backticked shell snippets, paths, URLs). |
 
@@ -309,7 +309,9 @@ engram rebuild-triggers           Re-extract triggers from bodies (post-migratio
 | Env var | Default | Effect |
 |---|---|---|
 | `ENGRAM_DB` | `~/.claude/tool-engrams/db.sqlite` | SQLite DB path |
-| `ENGRAM_WATCHER_MODEL` | `opus` | Model passed to `claude -p` for both watcher roles (e.g. `haiku` for a cheaper, faster watcher) |
+| `ENGRAM_WATCHER_MODEL` | `sonnet` | Model passed to `claude -p` for both watcher roles (e.g. `haiku` for a cheaper, faster watcher) |
+| `ENGRAM_FORMATION_MODEL` | unset | Model for the formation role only; beats `ENGRAM_WATCHER_MODEL` |
+| `ENGRAM_EVAL_MODEL` | unset | Model for the evaluation role only; beats `ENGRAM_WATCHER_MODEL` |
 | `ENGRAM_WATCHER_TIMEOUT` | `300` | Per-call `claude -p` timeout (seconds) for a watcher tick |
 | `ENGRAM_TICK_COALESCE_SEC` | `45` | Min seconds between ticks for one (session, role); a burst of triggers coalesces into one call (flush triggers ignore it) |
 | `ENGRAM_IDLE_SWEEP_SEC` | `1800` | How old a tracked session's last tick must be before the SessionStart idle-sweep treats its unread tail as abandoned and re-fires a flush tick |

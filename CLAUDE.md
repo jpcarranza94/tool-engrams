@@ -11,7 +11,7 @@ ToolEngrams is a tool-bound memory system for Claude Code. Memories bind to comm
   - `prompts/` — all prompt text in one place (session_start, pretool, watcher, consolidation)
   - `consolidation/` — nightly agent (collect sessions, spawn Opus review, launchd schedule)
   - `migrations/` — SQL migration files (auto-discovered by db.py)
-  - `watcher/` — event-driven background LLM work with **two roles**: `formation` (creates memories) and `evaluation` (judges how surfaced memories fared). `tick.py` is the core (one read→decide→`claude -p` per event, role-dispatched, plus coalesce policy + the SessionStart idle-sweep); `state.py` is the single seam over `watcher_state`, keyed `(work_session_id, role)` (cursor / armed / fail_streak / last_tick_ts, plus `sweep_idle`); `agent.py` runs the permissioned per-role `claude -p` session (a command allowlist, NOT a JSON schema); `transcript_format.py` the JSONL→text delta; `log.py` the shared log sink. Model via `$ENGRAM_WATCHER_MODEL` (default `opus`).
+  - `watcher/` — event-driven background LLM work with **two roles**: `formation` (creates memories) and `evaluation` (judges how surfaced memories fared). `tick.py` is the core (one read→decide→`claude -p` per event, role-dispatched, plus coalesce policy + the SessionStart idle-sweep); `state.py` is the single seam over `watcher_state`, keyed `(work_session_id, role)` (cursor / armed / fail_streak / last_tick_ts, plus `sweep_idle`); `agent.py` runs the permissioned per-role `claude -p` session (a command allowlist, NOT a JSON schema); `transcript_format.py` the JSONL→text delta; `log.py` the shared log sink. Model via `$ENGRAM_WATCHER_MODEL` (default `sonnet`).
   - `memory_store.py` — the Memory aggregate persistence seam: **every** SQL statement against `memories` / `triggers` / `memories_fts` lives here. Reads return typed `Memory` / `Trigger` objects (models.py); writes (insert/update/delete, reinforcement counter bumps, trigger persistence) go through its named functions. The PreToolUse hot path (`match_token_triggers` / `match_path_triggers`) returns raw rows so rank.py can build the lean `Candidate` with no per-call allocation. Each table has exactly one seam: `memories`/`triggers`/`memories_fts` → `memory_store.py`; `session_surfaces`/`session_turns` → `retrieval/session_state.py`; `consolidation_runs` → `consolidation/runs.py`; `watcher_state` → `watcher/state.py`. (Exception: `cli/migrate_v1_to_v2.py` keeps its own SQL — it reads the OLD v1 schema the stores don't model.)
   - `triggers.py` — trigger extraction validation (delegates trigger writes to memory_store)
   - `formation.py` — pure trigger extraction from memory body text (no DB writes)
@@ -46,7 +46,8 @@ pytest tests/e2e/ -m e2e     # E2E tests (spawns claude -p, slow)
 
 Read per tick (each tick is a fresh process), so changes apply to the next event:
 
-- `$ENGRAM_WATCHER_MODEL` — model for the watcher's `claude -p` (default `opus`).
+- `$ENGRAM_WATCHER_MODEL` — model for the watcher's `claude -p` (default `sonnet`).
+- `$ENGRAM_FORMATION_MODEL` / `$ENGRAM_EVAL_MODEL` — per-role model overrides; beat `$ENGRAM_WATCHER_MODEL` for their role.
 - `$ENGRAM_WATCHER_TIMEOUT` — per-call `claude -p` timeout in seconds (default `300`).
 - `$ENGRAM_TICK_COALESCE_SEC` — min seconds between ticks for one session; a burst of triggers coalesces into one model call (default `45`; flush triggers ignore it).
 - `$ENGRAM_IDLE_SWEEP_SEC` — how old a tracked session's last tick must be before the SessionStart idle-sweep treats its unread tail as abandoned and re-fires a flush tick (default `1800`).

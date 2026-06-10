@@ -31,7 +31,21 @@ from toolengrams.watcher import (
 
 def test_watcher_model_default(monkeypatch):
     monkeypatch.delenv("ENGRAM_WATCHER_MODEL", raising=False)
-    assert _watcher_model() == DEFAULT_WATCHER_MODEL == "opus"
+    assert _watcher_model() == DEFAULT_WATCHER_MODEL == "sonnet"
+
+
+def test_watcher_model_per_role_override_beats_global(monkeypatch):
+    monkeypatch.setenv("ENGRAM_WATCHER_MODEL", "sonnet")
+    monkeypatch.setenv("ENGRAM_EVAL_MODEL", "haiku")
+    monkeypatch.delenv("ENGRAM_FORMATION_MODEL", raising=False)
+    assert _watcher_model("eval") == "haiku"
+    assert _watcher_model("formation") == "sonnet"   # falls back to global
+
+
+def test_watcher_model_per_role_falls_back_to_default(monkeypatch):
+    monkeypatch.delenv("ENGRAM_WATCHER_MODEL", raising=False)
+    monkeypatch.delenv("ENGRAM_FORMATION_MODEL", raising=False)
+    assert _watcher_model("formation") == DEFAULT_WATCHER_MODEL
 
 
 def test_watcher_model_env_override(monkeypatch):

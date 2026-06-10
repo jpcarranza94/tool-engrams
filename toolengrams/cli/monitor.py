@@ -68,6 +68,21 @@ def _short(sid: str | None) -> str:
     return (sid or "")[:8]
 
 
+def _money(cost: float | None) -> str:
+    """$0.0123-style, or — for runs with no envelope (errors, pre-v14 rows).
+    `is not None`, not truthiness: a genuine $0 (subscription auth) is data."""
+    return f"${cost:.4f}" if cost is not None else "—"
+
+
+def _ktok(n: int) -> str:
+    """Compact token count: 850, 12.3k, 1.2M."""
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    if n >= 1_000:
+        return f"{n / 1_000:.1f}k"
+    return str(n)
+
+
 def _active_view(row, now_ts: int) -> dict:
     """A `running` row → its display state: active (pid alive + fresh) or stale."""
     age = now_ts - row["started_ts"]
@@ -95,6 +110,12 @@ def _run_view(row, now_ts: int) -> dict:
         "created": row["n_created"],
         "judged": row["n_judged"],
         "error": row["error"],
+        "model": row["model"],
+        "cost_usd": row["cost_usd"],
+        "input_tokens": row["input_tokens"],
+        "output_tokens": row["output_tokens"],
+        "cache_read_tokens": row["cache_read_tokens"],
+        "cache_creation_tokens": row["cache_creation_tokens"],
     }
 
 
@@ -181,7 +202,8 @@ def _render(snap: dict):
 
     # Last 24h.
     hist = Table(expand=True, box=None)
-    for col in ("when", "session", "role", "status", "dur", "Δchars", "+mem", "judged"):
+    for col in ("when", "session", "role", "status", "dur", "Δchars",
+                "+mem", "judged", "cost"):
         hist.add_column(col)
     _status_color = {"ok": "green", "error": "red", "crashed": "red", "running": "cyan"}
     for r in snap["recent_24h"]:
@@ -190,6 +212,7 @@ def _render(snap: dict):
             Text(r["status"], style=_status_color.get(r["status"], "white")),
             f'{r["duration_sec"]}s', str(r["delta_chars"] or "—"),
             str(r["created"] or ""), str(r["judged"] or ""),
+            _money(r["cost_usd"]),
         )
 
     # Decision stream.
@@ -212,7 +235,10 @@ def _render(snap: dict):
     by = c["runs_by_status"]
     header = (f'runs 24h: ok {by.get("ok", 0)} · error {by.get("error", 0)} · '
               f'crashed {by.get("crashed", 0)} · running {by.get("running", 0)}   '
-              f'│ created {c["created"]} · judged {c["judged"]}')
+              f'│ created {c["created"]} · judged {c["judged"]}   '
+              f'│ spend {_money(c["cost_usd"])} '
+              f'({_ktok(c["output_tokens"])} out · {_ktok(c["input_tokens"])} in · '
+              f'{_ktok(c["cache_read_tokens"] + c["cache_creation_tokens"])} cached)')
 
     layout = Layout()
     layout.split_column(

@@ -20,7 +20,7 @@ def test_fresh_db_has_run_tables(tmp_path: Path):
     tables = _tables(conn)
     assert "watcher_runs" in tables
     assert "watcher_run_events" in tables
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION == 13
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION == 14
     conn.close()
 
 
