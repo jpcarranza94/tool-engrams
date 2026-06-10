@@ -31,7 +31,7 @@ engram recall "<query>"
 engram recall --id <memory_id>
 ```
 
-### Show summary counts by type/scope/trigger kind
+### Show summary counts by kind/scope/trigger kind
 ```bash
 engram recall --stats
 ```
@@ -43,4 +43,4 @@ engram recall "<query>" --limit 5
 
 ## Output
 
-JSON with matching memories. Each memory includes: id, name, type, scope, surface_count, useful_count, pinned status. `--id` also shows triggers and recent surface history.
+JSON with matching memories. Each memory includes: id, name, kind, scope, surface_count, useful_count, pinned status. `--id` also shows triggers and recent surface history.

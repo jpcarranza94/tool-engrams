@@ -47,24 +47,24 @@ def test_subseq_exact_match():
 
 
 def test_subseq_with_gap():
-    # The poster child: `ergeon order 12345 reassign` matches `[ergeon, order, reassign]`.
+    # The poster child: `mycli order 12345 reassign` matches `[mycli, order, reassign]`.
     assert is_subsequence(
-        ("ergeon", "order", "reassign"),
-        ("ergeon", "order", "12345", "reassign"),
+        ("mycli", "order", "reassign"),
+        ("mycli", "order", "12345", "reassign"),
     )
 
 
 def test_subseq_wrong_order_fails():
     assert not is_subsequence(
-        ("ergeon", "order", "reassign"),
-        ("ergeon", "reassign", "order"),
+        ("mycli", "order", "reassign"),
+        ("mycli", "reassign", "order"),
     )
 
 
 def test_subseq_missing_token_fails():
     assert not is_subsequence(
-        ("ergeon", "order", "reassign"),
-        ("ergeon", "customer", "reassign"),
+        ("mycli", "order", "reassign"),
+        ("mycli", "customer", "reassign"),
     )
 
 

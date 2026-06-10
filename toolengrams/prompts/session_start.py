@@ -14,5 +14,6 @@ If you want to manually save or manage memories:
 
 Use --trigger to specify the required token sequence (subseq match, gaps allowed). \
 Use --kind block for rules to enforce at PreToolUse (denies the call; rare). \
-Use --kind hint for info injected at PostToolUseFailure on tool failure (default).\
+Use --kind hint for info injected as context alongside matching calls and on \
+matching tool failures (default; non-blocking).\
 """

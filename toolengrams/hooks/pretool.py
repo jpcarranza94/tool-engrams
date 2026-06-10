@@ -34,7 +34,7 @@ import json
 import sys
 from typing import Any
 
-from .. import db, memory_store
+from .. import db, memory_store, pause
 from ..prompts.pretool import format_injection
 from ..retrieval.extract import extract_hints
 from ..reinforcement.scoring import is_gated
@@ -50,6 +50,9 @@ from ._skip import WHITELIST, max_memories_per_call
 
 
 def main() -> int:
+    if pause.is_disabled():
+        _emit({})
+        return 0
     try:
         payload = json.loads(sys.stdin.read() or "{}")
     except json.JSONDecodeError as e:

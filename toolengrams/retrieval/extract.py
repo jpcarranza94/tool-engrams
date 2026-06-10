@@ -86,8 +86,8 @@ def _expand_compound_tokens(tokens: list[str]) -> list[str]:
 
     2. URLs (``http://...``, ``https://...``) → also yields the host
        and optionally the first path segment. Triggers like
-       ``["curl","jenkins.ergeon.in"]`` used to never match real calls
-       because shlex keeps the entire ``https://jenkins.ergeon.in/api/v1``
+       ``["curl","jenkins.example.com"]`` used to never match real calls
+       because shlex keeps the entire ``https://jenkins.example.com/api/v1``
        as one token.
 
     3. ``user@host`` → also yields ``user`` and ``host`` separately.

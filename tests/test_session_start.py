@@ -52,7 +52,7 @@ def test_guidance_mentions_manual_commands(monkeypatch):
 def test_session_start_tracks_real_session(temp_db, monkeypatch):
     """A real session gets a watcher_state row (cursor=0), no process spawned."""
     _run(
-        {"session_id": "track-test", "cwd": "/Users/jpcar/projects/my-app", "source": "startup"},
+        {"session_id": "track-test", "cwd": "/Users/dev/projects/my-app", "source": "startup"},
         monkeypatch,
     )
     row = temp_db.execute(

@@ -70,7 +70,7 @@ def retrieve_candidates(
 def is_subsequence(needle: tuple[str, ...], haystack: tuple[str, ...]) -> bool:
     """All tokens in `needle` appear in `haystack` in order (non-contiguous allowed).
 
-    `["ergeon", "order", "reassign"]` matches `ergeon order 12345 reassign`
+    `["mycli", "order", "reassign"]` matches `mycli order 12345 reassign`
     because "12345" is simply skipped.
     """
     if not needle:

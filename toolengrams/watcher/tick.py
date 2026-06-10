@@ -33,7 +33,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-from .. import db
+from .. import db, pause
 from ..prompts.eval import EVAL_SUBSEQUENT_HEADER, build_eval_prompt
 from ..prompts.watcher import WATCHER_SUBSEQUENT_HEADER, build_watcher_prompt
 from ..retrieval import session_state
@@ -434,6 +434,11 @@ def run_tick(session_id: str, transcript_path: str, cwd: str,
 
 def main(argv: list[str] | None = None) -> int:
     """CLI: engram watcher-tick <session_id> <transcript_path> <cwd> [--flush] [--role formation|eval]"""
+    # Kill switch: a paused system spawns no model work. Checked here too (not
+    # just in the hooks) so an already-scheduled detached tick also stands down.
+    if pause.is_disabled():
+        _log("TICK-PAUSED kill switch active; skipping")
+        return 0
     argv = list(sys.argv[1:] if argv is None else argv)
     flush = "--flush" in argv
     role = "formation"

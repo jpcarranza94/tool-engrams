@@ -14,7 +14,7 @@ import sys
 import time
 from datetime import date, timedelta
 
-from .. import db
+from .. import db, pause
 from ..consolidation import runs
 from ..consolidation.agent import run_consolidation_agent
 from ..consolidation.collect import collect_sessions
@@ -39,6 +39,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.uninstall_schedule:
         removed = uninstall_schedule()
         print(json.dumps({"action": "schedule_uninstalled", "was_installed": removed}))
+        return 0
+
+    # Kill switch: the scheduled nightly run is the most expensive single
+    # model call in the system — a paused system must not spend. Schedule
+    # install/uninstall above stays usable while paused.
+    if pause.is_disabled():
+        print(json.dumps({"action": "skipped", "reason": "paused"}))
         return 0
 
     target = _resolve_date(args)

@@ -43,7 +43,7 @@ def unslugify_candidates(slug: str) -> list[Path]:
 
     Example:
         unslugify_candidates("-Users-jpcar-personal-projects-tool-engrams")
-        -> [PosixPath('/Users/jpcar/personal-projects/tool-engrams'), ...]
+        -> [PosixPath('/Users/dev/projects/tool-engrams'), ...]
     """
     if not slug or not slug.startswith("-"):
         return []

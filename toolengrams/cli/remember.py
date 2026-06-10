@@ -180,6 +180,10 @@ def _resolve_triggers(
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
+    return _build_parser().parse_args(argv)
+
+
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="engram remember")
     parser.add_argument("text", nargs="?", default=None,
                         help="Memory body. Use '-' or omit to read from stdin.")
@@ -188,7 +192,8 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--kind", default=DEFAULT_KIND,
                         help=(f"block|hint (default {DEFAULT_KIND}). "
                               "block: PreToolUse denies + injects context. "
-                              "hint: PostToolUseFailure injects context on error."))
+                              "hint: injected as context alongside matching calls "
+                              "(PreToolUse) and on matching failures (non-blocking)."))
     parser.add_argument("--scope", default=DEFAULT_SCOPE,
                         help=f"global|project (default {DEFAULT_SCOPE})")
     parser.add_argument("--project-slug", default=None,
@@ -213,7 +218,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
                         help="token_subseq:git,push | path_glob:**/*.py")
     parser.add_argument("--dry-run", action="store_true",
                         help="Extract and report candidates; do not insert.")
-    return parser.parse_args(argv)
+    return parser
 
 
 # ---------- body / name ----------

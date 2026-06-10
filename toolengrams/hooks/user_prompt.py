@@ -17,6 +17,7 @@ import json
 import sys
 from typing import Any
 
+from .. import pause
 from ..utils import is_watcher_child
 from ..watcher import derive_transcript_path, tick
 from ._skip import is_internal_cwd
@@ -34,6 +35,9 @@ _MAX_CORRECTION_LEN = 280
 
 
 def main() -> int:
+    if pause.is_disabled():
+        _emit({})
+        return 0
     try:
         payload = json.loads(sys.stdin.read() or "{}")
     except json.JSONDecodeError:

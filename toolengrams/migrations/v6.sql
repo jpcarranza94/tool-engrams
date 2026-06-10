@@ -2,7 +2,7 @@
 --
 -- Replaces the (tool_name, head_joined, head_length) prefix-match trigger
 -- shape with (first_token, tokens_json) subsequence-match. Handles the
--- `ergeon order <id> reassign` positional-ID-between-verbs case that prefix
+-- `mycli order <id> reassign` positional-ID-between-verbs case that prefix
 -- matching couldn't hit.
 --
 -- We drop and recreate the triggers table. A best-effort re-population is

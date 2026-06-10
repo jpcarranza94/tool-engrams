@@ -32,6 +32,10 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
+    return _build_parser().parse_args(argv)
+
+
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="engram forget")
     parser.add_argument("name", nargs="?", default=None,
                         help="Memory name (exact or fuzzy match).")
@@ -41,7 +45,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
                         help="Soft-demote all memories matching this keyword via FTS.")
     parser.add_argument("--restore", default=None, metavar="NAME",
                         help="Undo a soft demote or archive.")
-    return parser.parse_args(argv)
+    return parser
 
 
 # ---------- actions ----------
