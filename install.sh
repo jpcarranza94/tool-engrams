@@ -13,11 +13,18 @@ DB_DIR="$HOME/.claude/tool-engrams"
 MIN_PYTHON="3.10"
 MIN_CLAUDE="2.1.117"
 
+# Reject unknown flags so a typo'd --uninstall can't silently run a full install.
+if [ -n "${1:-}" ] && [ "${1}" != "--uninstall" ]; then
+    echo "Usage: ./install.sh [--uninstall]"
+    exit 2
+fi
+
 # --uninstall: remove what this script wired up (hooks, permission, skill
 # symlinks). The DB and the Python package stay — memories are user data.
 if [ "${1:-}" = "--uninstall" ]; then
     echo "ToolEngrams uninstaller (script-install path)"
     if [ -f "$SETTINGS" ]; then
+        cp -p "$SETTINGS" "$SETTINGS.uninstall.bak"
         python3 - "$SETTINGS" << 'PYEOF'
 import json
 import sys
@@ -64,20 +71,23 @@ echo "====================="
 echo ""
 
 # Mutual exclusivity: the plugin install wires the same 8 hooks via
-# plugin.json — running both double-fires every hook.
-if [ -f "$SETTINGS" ] && python3 -c '
+# plugin.json — running both double-fires every hook. Plugin enablement can
+# live in settings.json or settings.local.json; check both.
+for settings_file in "$SETTINGS" "$HOME/.claude/settings.local.json"; do
+    if [ -f "$settings_file" ] && python3 -c '
 import json, sys
 from pathlib import Path
 s = json.loads(Path(sys.argv[1]).read_text())
 enabled = s.get("enabledPlugins") or {}
 sys.exit(0 if any(k.split("@")[0] == "tool-engrams" and v for k, v in enabled.items()) else 1)
-' "$SETTINGS" 2>/dev/null; then
-    echo "ERROR: the tool-engrams Claude Code plugin is already installed and enabled."
-    echo "  Running install.sh too would register every hook twice."
-    echo "  Either keep the plugin (recommended) or remove it first:"
-    echo "  /plugin uninstall tool-engrams"
-    exit 1
-fi
+' "$settings_file" 2>/dev/null; then
+        echo "ERROR: the tool-engrams Claude Code plugin is already installed and enabled"
+        echo "  (per $settings_file). Running install.sh too would register every hook twice."
+        echo "  Either keep the plugin (recommended) or remove it first:"
+        echo "  /plugin uninstall tool-engrams"
+        exit 1
+    fi
+done
 
 # 0. Preflight: required tool versions, with actionable errors.
 echo "0. Checking prerequisites..."

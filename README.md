@@ -293,7 +293,11 @@ venv but **keeps your memories** — the DB lives at `~/.claude/tool-engrams/`,
 not inside the plugin (see `docs/adr/0004`).
 
 Requires Python ≥ 3.10 with `venv` available (`apt install python3-venv` on
-Debian/Ubuntu).
+Debian/Ubuntu) and Claude Code ≥ 2.1.154 (older clients ignore
+`defaultEnabled: false` and would enable — and start spending — on install).
+
+The plugin has no postinstall step, so the nightly consolidation schedule isn't
+offered automatically — opt in with `engram consolidate --install-schedule`.
 
 ### Script (non-plugin fallback)
 
@@ -304,9 +308,14 @@ cd tool-engrams
 ```
 
 The two paths are mutually exclusive — `install.sh` refuses to run while the
-plugin is enabled (both would wire the same hooks twice). Migrating script →
-plugin: `./install.sh --uninstall`, then install the plugin; the DB carries
-over untouched.
+plugin is enabled, and the plugin warns at SessionStart if legacy hooks are
+still wired (both would fire every hook twice). Migrating script → plugin:
+`./install.sh --uninstall`, then install the plugin; the DB carries over
+untouched.
+
+> **Existing script installs:** the skill folders were renamed (`engram-remember`
+> → `remember`, etc.), so after a `git pull` your old `~/.claude/skills/engram-*`
+> symlinks dangle. Re-run `./install.sh` once — it re-points them.
 
 The installer:
 
@@ -419,6 +428,7 @@ Plugin install:
 
 ```
 /plugin uninstall tool-engrams        # removes hooks + venv; keeps the DB
+rm ~/.local/bin/engram                # the venv symlink, now dangling
 rm -rf ~/.claude/tool-engrams/        # only if you also want the memories gone
 ```
 

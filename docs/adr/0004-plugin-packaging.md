@@ -22,6 +22,14 @@ CLI honors `--keep-data`); `defaultEnabled: false` exists (v2.1.154+).
 
 ### 1. Venv bootstrap via a fail-open hook shim, never inline
 
+Why a shim on *every* event rather than venv paths in plugin.json plus a
+SessionStart-only bootstrap: the venv can be missing or mid-rebuild at any
+moment (first install, plugin update, crashed build), and a hook command that
+points at a nonexistent or half-built binary is a visible hook error on every
+tool call. The shim is what makes every event fail open while dark, and its
+per-call stamp check is what notices a plugin update without waiting for the
+next SessionStart.
+
 Every plugin hook routes through `plugin/hook.sh <ROOT> <DATA> <subcommand>`:
 
 - It stamp-compares `$DATA/install.stamp` against (pyproject.toml content +

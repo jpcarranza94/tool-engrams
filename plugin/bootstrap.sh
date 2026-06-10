@@ -13,16 +13,25 @@ DATA="$2"
 LOCK="$DATA/bootstrap.lock"
 LOG="$DATA/bootstrap.log"
 STAMP="$DATA/install.stamp"
+# Stale-lock TTL. The package is stdlib-only, so a healthy build is ~1 min;
+# a lock this old means a crashed build. The lock mtime is refreshed between
+# phases below so a merely-slow build is never mistaken for a dead one.
+STALE_LOCK_MIN=15
 
 mkdir -p "$DATA"
 
-# Reap a stale lock from a crashed build (>15 min old), then take the lock.
+# Reap a stale lock from a crashed build, then take the lock.
 if [ -d "$LOCK" ]; then
-    find "$DATA" -maxdepth 1 -name bootstrap.lock -type d -mmin +15 \
+    find "$DATA" -maxdepth 1 -name bootstrap.lock -type d -mmin "+$STALE_LOCK_MIN" \
         -exec rm -rf {} \; 2>/dev/null
 fi
 mkdir "$LOCK" 2>/dev/null || exit 0   # another build is already running
 trap 'rm -rf "$LOCK"' EXIT INT TERM
+
+# Cap the log: every failed build appends, and hooks fire often.
+if [ -f "$LOG" ] && [ "$(wc -c < "$LOG")" -gt 100000 ]; then
+    mv "$LOG" "$LOG.1"
+fi
 
 {
     echo "=== bootstrap started: $(date) (root: $ROOT)"
@@ -34,11 +43,19 @@ trap 'rm -rf "$LOCK"' EXIT INT TERM
         echo "ERROR: Python >= 3.10 required, found $(python3 --version 2>&1)."
         exit 1
     fi
+    # Validate the install source BEFORE destroying the working venv — a
+    # vanished plugin root (e.g. the old root after an update) must not
+    # leave us venv-less.
+    if [ ! -f "$ROOT/pyproject.toml" ]; then
+        echo "ERROR: plugin root $ROOT has no pyproject.toml; refusing to rebuild."
+        exit 1
+    fi
     # --clear so a partial venv from a crashed build can't poison this one.
     if ! python3 -m venv --clear "$DATA/venv"; then
         echo "ERROR: venv creation failed. On Debian/Ubuntu: apt install python3-venv"
         exit 1
     fi
+    touch "$LOCK"   # refresh lock mtime so a slow pip phase isn't reaped
     if ! "$DATA/venv/bin/pip" install --quiet "$ROOT"; then
         echo "ERROR: pip install failed — see above."
         exit 1

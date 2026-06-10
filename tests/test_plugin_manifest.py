@@ -71,6 +71,15 @@ def test_plugin_shell_scripts_parse():
         assert proc.returncode == 0, f"{script}: {proc.stderr}"
 
 
+def test_plugin_and_install_sh_wire_the_same_events():
+    """plugin.json and install.sh define the same hook contract in two places;
+    this tripwire fails when one gains/loses an event the other doesn't."""
+    install_sh = (REPO_ROOT / "install.sh").read_text()
+    for event in HOOK_EVENTS:
+        assert f'"{event}"' in install_sh, (
+            f"install.sh no longer wires {event} but plugin.json does")
+
+
 def test_skill_folders_match_plugin_namespacing():
     """Plugin skills are /tool-engrams:<folder>; keep folders short, and keep
     SKILL.md free of a frontmatter name that would override them."""

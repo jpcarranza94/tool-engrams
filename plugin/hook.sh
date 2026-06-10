@@ -25,8 +25,10 @@ CUR="$(cat "$ROOT/pyproject.toml" 2>/dev/null; printf '%s' "$ROOT")"
 OLD="$(cat "$STAMP" 2>/dev/null)"
 
 # Stamp current and binary present: the common path — hand straight off.
+# ENGRAM_PLUGIN lets engram (session-start) detect a plugin install and warn
+# when legacy script-installed hooks are ALSO present (double-fire).
 if [ -x "$BIN" ] && [ "$CUR" = "$OLD" ]; then
-    exec "$BIN" "$@"
+    ENGRAM_PLUGIN=1 exec "$BIN" "$@"
 fi
 
 # Missing or stale venv: spawn the (lock-serialized) build and fail open.
@@ -36,10 +38,18 @@ mkdir -p "$DATA" 2>/dev/null
 nohup "$ROOT/plugin/bootstrap.sh" "$ROOT" "$DATA" >/dev/null 2>&1 &
 
 # Venv not ready. Tell the model on SessionStart; stay silent everywhere else.
+# A log with errors but no stamp means earlier builds FAILED — say so instead
+# of promising "live next session" forever.
 if [ "${1:-}" = "session-start" ]; then
-    cat <<'EOF'
+    if [ ! -f "$STAMP" ] && grep -q "^ERROR" "$DATA/bootstrap.log" 2>/dev/null; then
+        cat <<'EOF'
+{"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": "[ToolEngrams] Plugin bootstrap has been FAILING — the memory system is not running. See ~/.claude/plugins/data/*/bootstrap.log for the error (commonly: python3-venv missing)."}}
+EOF
+    else
+        cat <<'EOF'
 {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": "[ToolEngrams] First-run bootstrap in progress: building the plugin venv in the background. The memory system is dark for this session and live from the next one. Check progress: ~/.claude/plugins/data/*/bootstrap.log"}}
 EOF
+    fi
 else
     echo '{}'
 fi
