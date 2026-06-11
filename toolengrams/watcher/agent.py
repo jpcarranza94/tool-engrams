@@ -6,16 +6,16 @@ constrained JSON schema the harness parses (see ADR-0001).
 Mechanics mirror the consolidation agent: a sandbox work dir with a
 `settings.local.json` that grants exactly the role's command surface, ENGRAM_DB
 in the env, and ENGRAM_IN_WATCHER set so the session's own tool calls don't
-recursively trigger engram hooks (the recursion guard). The sandbox dir is
-STABLE per (work session, role) — `claude -p --resume` resolves session ids
-within the current project (cwd), so a fresh dir per tick would orphan every
-resume id the moment it was extracted. The
-user's real cwd is handed to the model in the prompt so it can pass
-`--project-cwd` to `engram remember` / `--session-id` to `engram judge`.
+recursively trigger engram hooks (the recursion guard). Every tick is a FRESH
+`claude -p` call (ADR-0005) — the sandbox dir stays stable per (work session,
+role) only so its transcripts stay out of work projects, the recursion guard
+recognizes it, and `engram cleanup` can reap it cold. The user's real cwd is
+handed to the model in the prompt so it can pass `--project-cwd` to
+`engram remember` / `--session-id` to `engram judge`.
 
 Safety is the **command surface**, not a schema:
     formation → `engram remember` only
-    eval      → `engram judge` only
+    eval      → `engram judge` + `engram quarantine` only
 
 Model selection via `$ENGRAM_WATCHER_MODEL` (default sonnet); timeout via
 `$ENGRAM_WATCHER_TIMEOUT`.
@@ -57,12 +57,14 @@ DEFAULT_WATCHER_TIMEOUT = 300
 
 # The command surface each role is granted in its sandbox settings. This — not a
 # JSON schema — is what keeps a per-turn judge from nuking a good memory: eval
-# literally cannot run anything but `engram judge`.
+# can only judge surfaces and (reversibly, audited) quarantine by id.
 # Space-glob form mirrors the consolidation agent's proven `Bash(engram *)`
 # grant — restricted here to the single verb each role is allowed to run.
 ROLE_ALLOWLIST: dict[str, list[str]] = {
     "formation": ["Bash(engram remember *)"],
-    "eval": ["Bash(engram judge *)"],
+    # quarantine is eval's emergency brake (ADR-0007): id-only, soft-demote,
+    # audited — structurally weaker than `forget`, which stays off-list.
+    "eval": ["Bash(engram judge *)", "Bash(engram quarantine *)"],
 }
 
 # Sandbox-dir prefix per role — must stay in sync with
@@ -83,28 +85,24 @@ def _sandbox_root() -> Path:
 def _work_dir(role: str, work_session_id: str) -> Path:
     """The stable sandbox cwd for one (work session, role).
 
-    Stability is what makes `--resume` work: Claude Code stores conversations
-    under a per-project slug derived from the cwd *path string*, and
-    `--resume <id>` only resolves within the current project — so the path must
-    be the same every tick (recreating a deleted dir yields the same slug and
-    still resolves). What does orphan a persisted resume id is Claude Code's
-    own transcript cleanup; tick.py then falls back to a fresh session on the
-    retry. The session id is sanitized so a hostile or malformed id can't
-    traverse out of the sandbox root.
+    Stability is bookkeeping, not session state: one dir per (session, role)
+    keeps the watcher's own transcripts in a recognizable internal slug (the
+    recursion guard and the nightly collect exclude it) and gives `engram
+    cleanup` one cold thing to reap. The session id is sanitized so a hostile
+    or malformed id can't traverse out of the sandbox root.
     """
     return _sandbox_root() / f"{_WORKDIR_PREFIX[role]}{safe_filename_id(work_session_id)}"
 
 
 @dataclass(slots=True)
 class SessionResult:
-    """Outcome of one watcher `claude -p` turn. `ok` is False on any process
+    """Outcome of one watcher `claude -p` call. `ok` is False on any process
     failure (timeout, spawn error, non-zero exit); the tick treats that as a held
-    window and retries. `watcher_session_id` is the id to `--resume` next time.
+    window and retries.
     Cost/token fields come from the JSON envelope of a successful call (None on
     failure — there is no envelope to read) and land on the `watcher_runs` row."""
 
     ok: bool
-    watcher_session_id: str | None
     error: str | None = None
     cost_usd: float | None = None
     input_tokens: int | None = None
@@ -142,26 +140,25 @@ def _watcher_timeout() -> int:
 DELTA_FILENAME = "delta.txt"
 
 
-def run_watcher_session(role: str, message: str, resume: str | None,
+def run_watcher_session(role: str, message: str,
                         work_session_id: str, run_id: int | None = None,
                         delta: str = "") -> SessionResult:
-    """Run one permissioned `claude -p` turn for `role`, resuming `resume` if set.
+    """Run one FRESH permissioned `claude -p` call for `role` (ADR-0005).
 
     Ensures the (work session, role) stable sandbox cwd granting the role's
     allowlist, writes the transcript `delta` to `./delta.txt` there (the prompt
-    tells the model to read it), sets ENGRAM_DB + ENGRAM_IN_WATCHER (and
-    ENGRAM_RUN_ID, when given) in the env, and shells out via the shared seam.
-    Returns `ok=False` (held window) on any process failure. The side effects
-    happen in-band via the model's `engram` calls — there is nothing to parse.
+    tells the model to read it), sets ENGRAM_DB + ENGRAM_IN_WATCHER +
+    ENGRAM_ORIGIN_SESSION (and ENGRAM_RUN_ID, when given) in the env, and
+    shells out via the shared seam. Returns `ok=False` (held window) on any
+    process failure. The side effects happen in-band via the model's `engram`
+    calls — there is nothing to parse.
     """
     if not CLAUDE_BIN:
-        return SessionResult(ok=False, watcher_session_id=resume,
-                             error="claude CLI not found")
+        return SessionResult(ok=False, error="claude CLI not found")
 
     allow = ROLE_ALLOWLIST.get(role)
     if allow is None:
-        return SessionResult(ok=False, watcher_session_id=resume,
-                             error=f"unknown role {role!r}")
+        return SessionResult(ok=False, error=f"unknown role {role!r}")
 
     try:
         work_dir = _work_dir(role, work_session_id)
@@ -172,7 +169,7 @@ def run_watcher_session(role: str, message: str, resume: str | None,
         info = work_dir.lstat()
         if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid():
             return SessionResult(
-                ok=False, watcher_session_id=resume,
+                ok=False,
                 error=f"sandbox is not a directory we own: {work_dir}")
         delta_path = work_dir / DELTA_FILENAME
         delta_path.write_text(delta or "(no new activity)")
@@ -182,13 +179,16 @@ def run_watcher_session(role: str, message: str, resume: str | None,
         env = prepend_engram_bin(os.environ.copy())
         env[WATCHER_CHILD_ENV] = "1"
         env["ENGRAM_DB"] = str(db.db_path())
+        # Attribution for same-session suppression (ADR-0006): the child's
+        # `engram remember` reads this — attribution never depends on the
+        # model passing --origin-session itself.
+        env["ENGRAM_ORIGIN_SESSION"] = work_session_id
         if run_id is not None:
             env["ENGRAM_RUN_ID"] = str(run_id)
         result = invoke_claude_agent(
             message,
             timeout=_watcher_timeout(),
             model=_watcher_model(role),
-            resume=resume,
             cwd=str(work_dir),
             env=env,
             claude_bin=CLAUDE_BIN,
@@ -196,22 +196,17 @@ def run_watcher_session(role: str, message: str, resume: str | None,
     except Exception as e:
         # Sandbox setup failed (mkdir / delta write / settings). Fail open so
         # the tick finalizes the run row as error instead of crashing.
-        return SessionResult(ok=False, watcher_session_id=resume,
-                             error=f"session setup failed: {e}")
+        return SessionResult(ok=False, error=f"session setup failed: {e}")
 
     if result.error or result.returncode != 0:
-        return SessionResult(ok=False, watcher_session_id=resume,
+        return SessionResult(ok=False,
                              error=result.error or f"exit {result.returncode}")
-    # Reuse the existing session for the next --resume. We extract the id from the
-    # JSON envelope (always present) rather than pinning a caller --session-id:
-    # extraction is the proven path and composes with the permissioned session.
-    # The same envelope reports the call's exact cost and token usage — captured
+    # The JSON envelope reports the call's exact cost and token usage — captured
     # here so the run row (and `engram monitor`) can show watcher spend.
     payload = _envelope(result.stdout) or {}
     usage = payload.get("usage") or {}
     return SessionResult(
         ok=True,
-        watcher_session_id=payload.get("session_id") or resume,
         cost_usd=payload.get("total_cost_usd"),
         input_tokens=usage.get("input_tokens"),
         output_tokens=usage.get("output_tokens"),

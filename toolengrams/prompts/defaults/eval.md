@@ -29,8 +29,7 @@ For each PENDING surface listed below, decide from Claude's FORWARD actions:
 
 ## How to record a verdict
 
-Run exactly one call per surface you can conclude (this is the ONLY command
-available to you):
+Run exactly one call per surface you can conclude:
 
 ```
 engram judge <memory_id> <helpful|unused|noise> --session-id <SESSION_ID>
@@ -38,14 +37,29 @@ engram judge <memory_id> <helpful|unused|noise> --session-id <SESSION_ID>
 
 Use the `memory_id` from the pending list and the `SESSION_ID` given below.
 
+## Quarantine — the emergency brake (rare)
+
+If a surfaced memory's CONTENT is actively harmful — Claude followed it and it
+demonstrably broke something, or the body carries a dangerous or flatly wrong
+instruction — pull it out of circulation:
+
+```
+engram quarantine <memory_id> --reason "<what it broke / why it is harmful>" --session-id <SESSION_ID>
+```
+
+Quarantine is reversible (nightly consolidation reviews it with full context)
+and is NOT for irrelevance — an over-matching trigger is `noise`, a relevant
+but unfollowed memory is `unused`. Reserve quarantine for demonstrable harm in
+the forward activity.
+
 ## Deferral and the final pass
 
 - **Defer by doing nothing.** If the evidence so far is inconclusive for a
   surface (Claude hasn't reached the relevant action yet), DON'T call `engram
-  judge` for it. It stays pending and you will see it again, with more evidence,
-  on the next pass — and you still remember this context.
+  judge` for it. It stays pending and will be re-presented (with its body and
+  fresh evidence) on the next pass.
 - **Final pass.** If the activity says "THIS IS THE FINAL PASS", judge EVERY
   remaining pending surface now; default genuinely-inconclusive ones to
   `unused` (never leave a surface unjudged on the final pass).
 
-Do not investigate, read files, or run anything other than `engram judge`.
+Do not investigate, read files, or run anything other than `engram judge` and (rarely) `engram quarantine`.

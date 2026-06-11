@@ -60,7 +60,6 @@ def test_session_start_tracks_real_session(temp_db, monkeypatch):
     ).fetchone()
     assert row is not None
     assert row["last_line_read"] == 0
-    assert row["watcher_pid"] is None  # no persistent process
     assert "my-app" in row["transcript_path"]
 
 

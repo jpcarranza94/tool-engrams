@@ -15,12 +15,14 @@ from .cli import (
     consolidate,
     dashboard,
     doctor,
+    edit,
     forget,
     judge,
     mark_noise,
     migrate_v1_to_v2,
     monitor,
     pin,
+    quarantine,
     rebuild_triggers,
     recall,
     remember,
@@ -56,6 +58,8 @@ _SELF_PARSING = {
     "pin": pin.main,
     "recall": recall.main,
     "consolidate": consolidate.main,
+    "edit": edit.main,
+    "quarantine": quarantine.main,
     "status": status.main,
     "doctor": doctor.main,
     "seed": seed.main,
@@ -93,6 +97,11 @@ def main(argv: list[str] | None = None) -> int:
     # Listed so --help shows them, but dispatch goes through _SELF_PARSING above.
     sub.add_parser("remember", help="Extract triggers from body text and insert a memory", add_help=False)
     sub.add_parser("forget", help="Soft-demote or archive a memory", add_help=False)
+    sub.add_parser("edit", help="In-place content correction — preserves id, counters, "
+                                "surfaces, triggers", add_help=False)
+    sub.add_parser("quarantine", help="Pull a harmful memory out of circulation, "
+                                      "reversibly (eval watcher's emergency brake)",
+                   add_help=False)
     sub.add_parser("verify", help="Mark a memory as still accurate (last_verified_ts = now)", add_help=False)
     sub.add_parser("skip", help="Mark the most recent surface of a memory as unused (negative signal)", add_help=False)
     sub.add_parser("judge", help="Evaluation watcher verb: label a surfaced memory helpful|unused|noise", add_help=False)

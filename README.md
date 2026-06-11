@@ -75,8 +75,8 @@ No network and no LLM on the hot path (hooks are single-digit-ms SQL lookups). B
 | **PreToolUse hook** | `toolengrams/hooks/pretool.py` | Before every whitelisted tool call | Surfaces matching memories: a `block` denies the call + injects its body; a `hint` injects context only — it never emits a permission decision, so your approval prompts are untouched. The **surfacing gate** drops a hint whose quality `q` has fallen below 0.5. |
 | **PostToolUse hook** | `toolengrams/hooks/post_tool.py` | After a tool call | Increments the per-session turn counter and fires the recovery fast-path tick on a failure→success. **Does not credit usefulness** — that moved to the evaluation watcher. |
 | **PostToolUseFailure hook** | `toolengrams/hooks/post_tool_failure.py` | After a real tool failure | Surfaces `hint`-kind memories as `additionalContext` (gated by `q`); arms the formation watcher. |
-| **Formation watcher** | `toolengrams/watcher/tick.py` (role `formation`) | Detached `claude -p` per turn (Stop), recovery, correction, or session-end flush | Reads the JSONL transcript delta and calls `engram remember` for new patterns. |
-| **Evaluation watcher** | `toolengrams/watcher/tick.py` (role `eval`) | Detached `claude -p` at the Stop/flush **after** a surface, only when surfaces are pending | Reads forward, judges how each surfaced memory fared, and calls `engram judge`. |
+| **Formation watcher** | `toolengrams/watcher/tick.py` (role `formation`) | Fresh detached `claude -p` per turn (Stop), recovery, correction, or session-end flush | Reads the JSONL transcript delta (plus the tail of the prior window and the list of memories it already saved this session — ADR-0005) and calls `engram remember` for new patterns. |
+| **Evaluation watcher** | `toolengrams/watcher/tick.py` (role `eval`) | Fresh detached `claude -p` at the Stop/flush **after** a surface, only when surfaces are pending | Reads forward, judges how each surfaced memory fared (`engram judge`), and can reversibly `engram quarantine` a demonstrably harmful memory (ADR-0007). |
 | **Consolidation** | `toolengrams/consolidation/agent.py` | Nightly (launchd/cron) | Opus agent reviews yesterday's sessions — prunes noise, **narrows over-matching triggers**, discovers missed patterns, deduplicates. |
 
 ## Surfacing pipeline
@@ -260,7 +260,7 @@ The hot path (hooks) has **no external dependencies** — stdlib + sqlite3 only.
 
 **What runs in the background.** After a turn completes (Stop), the hooks fire detached `claude -p` sessions: one **formation** tick (forms memories from the transcript delta) and, only when surfaced memories are pending judgment, one **evaluation** tick. Rapid turns coalesce (default 45s window), so it's at most one model call per role per coalesced Stop event — not per tool call. A nightly **consolidation** agent (Opus) reviews the day's sessions. Nothing model-driven runs on the tool-call hot path.
 
-**What it costs.** Scales with how many sessions you run: observed sonnet-watcher days range from **~$1 (light use) to ~$9 (a heavy multi-session day — 50 watcher runs)**. Evaluation calls cost roughly 5× formation calls (they re-read surfaced context). Don't trust these numbers — measure your own: `engram monitor` shows per-run USD cost live, and `ENGRAM_WATCHER_MODEL=haiku` cuts the bill if it runs hot.
+**What it costs.** Scales with how much actually happens (delta size), not with session age: every tick is a fresh `claude -p` call (ADR-0005 — a 5-session audit found the old resumed-conversation design spent up to 96% of its budget re-carrying history for decisions the current delta already determined, a 2.5–9× premium). Pre-redesign observed sonnet days ranged ~$1–$9; expect materially less now. Don't trust estimates — measure your own: `engram monitor` shows per-run USD cost live, and `ENGRAM_WATCHER_MODEL=haiku` cuts the bill if it runs hot.
 
 **The levers.**
 
@@ -282,7 +282,8 @@ ToolEngrams injects stored text into Claude's context and can deny tool calls �
 
 - **Memory bodies are untrusted input to future sessions.** They form autonomously from transcripts via a background LLM, and they're injected at PreToolUse — a poisoned or prompt-injecting memory body would speak with the system's voice. `block`-kind memories deserve the most scrutiny: their body is delivered alongside a denied tool call, the moment Claude is most likely to comply. Audit what's stored with `engram recall` and watch formation decisions in `engram monitor`.
 - **Hints never touch the permission system.** A surfaced `hint` emits only `additionalContext` — no `permissionDecision` — so Claude Code's approval prompts fire exactly as they would without ToolEngrams. (An explicit hook "allow" would silently bypass the prompt for any command an autonomously-formed trigger matched; the system deliberately never grants that.) Only `block` emits a decision, and it is always `deny`.
-- **The watcher's containment boundary is a command allowlist, not trust in the model.** Each watcher role runs `claude -p` with a per-role allowlist — the formation session may only run `engram remember`, the evaluation session only `engram judge`. A hijacked watcher can write bad memories (auditable, reversible) but can't run arbitrary commands.
+- **The watcher's containment boundary is a command allowlist, not trust in the model.** Each watcher role runs `claude -p` with a per-role allowlist — the formation session may only run `engram remember`; the evaluation session only `engram judge` plus `engram quarantine` (id-only, soft-demote, audited with a reason — its emergency brake for demonstrably harmful memories, ADR-0007). A hijacked watcher can write bad memories (auditable, reversible) but can't run arbitrary commands, hard-delete, or rewrite existing bodies.
+- **A memory never surfaces into the session that formed it** (hints; ADR-0006). The origin session already lived the episode, a same-session "helpful" would be self-confirmation rather than transfer, and the suppression severs the loop where the watcher re-reads its own injected text as fresh evidence. Blocks are exempt — enforcement fires where the lesson was learned.
 - **The secrets gate** (above) keeps credentials out of the store, so a leaked DB or surfaced memory can't replay them.
 - **The kill switch** (`engram pause`) takes the whole system offline in one command while you investigate anything suspicious.
 
@@ -360,6 +361,12 @@ engram remember "<body>" \
   --scope <global|project> \
   --trigger "<token sequence>"    Author a memory (--path for file-glob bindings)
 engram forget "<name>"            Soft-demote or archive a memory
+engram edit <id|name> --body "…"  In-place content correction: preserves id,
+                                    counters, surfaces, triggers; stamps
+                                    last_verified_ts (--re-extract-triggers opt-in)
+engram quarantine <id> --reason   Reversibly pull a harmful memory from
+                                    circulation (soft-demote + audit event +
+                                    noise-mark; the eval watcher's verb)
 engram pin "<name>"               Pin/unpin (gate- and decay-exempt)
 engram judge <id> <verdict>       Label a surfaced memory helpful|unused|noise
                                     (the evaluation watcher's verb)
@@ -393,7 +400,7 @@ engram rebuild-triggers           Re-extract triggers from bodies (post-migratio
 - **session_surfaces** — which memories surfaced when, under which hook, and the eval watcher's `outcome ∈ {helpful, unused, noise}` (NULL until judged). Per-session dedup + reinforcement targeting.
 - **session_turns** — per-session tool-call counter.
 - **consolidation_runs** — nightly run log with quality metrics.
-- **watcher_state** — keyed `(work_session_id, role)` (formation + eval): per-role transcript cursor, resume id, and tick state (`armed`, `last_tick_ts`, `fail_streak`).
+- **watcher_state** — keyed `(work_session_id, role)` (formation + eval): per-role transcript cursor and tick state (`armed`, `last_tick_ts`, `fail_streak`).
 
 ## Configuration
 

@@ -41,9 +41,9 @@ def test_model_tick_writes_ok_run_and_passes_run_id(temp_db, tmp_path, monkeypat
     transcript.write_text(_bash_line("gh pr create"))
     seen = {}
 
-    def runner(role, message, resume, run_id=None, **kw):
+    def runner(role, message, run_id=None, **kw):
         seen["run_id"] = run_id
-        return SessionResult(ok=True, watcher_session_id="w1")
+        return SessionResult(ok=True)
 
     _wire(monkeypatch, tmp_path, runner)
     tick.ensure_row("s", str(transcript), "/cwd")
@@ -64,8 +64,8 @@ def test_failed_tick_writes_error_run(temp_db, tmp_path, monkeypatch):
     transcript = tmp_path / "t.jsonl"
     transcript.write_text(_bash_line("gh pr create"))
 
-    def runner(role, message, resume, run_id=None, **kw):
-        return SessionResult(ok=False, watcher_session_id=resume,
+    def runner(role, message, run_id=None, **kw):
+        return SessionResult(ok=False,
                              error="claude -p timed out (120s)")
 
     _wire(monkeypatch, tmp_path, runner)
@@ -83,9 +83,9 @@ def test_gated_tick_writes_no_run(temp_db, tmp_path, monkeypatch):
     transcript.write_text(_user_line("hi, how are you"))  # pure chat → gated
     called = []
 
-    def runner(role, message, resume, run_id=None, **kw):
+    def runner(role, message, run_id=None, **kw):
         called.append(role)
-        return SessionResult(ok=True, watcher_session_id="w1")
+        return SessionResult(ok=True)
 
     _wire(monkeypatch, tmp_path, runner)
     tick.ensure_row("s", str(transcript), "/cwd")
@@ -102,13 +102,13 @@ def test_run_row_committed_before_session_runs(temp_db, tmp_path, monkeypatch):
     transcript.write_text(_bash_line("gh pr create"))
     seen = {}
 
-    def runner(role, message, resume, run_id=None, **kw):
+    def runner(role, message, run_id=None, **kw):
         with db.session() as conn2:           # a separate connection
             row = conn2.execute(
                 "SELECT status FROM watcher_runs WHERE id = ?", (run_id,)
             ).fetchone()
         seen["status"] = row["status"] if row else None
-        return SessionResult(ok=True, watcher_session_id="w1")
+        return SessionResult(ok=True)
 
     _wire(monkeypatch, tmp_path, runner)
     tick.ensure_row("s", str(transcript), "/cwd")
@@ -125,7 +125,7 @@ def test_reaper_crashes_prior_running_row(temp_db, tmp_path, monkeypatch):
     transcript = tmp_path / "t.jsonl"
     transcript.write_text(_bash_line("gh pr create"))
     _wire(monkeypatch, tmp_path,
-          lambda role, message, resume, run_id=None, **kw: SessionResult(True, "w1"))
+          lambda role, message, run_id=None, **kw: SessionResult(True))
     tick.ensure_row("s", str(transcript), "/cwd")
     tick.run_tick("s", str(transcript), "/cwd")
 

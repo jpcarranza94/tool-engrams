@@ -103,20 +103,23 @@ def record_event(
     memory_id: int | None,
     memory_name: str | None,
     outcome: str | None = None,
+    detail: str | None = None,
 ) -> None:
-    """Record one memory a run created (`kind='created'`) or judged
-    (`kind='judged'`, with `outcome`). Written by the engram CLI child."""
+    """Record one memory a run created (`kind='created'`), judged
+    (`kind='judged'`, with `outcome`), or quarantined (`kind='quarantined'`,
+    with the reason in `detail`). Written by the engram CLI child."""
     conn.execute(
         "INSERT INTO watcher_run_events "
-        "(run_id, ts, kind, memory_id, memory_name, outcome) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        (run_id, ts, kind, memory_id, memory_name, outcome),
+        "(run_id, ts, kind, memory_id, memory_name, outcome, detail) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (run_id, ts, kind, memory_id, memory_name, outcome, detail),
     )
 
 
 def record_cli_event(conn: sqlite3.Connection, *, kind: str,
                      memory_id: int | None, memory_name: str | None,
-                     outcome: str | None = None) -> None:
+                     outcome: str | None = None,
+                     detail: str | None = None) -> None:
     """Record a created/judged event IF this CLI call is running inside a watcher
     session (`$ENGRAM_RUN_ID` set). No-op for manual or consolidation `engram`
     calls. Best-effort — never raises into the caller (it's telemetry)."""
@@ -126,9 +129,42 @@ def record_cli_event(conn: sqlite3.Connection, *, kind: str,
     try:
         run_id = int(raw)
         record_event(conn, run_id=run_id, ts=int(time.time()), kind=kind,
-                     memory_id=memory_id, memory_name=memory_name, outcome=outcome)
+                     memory_id=memory_id, memory_name=memory_name, outcome=outcome,
+                     detail=detail)
     except Exception:
         pass
+
+
+def session_created_memories(conn: sqlite3.Connection,
+                             work_session_id: str) -> list[sqlite3.Row]:
+    """Memories the formation role already created/updated for this work session
+    (the stateless tick's "what I saved this session" list, ADR-0005). Distinct
+    by memory_id, newest first; raw rows (memory_id, memory_name)."""
+    return conn.execute(
+        "SELECT e.memory_id, e.memory_name, MAX(e.ts) AS ts "
+        "FROM watcher_run_events e JOIN watcher_runs r ON r.id = e.run_id "
+        "WHERE r.work_session_id = ? AND r.role = 'formation' "
+        "  AND e.kind = 'created' AND e.memory_id IS NOT NULL "
+        "GROUP BY e.memory_id ORDER BY ts DESC",
+        (work_session_id,),
+    ).fetchall()
+
+
+def prev_window_start(conn: sqlite3.Connection, work_session_id: str,
+                      role: str, before_cursor: int, max_windows: int = 2) -> int | None:
+    """cursor_from of the oldest of the last `max_windows` ok runs that ended at
+    or below `before_cursor` — the start of the prior-delta tail the stateless
+    formation tick re-reads (ADR-0005). None if no prior ok run."""
+    rows = conn.execute(
+        "SELECT cursor_from FROM watcher_runs "
+        "WHERE work_session_id = ? AND role = ? AND status = 'ok' "
+        "  AND cursor_to IS NOT NULL AND cursor_to <= ? "
+        "ORDER BY started_ts DESC LIMIT ?",
+        (work_session_id, role, before_cursor, max_windows),
+    ).fetchall()
+    if not rows:
+        return None
+    return min(r["cursor_from"] or 0 for r in rows)
 
 
 def count_runs_before(conn: sqlite3.Connection, cutoff_ts: int) -> int:

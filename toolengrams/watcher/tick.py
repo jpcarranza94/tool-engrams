@@ -13,9 +13,16 @@ Two roles share this engine:
     surfaces. Reads FORWARD from its own trailing cursor and judges how each
     surfaced memory fared. Defers by not judging; flush forces closure.
 
-State (cursor / resume id / armed / fail_streak) lives per `(work_session_id,
-role)` in `watcher_state`, behind `state.py`. Ticks for the same (session, role)
-are serialized by a non-blocking file lock; the two roles run concurrently.
+Every tick is a FRESH `claude -p` call (ADR-0005) — no `--resume`. Formation
+re-supplies the two useful bits of cross-tick context explicitly: the tail of
+the previous 1-2 delta windows (re-read from the work transcript via the run
+log's cursor spans) and the list of memories it already saved this session
+(from `watcher_run_events`). Eval needs neither — the pending-surfaces list it
+gets every tick IS its state.
+
+State (cursor / armed / fail_streak) lives per `(work_session_id, role)` in
+`watcher_state`, behind `state.py`. Ticks for the same (session, role) are
+serialized by a non-blocking file lock; the two roles run concurrently.
 
 Tail recovery: a session can die before its final Stop/flush. `sweep_idle_
 sessions` (run from SessionStart) re-fires a formation flush — and an eval flush
@@ -34,8 +41,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .. import db, pause
-from ..prompts.eval import EVAL_SUBSEQUENT_HEADER, build_eval_prompt
-from ..prompts.watcher import WATCHER_SUBSEQUENT_HEADER, build_watcher_prompt
+from ..prompts.eval import build_eval_prompt
+from ..prompts.watcher import build_watcher_prompt
 from ..retrieval import session_state
 from ..utils import WATCHER_CHILD_ENV, safe_filename_id as _safe
 from . import runs_store, state
@@ -248,23 +255,79 @@ _ACTIVITY_POINTER = (
 )
 
 
+# Cap on the prior-delta tail injected into a fresh formation tick (ADR-0005):
+# enough to pair an episode's failure (last window) with its fix (this window),
+# small enough that the message never grows with session age.
+PRIOR_TAIL_MAX_CHARS = 4000
+
+
 def _formation_decision(session_id: str, cwd: str, delta: str, n_lines: int,
-                        flush: bool, armed: bool, watcher_session_id: str | None) -> _Decision:
+                        flush: bool, armed: bool, transcript_path: str = "",
+                        cursor: int = 0) -> _Decision:
     """Gate a formation window: a pure-chat turn with nothing armed isn't worth a
-    model call (advance past it). Otherwise build the formation message."""
+    model call (advance past it). Otherwise build the fresh-tick formation
+    message: full prompt + this session's prior saves + prior-delta tail."""
     if n_lines == 0:
         return _Decision(skip=True, advance=False)  # nothing new
     has_activity = ("TOOL (" in delta) or ("RESULT:" in delta)
     if not delta.strip() or (not flush and not armed and not has_activity):
         log = f"SKIP-GATE session={session_id} role=formation lines={n_lines}" if delta.strip() else None
         return _Decision(skip=True, advance=True, log=log)
-    head = build_watcher_prompt(cwd) if watcher_session_id is None else WATCHER_SUBSEQUENT_HEADER
-    message = head + _ACTIVITY_POINTER
+    message = (build_watcher_prompt(cwd)
+               + _session_saves_section(session_id)
+               + _prior_tail_section(session_id, transcript_path, cursor)
+               + _ACTIVITY_POINTER)
     return _Decision(skip=False, message=message, delta=delta)
 
 
+def _session_saves_section(session_id: str) -> str:
+    """Names of memories this session's formation already saved — the stateless
+    replacement for "remembering" them (dedup/refinement signal, ADR-0005)."""
+    try:
+        with db.session() as conn:
+            rows = runs_store.session_created_memories(conn, session_id)
+    except Exception:
+        return ""
+    if not rows:
+        return ""
+    lines = ["\n\n--- Already saved this session ---",
+             "You (in earlier passes) already saved these memories from this same",
+             "work session. Don't re-save the same lesson; if a recurrence adds",
+             "genuinely new information, save a body that MERGES old and new:"]
+    for r in rows[:10]:
+        lines.append(f"  [id={r['memory_id']}] {r['memory_name']}")
+    return "\n".join(lines)
+
+
+def _prior_tail_section(session_id: str, transcript_path: str, cursor: int) -> str:
+    """Tail of the previous 1-2 delta windows, re-read from the work transcript
+    via the run log's cursor spans — bounded cross-delta context so an episode
+    spanning two windows (failure last tick, fix this tick) still assembles."""
+    if not transcript_path or cursor <= 0:
+        return ""
+    try:
+        with db.session() as conn:
+            start = runs_store.prev_window_start(conn, session_id, "formation", cursor)
+        if start is None or start >= cursor:
+            return ""
+        lines = _read_lines_from(transcript_path, start)[: cursor - start]
+        tail = _format_delta(lines)
+    except Exception:
+        return ""
+    if not tail.strip():
+        return ""
+    if len(tail) > PRIOR_TAIL_MAX_CHARS:
+        tail = "…" + tail[-PRIOR_TAIL_MAX_CHARS:]
+    return ("\n\n--- Recent prior activity (context only) ---\n"
+            "The tail of the previous window(s), for episodes that span passes "
+            "(e.g. a failure there, its fix in the new activity). Do not save "
+            "memories from this section alone — it was already processed:\n"
+            + tail)
+
+
 def _eval_decision(session_id: str, cwd: str, delta: str, n_lines: int,
-                   flush: bool, armed: bool, watcher_session_id: str | None) -> _Decision:
+                   flush: bool, armed: bool, transcript_path: str = "",
+                   cursor: int = 0) -> _Decision:
     """Decide an eval window. Run only when surfaces are pending; with pending
     surfaces but no new evidence (and not a flush), DEFER (hold the cursor)."""
     with db.session() as conn:
@@ -275,15 +338,13 @@ def _eval_decision(session_id: str, cwd: str, delta: str, n_lines: int,
     if n_lines == 0 and not flush:
         # Pending, but no forward evidence yet → defer (hold cursor).
         return _Decision(skip=True, advance=False)
-    message = _eval_message(session_id, pending, flush,
-                            is_new=watcher_session_id is None)
+    message = _eval_message(session_id, pending, flush)
     return _Decision(skip=False, message=message, delta=delta)
 
 
-def _eval_message(session_id: str, pending_rows, flush: bool, is_new: bool) -> str:
-    head = build_eval_prompt() if is_new else EVAL_SUBSEQUENT_HEADER
+def _eval_message(session_id: str, pending_rows, flush: bool) -> str:
     lines = [
-        head,
+        build_eval_prompt(),
         f"SESSION_ID: {session_id}   (pass this verbatim to --session-id)",
         "",
         "PENDING SURFACES (judge each you can conclude):",
@@ -372,19 +433,18 @@ def run_tick(session_id: str, transcript_path: str, cwd: str,
 
         st = state.read(session_id, role)
         last_line = st.last_line_read
-        watcher_session_id = st.watcher_session_id
         fail_streak = st.fail_streak
 
         new_lines = _read_lines_from(transcript_path, last_line)
         delta = _format_delta(new_lines) if new_lines else ""
 
         decision = _DECIDERS[role](
-            session_id, cwd, delta, len(new_lines), flush, st.armed, watcher_session_id,
+            session_id, cwd, delta, len(new_lines), flush, st.armed,
+            transcript_path, last_line,
         )
         if decision.skip:
             advance = len(new_lines) if decision.advance else 0
             state.commit_tick(session_id, role=role,
-                              watcher_session_id=watcher_session_id,
                               last_line=last_line + advance, armed=0, fail_streak=0)
             if decision.log:
                 _log(decision.log)
@@ -394,14 +454,9 @@ def run_tick(session_id: str, transcript_path: str, cwd: str,
         # Open the run row and commit it BEFORE spawning claude, so the model's
         # engram CLI calls can record events against it via $ENGRAM_RUN_ID.
         run_id = _open_run(session_id, role, cwd, flush, last_line)
-        # The PR thesis "resume resolves" must be field-verifiable: log whether
-        # this call resumed the watcher session or started fresh.
-        resumed = int(watcher_session_id is not None)
         result = run_watcher_session(role, decision.message,
-                                     resume=watcher_session_id,
                                      work_session_id=session_id, run_id=run_id,
                                      delta=decision.delta)
-        watcher_session_id = result.watcher_session_id
         failed = not result.ok
         # cursor_to records the window this run READ (last_line..+new_lines); on a
         # failure the persisted cursor is held below this — the run log shows what
@@ -411,10 +466,10 @@ def run_tick(session_id: str, transcript_path: str, cwd: str,
         if failed:
             _log(f"MODEL-ERROR session={session_id} role={role} "
                  f"delta_chars={len(delta)} attempt={attempt} flush={int(flush)} "
-                 f"resumed={resumed} error={(result.error or '')[:200]}")
+                 f"error={(result.error or '')[:200]}")
         else:
             _log(f"MODEL-OK session={session_id} role={role} "
-                 f"lines={len(new_lines)} resumed={resumed}")
+                 f"lines={len(new_lines)}")
 
         # Hold the window on failure, give up after the cap (fail_streak persisted).
         advance, fail_streak = _retry_decision(failed, fail_streak, MAX_FORM_RETRIES)
@@ -423,11 +478,7 @@ def run_tick(session_id: str, transcript_path: str, cwd: str,
                 _log(f"SKIP-GIVEUP session={session_id} role={role} "
                      f"lines={len(new_lines)} after {MAX_FORM_RETRIES} attempts")
             last_line += len(new_lines)
-        elif watcher_session_id is not None:
-            # Retry from a clean session so a bad turn in --resume history can't
-            # bias the retry.
-            watcher_session_id = None
-        state.commit_tick(session_id, role=role, watcher_session_id=watcher_session_id,
+        state.commit_tick(session_id, role=role,
                           last_line=last_line, armed=0, fail_streak=fail_streak)
     return 0
 

@@ -107,6 +107,14 @@ def _run(payload: dict[str, Any]) -> int:
         # Surfacing gate: suppress hints that have proven more noise than signal
         # (q < 0.5 after warm-up). block + pinned are exempt (see scoring.is_gated).
         candidates = [c for c in candidates if not is_gated(c)]
+
+        # Same-session suppression (ADR-0006): a hint never surfaces into the
+        # session that formed it — the session already lived the episode, and a
+        # same-session "helpful" would be self-confirmation, not transfer.
+        # Blocks are exempt: enforcement must fire where the lesson was learned.
+        candidates = [c for c in candidates
+                      if c.kind == "block" or not c.origin_session_id
+                      or c.origin_session_id != session_id]
         if not candidates:
             _emit({})
             return 0

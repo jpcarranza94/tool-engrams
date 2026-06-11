@@ -118,6 +118,7 @@ def _merge_token_candidate(
             pinned=bool(row["pinned"]),
             kind=row["kind"],
             scope=row["scope"],
+            origin_session_id=row["origin_session_id"],
         )
 
 
@@ -137,6 +138,7 @@ def _merge_path_candidate(store: dict[int, Candidate], row: sqlite3.Row) -> None
         pinned=bool(row["pinned"]),
         kind=row["kind"],
         scope=row["scope"],
+        origin_session_id=row["origin_session_id"],
     )
 
 

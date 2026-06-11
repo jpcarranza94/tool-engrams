@@ -1,8 +1,9 @@
 """Tests for the event-driven watcher tick (gate, coalesce, arm, retry, lock)
 across both roles — formation and evaluation.
 
-The model seam is `tick.run_watcher_session(role, message, resume)` →
-`SessionResult(ok, watcher_session_id)`. There is no JSON parsing or in-process
+The model seam is `tick.run_watcher_session(role, message)` →
+`SessionResult(ok)` — every tick is a fresh call (ADR-0005). There is no JSON
+parsing or in-process
 save; the watcher session calls the engram CLI itself.
 """
 
@@ -35,8 +36,8 @@ def _bash_line(cmd: str) -> str:
 
 def _ok(sid="w1"):
     """A runner that always succeeds, returning session id `sid`."""
-    def _runner(role, message, resume, run_id=None, **kw):
-        return SessionResult(ok=True, watcher_session_id=sid)
+    def _runner(role, message, run_id=None, **kw):
+        return SessionResult(ok=True)
     return _runner
 
 
@@ -130,7 +131,7 @@ def test_run_tick_gate_skips_pure_chat(temp_db, tmp_path, monkeypatch):
     transcript.write_text(_user_line("hello there, how are you"))
     calls = []
     _wire(monkeypatch, tmp_path,
-          lambda role, msg, resume, run_id=None, **kw: calls.append(role) or SessionResult(True, "w1"))
+          lambda role, msg, run_id=None, **kw: calls.append(role) or SessionResult(True))
     tick.ensure_row("s", str(transcript), "/cwd")
 
     tick.run_tick("s", str(transcript), "/cwd")
@@ -144,7 +145,7 @@ def test_run_tick_armed_forces_model_on_chat(temp_db, tmp_path, monkeypatch):
     transcript.write_text(_user_line("ok thanks"))
     calls = []
     _wire(monkeypatch, tmp_path,
-          lambda role, msg, resume, run_id=None, **kw: calls.append(role) or SessionResult(True, "w1"))
+          lambda role, msg, run_id=None, **kw: calls.append(role) or SessionResult(True))
     tick.ensure_row("s", str(transcript), "/cwd")
     tick.arm("s")
 
@@ -159,21 +160,20 @@ def test_run_tick_calls_model_on_tool_activity(temp_db, tmp_path, monkeypatch):
     transcript.write_text(_bash_line("gh pr create --title x"))
     seen = []
     _wire(monkeypatch, tmp_path,
-          lambda role, msg, resume, run_id=None, **kw: seen.append((role, resume)) or SessionResult(True, "w1"))
+          lambda role, msg, run_id=None, **kw: seen.append(role) or SessionResult(True))
     tick.ensure_row("s", str(transcript), "/cwd")
 
     tick.run_tick("s", str(transcript), "/cwd")
 
-    assert seen == [("formation", None)]      # formation session, fresh (no resume)
+    assert seen == ["formation"]
     assert _col("s", "last_line_read") == 1
-    assert _col("s", "watcher_session_id") == "w1"
 
 
 def test_run_tick_holds_cursor_and_persists_streak_on_failure(temp_db, tmp_path, monkeypatch):
     transcript = tmp_path / "t.jsonl"
     transcript.write_text(_bash_line("gh pr create"))
     _wire(monkeypatch, tmp_path,
-          lambda role, msg, resume, run_id=None, **kw: SessionResult(ok=False, watcher_session_id=resume))
+          lambda role, msg, run_id=None, **kw: SessionResult(ok=False))
     tick.ensure_row("s", str(transcript), "/cwd")
 
     tick.run_tick("s", str(transcript), "/cwd")
@@ -187,7 +187,7 @@ def test_run_tick_lock_prevents_concurrent_processing(temp_db, tmp_path, monkeyp
     transcript.write_text(_bash_line("gh pr create"))
     calls = []
     _wire(monkeypatch, tmp_path,
-          lambda role, msg, resume, run_id=None, **kw: calls.append(role) or SessionResult(True, "w1"))
+          lambda role, msg, run_id=None, **kw: calls.append(role) or SessionResult(True))
     tick.ensure_row("s", str(transcript), "/cwd")
 
     # Hold the per-(session, role) lock, then a second tick must no-op.
@@ -209,9 +209,9 @@ def test_run_tick_holds_then_gives_up_across_events(temp_db, tmp_path, monkeypat
     transcript.write_text(_bash_line("gh pr create"))
     calls = {"n": 0}
 
-    def boom(role, msg, resume, run_id=None, **kw):
+    def boom(role, msg, run_id=None, **kw):
         calls["n"] += 1
-        return SessionResult(ok=False, watcher_session_id=resume)
+        return SessionResult(ok=False)
 
     _wire(monkeypatch, tmp_path, boom)
     tick.ensure_row("s", str(transcript), "/cwd")
@@ -224,30 +224,27 @@ def test_run_tick_holds_then_gives_up_across_events(temp_db, tmp_path, monkeypat
     assert _col("s", "fail_streak") == 0         # streak reset after give-up
 
 
-def test_run_tick_resets_session_on_failure_across_events(temp_db, tmp_path, monkeypatch):
-    """After a failure on a --resume window, the next event must retry via a
-    FRESH session (resume=None), not re-feed the bad turn via resume."""
+def test_run_tick_failure_then_retry_consumes_window(temp_db, tmp_path, monkeypatch):
+    """A failed window is retried by the next event's FRESH call (every call is
+    fresh now — ADR-0005) and ultimately consumed."""
     transcript = tmp_path / "t.jsonl"
     transcript.write_text(_bash_line("first window"))
-    route = []
     script = iter([True, False, True])  # window1 ok, window2 fails, window2 retried ok
 
-    def fake(role, msg, resume, run_id=None, **kw):
-        route.append(resume)
-        ok = next(script)
-        return SessionResult(ok=ok, watcher_session_id="w1" if ok else resume)
+    def fake(role, msg, run_id=None, **kw):
+        return SessionResult(ok=next(script))
 
     _wire(monkeypatch, tmp_path, fake)
     tick.ensure_row("s", str(transcript), "/cwd")
 
-    tick.run_tick("s", str(transcript), "/cwd")        # event 1: window1, fresh → ok
+    tick.run_tick("s", str(transcript), "/cwd")        # event 1: window1 ok
     with open(transcript, "a") as f:                   # window2 arrives
         f.write(_bash_line("second window"))
-    tick.run_tick("s", str(transcript), "/cwd")        # event 2: window2 via resume → fail
-    tick.run_tick("s", str(transcript), "/cwd")        # event 3: window2 via fresh → ok
+    tick.run_tick("s", str(transcript), "/cwd")        # event 2: window2 fails (held)
+    tick.run_tick("s", str(transcript), "/cwd")        # event 3: window2 retried ok
 
-    assert route == [None, "w1", None]        # new, resume, new
     assert _col("s", "last_line_read") == 2   # both windows ultimately consumed
+    assert _col("s", "fail_streak") == 0
 
 
 # ---------- eval run_tick ----------
@@ -258,7 +255,7 @@ def test_eval_tick_skips_when_no_pending(temp_db, tmp_path, monkeypatch):
     transcript.write_text(_bash_line("git push"))
     calls = []
     _wire(monkeypatch, tmp_path,
-          lambda role, msg, resume, run_id=None, **kw: calls.append(role) or SessionResult(True, "e1"))
+          lambda role, msg, run_id=None, **kw: calls.append(role) or SessionResult(True))
     tick.ensure_row("s", str(transcript), "/cwd", role="eval")
 
     tick.run_tick("s", str(transcript), "/cwd", role="eval")
@@ -273,14 +270,13 @@ def test_eval_tick_runs_when_pending(temp_db, tmp_path, monkeypatch):
     _seed_pending_surface("s")
     seen = []
     _wire(monkeypatch, tmp_path,
-          lambda role, msg, resume, run_id=None, **kw: seen.append((role, resume)) or SessionResult(True, "e1"))
+          lambda role, msg, run_id=None, **kw: seen.append(role) or SessionResult(True))
     tick.ensure_row("s", str(transcript), "/cwd", role="eval")
 
     tick.run_tick("s", str(transcript), "/cwd", role="eval")
 
-    assert seen == [("eval", None)]                          # eval session ran
+    assert seen == ["eval"]                                  # eval session ran
     assert _col("s", "last_line_read", role="eval") == 1
-    assert _col("s", "watcher_session_id", role="eval") == "e1"
 
 
 def test_eval_tick_defers_when_no_new_evidence(temp_db, tmp_path, monkeypatch):
@@ -289,7 +285,7 @@ def test_eval_tick_defers_when_no_new_evidence(temp_db, tmp_path, monkeypatch):
     _seed_pending_surface("s")
     calls = []
     _wire(monkeypatch, tmp_path,
-          lambda role, msg, resume, run_id=None, **kw: calls.append(role) or SessionResult(True, "e1"))
+          lambda role, msg, run_id=None, **kw: calls.append(role) or SessionResult(True))
     tick.ensure_row("s", str(transcript), "/cwd", role="eval")
 
     tick.run_tick("s", str(transcript), "/cwd", role="eval")
@@ -304,7 +300,7 @@ def test_eval_tick_flush_forces_run_without_new_lines(temp_db, tmp_path, monkeyp
     _seed_pending_surface("s")
     seen = []
     _wire(monkeypatch, tmp_path,
-          lambda role, msg, resume, run_id=None, **kw: seen.append(role) or SessionResult(True, "e1"))
+          lambda role, msg, run_id=None, **kw: seen.append(role) or SessionResult(True))
     tick.ensure_row("s", str(transcript), "/cwd", role="eval")
 
     tick.run_tick("s", str(transcript), "/cwd", role="eval", flush=True)

@@ -38,6 +38,7 @@ class Memory:
     pinned: bool
     archived_ts: int | None
     last_verified_ts: int | None
+    origin_session_id: str | None = None
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "Memory":
@@ -57,6 +58,7 @@ class Memory:
             pinned=bool(row["pinned"]),
             archived_ts=row["archived_ts"],
             last_verified_ts=row["last_verified_ts"],
+            origin_session_id=row["origin_session_id"],
         )
 
 
@@ -110,6 +112,7 @@ class Candidate:
     pinned: bool
     kind: MemoryKind
     scope: MemoryScope
+    origin_session_id: str | None = None
     final_score: float = 0.0
 
     @property
