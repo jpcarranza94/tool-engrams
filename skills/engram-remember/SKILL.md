@@ -65,4 +65,12 @@ If neither `--trigger` nor `--path` is provided, triggers are auto-extracted fro
 
 ## Dedup
 
-If an existing memory already has overlapping triggers, the body is updated instead of creating a duplicate.
+If an existing memory already has overlapping triggers, the body is updated instead of creating a duplicate. The output then carries `existing_match.previous_body` — the body you just replaced. Read it: if it held still-valid guidance missing from yours, re-run `engram remember` once with a single merged body.
+
+## Correcting an existing memory
+
+To fix a memory's content directly, don't forget + re-remember (that destroys its id and reinforcement history). Edit in place:
+
+```bash
+engram edit <id|name> --body "<corrected body>"
+```

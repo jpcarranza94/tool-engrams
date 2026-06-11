@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from toolengrams.cli import forget, recall, remember
+from toolengrams.cli import edit, forget, quarantine, recall, remember
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -21,6 +21,17 @@ SKILL_PARSERS = {
     "engram-remember": ("remember", remember._build_parser),
     "engram-recall": ("recall", recall._build_parser),
     "engram-forget": ("forget", forget._build_parser),
+}
+
+# Skills legitimately cross-reference sibling verbs ("for corrections use
+# engram edit"), so EVERY `engram <sub>` line in every skill is validated
+# against this registry — not just the skill's own verb.
+ALL_PARSERS = {
+    "remember": remember._build_parser,
+    "recall": recall._build_parser,
+    "forget": forget._build_parser,
+    "edit": edit._build_parser,
+    "quarantine": quarantine._build_parser,
 }
 
 _CODE_BLOCK = re.compile(r"```(?:bash|sh)?\n(.*?)```", re.DOTALL)
@@ -58,6 +69,36 @@ def test_skill_has_no_frontmatter_name(skill_name):
         f"skills/{skill_name}: remove the frontmatter `name` — the folder/"
         "symlink basename is the skill name."
     )
+
+
+_ENGRAM_LINE = re.compile(r"^engram (\S+)", re.M)
+
+
+@pytest.mark.parametrize("skill_name", sorted(SKILL_PARSERS))
+def test_all_engram_lines_use_known_verbs_and_flags(skill_name):
+    """Every `engram <sub>` invocation in the skill — including
+    cross-references to sibling verbs — must name a registered subcommand
+    and use only flags its parser accepts."""
+    skill_md = (REPO_ROOT / "skills" / skill_name / "SKILL.md").read_text()
+    for block in _CODE_BLOCK.findall(skill_md):
+        joined = re.sub(r"\\\n", " ", block)
+        for line in joined.splitlines():
+            line = line.strip()
+            m = re.match(r"^engram (\S+)", line)
+            if not m:
+                continue
+            sub = m.group(1)
+            assert sub in ALL_PARSERS, (
+                f"{skill_name}/SKILL.md references `engram {sub}` — not in the "
+                "test's parser registry; add it (or fix the doc)."
+            )
+            known = set(ALL_PARSERS[sub]()._option_string_actions)
+            line_clean = line.replace("[", " ").replace("]", " ")
+            used = {tok for tok in shlex.split(line_clean) if tok.startswith("--")}
+            assert used <= known, (
+                f"{skill_name}/SKILL.md documents flags missing from "
+                f"`engram {sub}`: {sorted(used - known)}"
+            )
 
 
 @pytest.mark.parametrize("skill_name", sorted(SKILL_PARSERS))

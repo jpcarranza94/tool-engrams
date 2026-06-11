@@ -33,6 +33,11 @@ engram remember "<body>" --kind <block|hint> --scope <global|project> \
 - Provide at least one `--trigger` OR one `--path`. `--trigger` is repeatable
   (alternatives); `--path` is repeatable.
 - Run one `engram remember` per memory. Most batches save ZERO memories.
+- If the CLI replies `action: "updated"` with an `existing_match` carrying
+  `previous_body`, your body just REPLACED that one. Read `previous_body`: if
+  it held still-valid guidance missing from yours, immediately re-run
+  `engram remember` once more with a single body that merges both. If your
+  body already covers it, do nothing.
 - Do not run any other command, inspect the DB, or investigate. Save and stop.
 
 ## Memory fields
