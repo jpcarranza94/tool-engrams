@@ -9,6 +9,9 @@ automatically in the background — you don't need to manage it.
 If you want to manually save or manage memories:
   Save: engram remember "<body>" --trigger "<token sequence>" --kind <block|hint>
   Example: engram remember "Use --force-with-lease" --trigger "git push --force" --trigger "git push -f" --kind block
+  Correct: engram edit <id|name> --body "<new body>"   (in-place — preserves
+          the memory's id and reinforcement history; never forget+re-remember
+          to fix content)
   Forget: engram forget "<name>"
   Browse: engram recall [query]
 

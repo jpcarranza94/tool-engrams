@@ -95,7 +95,8 @@ The memory inventory above is already ordered audit-first: `verified=never` rows
 4. **Read the full body before judging.** The body shown in the inventory is truncated to 500 chars. If you're about to archive based on a truncation, run `Bash(engram recall --id <N>)` to see the full text first.
 
 5. **Decide:**
-   - If a diff clearly contradicts the memory body (e.g. memory says "X is required in file Y" but a recent commit removed X from Y), `engram forget --delete "<name>"`. Reversible later via `engram forget --restore "<name>"` if you discover you were wrong.
+   - If a diff contradicts only a DETAIL of the body (a renamed flag, a moved file, a changed default) and the lesson itself still holds, REPAIR it: `engram edit <id> --body "<corrected body>"` -- counters and triggers survive, and the edit stamps last_verified_ts. Prefer this over archiving partially-right knowledge.
+   - If a diff contradicts the memory's core claim, `engram forget --delete "<name>"`. Reversible later via `engram forget --restore "<name>"` if you discover you were wrong.
    - If the body still holds (or if you can't find evidence of contradiction in the relevant commits), `engram verify "<name>"` — this stamps `last_verified_ts = NOW` so future runs skip the audit until the staleness horizon elapses.
    - If genuinely uncertain, leave it alone; don't verify or archive on a coin flip.
 
@@ -140,6 +141,7 @@ Before the JSON block, include a human-readable report with:
 - `Bash(engram forget --delete "name")` -- archive a memory
 - `Bash(engram forget --restore "name")` -- undo a previous archive (use if a teammate or a prior run was over-eager)
 - `Bash(engram verify "name")` -- mark a memory's body as still accurate (sets last_verified_ts = now); use after auditing it against git history and finding no contradiction
+- `Bash(engram edit <id> --body "...")` -- repair a memory's body IN PLACE, preserving its id, counters, surfaces, and triggers (also stamps last_verified_ts). The counter-preserving fix for content that is mostly right but stale/wrong in a detail -- prefer it over forget+remember, which resets reinforcement history. `--re-extract-triggers` re-derives triggers from the new body (refuses if none would remain)
 - `Bash(engram skip "name" --session-id <S>)` -- mark a memory's most recent unmarked surface as outcome='unused' in a specific session. Useful for retrospectively flagging surfaces that you judged unhelpful while reviewing session transcripts.
 - `Bash(engram mark-noise "name")` -- retroactively label a memory's unmarked surfaces as outcome='noise'. Add `--session-id <S>` to scope to one session. Use when concluding a memory is noise during consolidation rather than running raw `Bash(sqlite3 UPDATE …)` SQL.
 - `Bash(engram trigger <memory_id> --list)` -- list a memory's triggers with their ids
