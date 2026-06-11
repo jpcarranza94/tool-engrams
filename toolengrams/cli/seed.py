@@ -184,7 +184,7 @@ def _insert_triggers(conn, memory_id: int, triggers: list[dict]) -> None:
         if kind == "token_subseq":
             tokens = list(t["tokens"])
             if not tokens:
-                continue
-            memory_store.add_token_trigger(conn, memory_id, tokens[0], tokens)
+                continue  # skip the entry, don't crash — seed data is ours
+            memory_store.add_token_trigger(conn, memory_id, tokens)
         elif kind == "path_glob":
             memory_store.add_path_trigger(conn, memory_id, t["path_pattern"])

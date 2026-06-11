@@ -71,7 +71,7 @@ def insert_candidate_triggers(
                     file=sys.stderr,
                 )
                 continue
-            memory_store.add_token_trigger(conn, memory_id, tokens[0], list(tokens))
+            memory_store.add_token_trigger(conn, memory_id, tokens)
         elif c.kind == "path_glob":
             if not c.path_pattern:
                 continue

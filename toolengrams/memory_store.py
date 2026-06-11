@@ -436,11 +436,17 @@ def restore(conn: sqlite3.Connection, memory_id: int) -> None:
 
 
 def add_token_trigger(conn: sqlite3.Connection, memory_id: int,
-                      first_token: str, tokens: list[str]) -> None:
+                      tokens: list[str]) -> None:
+    """Insert a token_subseq trigger. first_token is derived here — the one
+    place that owns the contract: stored as-is (no case folding), because
+    the lookup is case-sensitive and command names are too (Make != make)."""
+    tokens = list(tokens)
+    if not tokens:
+        raise ValueError("token_subseq trigger needs at least one token")
     conn.execute(
         "INSERT INTO triggers (memory_id, kind, first_token, tokens_json) "
         "VALUES (?, 'token_subseq', ?, ?)",
-        (memory_id, first_token, json.dumps(list(tokens))),
+        (memory_id, tokens[0], json.dumps(tokens)),
     )
 
 

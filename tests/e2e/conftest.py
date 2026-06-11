@@ -207,13 +207,8 @@ def seed_memory(claude_runner):
         )
         for t in triggers or []:
             if t["kind"] == "token_subseq":
-                tokens = list(t["tokens"])
-                if not tokens:
-                    raise ValueError("token_subseq trigger needs at least one token")
-                # first_token passed as-is: production writers don't lowercase
-                # and the lookup is case-sensitive — the fixture must mirror
-                # production, not the stale schema comment.
-                memory_store.add_token_trigger(conn, memory_id, tokens[0], tokens)
+                # The seam derives first_token and rejects empty token lists.
+                memory_store.add_token_trigger(conn, memory_id, t["tokens"])
             elif t["kind"] == "path_glob":
                 memory_store.add_path_trigger(conn, memory_id, t["path_pattern"])
             else:
