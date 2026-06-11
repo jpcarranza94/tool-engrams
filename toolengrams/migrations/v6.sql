@@ -26,7 +26,8 @@ CREATE TABLE triggers (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     memory_id       INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
     kind            TEXT NOT NULL CHECK (kind IN ('token_subseq','path_glob')),
-    first_token     TEXT,     -- lowercased for indexed lookup; null for path_glob
+    first_token     TEXT,     -- tokens[0] stored as-is (lookup is case-sensitive,
+                              -- like command names); null for path_glob
     tokens_json     TEXT,     -- JSON array of required tokens in order; null for path_glob
     path_pattern    TEXT      -- fnmatch pattern; null for token_subseq
 );
