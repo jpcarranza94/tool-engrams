@@ -45,7 +45,7 @@ def test_run_watcher_session_writes_delta_file_and_grants_scoped_read(monkeypatc
     monkeypatch.setattr(agent, "CLAUDE_BIN", "/usr/bin/claude")
 
     r = agent.run_watcher_session(
-        "formation", "PROMPT: read ./delta.txt", resume=None,
+        "formation", "PROMPT: read ./delta.txt",
         work_session_id="s1", run_id=5,
         delta="USER: hi\nTOOL (Bash): git push --force origin main",
     )
@@ -68,9 +68,9 @@ def test_run_session_does_not_mutate_role_allowlist(monkeypatch):
     monkeypatch.setattr(agent, "CLAUDE_BIN", "/usr/bin/claude")
     before = list(agent.ROLE_ALLOWLIST["formation"])
 
-    agent.run_watcher_session("formation", "p", resume=None,
+    agent.run_watcher_session("formation", "p",
                               work_session_id="s1", delta="a")
-    agent.run_watcher_session("formation", "p", resume=None,
+    agent.run_watcher_session("formation", "p",
                               work_session_id="s1", delta="b")
 
     assert agent.ROLE_ALLOWLIST["formation"] == before   # unchanged after two calls
@@ -85,17 +85,17 @@ def test_run_session_fail_open_on_delta_write_error(monkeypatch):
     monkeypatch.setattr(pathlib.Path, "write_text",
                         lambda self, *a, **k: (_ for _ in ()).throw(OSError("disk full")))
 
-    r = agent.run_watcher_session("formation", "p", resume="sid",
+    r = agent.run_watcher_session("formation", "p",
                                   work_session_id="s1", delta="x")
     assert r.ok is False
-    assert r.watcher_session_id == "sid"        # resume id preserved for retry
+
     assert "setup failed" in (r.error or "")
 
 
 def test_sandbox_cwd_is_stable_per_session_and_role(monkeypatch):
-    """`--resume` resolves session ids per project cwd, so the sandbox dir must
+    """The sandbox dir must
     be the SAME across ticks of one (work session, role) — and different across
-    sessions and roles. A fresh dir per tick orphans every resume id."""
+    sessions and roles (stable slug for the recursion guard + cleanup)."""
     cwds = []
     monkeypatch.setattr(agent, "invoke_claude_agent",
                         lambda message, **kw: (cwds.append(kw["cwd"]),
@@ -103,13 +103,13 @@ def test_sandbox_cwd_is_stable_per_session_and_role(monkeypatch):
                                                             returncode=0))[1])
     monkeypatch.setattr(agent, "CLAUDE_BIN", "/usr/bin/claude")
 
-    agent.run_watcher_session("formation", "p", resume=None,
+    agent.run_watcher_session("formation", "p",
                               work_session_id="sess-a", delta="a")
-    agent.run_watcher_session("formation", "p", resume="w",
+    agent.run_watcher_session("formation", "p",
                               work_session_id="sess-a", delta="b")
-    agent.run_watcher_session("formation", "p", resume=None,
+    agent.run_watcher_session("formation", "p",
                               work_session_id="sess-b", delta="c")
-    agent.run_watcher_session("eval", "p", resume=None,
+    agent.run_watcher_session("eval", "p",
                               work_session_id="sess-a", delta="d")
 
     assert cwds[0] == cwds[1]                      # same session+role → same cwd
@@ -130,7 +130,7 @@ def test_sandbox_id_is_sanitized_against_traversal(tmp_path, monkeypatch):
                                                             returncode=0))[1])
     monkeypatch.setattr(agent, "CLAUDE_BIN", "/usr/bin/claude")
 
-    r = agent.run_watcher_session("formation", "p", resume=None,
+    r = agent.run_watcher_session("formation", "p",
                                   work_session_id="../../../etc/evil", delta="x")
 
     assert r.ok
@@ -148,7 +148,7 @@ def test_sandbox_created_user_only_and_symlink_rejected(tmp_path, monkeypatch):
                                                            returncode=0))
     monkeypatch.setattr(agent, "CLAUDE_BIN", "/usr/bin/claude")
 
-    r = agent.run_watcher_session("formation", "p", resume=None,
+    r = agent.run_watcher_session("formation", "p",
                                   work_session_id="sess-perm", delta="x")
     assert r.ok
     mode = (tmp_path / "engram-formation-sess-perm").stat().st_mode & 0o777
@@ -157,11 +157,11 @@ def test_sandbox_created_user_only_and_symlink_rejected(tmp_path, monkeypatch):
     victim = tmp_path / "victim"
     victim.mkdir()
     (tmp_path / "engram-eval-sess-link").symlink_to(victim)
-    r = agent.run_watcher_session("eval", "p", resume="sid",
+    r = agent.run_watcher_session("eval", "p",
                                   work_session_id="sess-link", delta="x")
     assert r.ok is False
     assert "not a directory we own" in (r.error or "")
-    assert r.watcher_session_id == "sid"           # resume id preserved
+
 
 
 def test_tick_routes_activity_through_delta_not_inline(temp_db, tmp_path, monkeypatch):
@@ -172,10 +172,10 @@ def test_tick_routes_activity_through_delta_not_inline(temp_db, tmp_path, monkey
     transcript.write_text(_bash_line(cmd))
     seen = {}
 
-    def runner(role, message, resume, run_id=None, delta="", **kw):
+    def runner(role, message, run_id=None, delta="", **kw):
         seen["message"] = message
         seen["delta"] = delta
-        return SessionResult(ok=True, watcher_session_id="w1")
+        return SessionResult(ok=True)
 
     monkeypatch.setattr(tick, "CLAUDE_BIN", "claude")
     monkeypatch.setattr(tick, "LOG_PATH", tmp_path / "watcher.log")

@@ -31,7 +31,7 @@ from .models import Memory, Trigger
 _MEM_COLS = (
     "id, name, description, body, kind, scope, project_slug, created_ts, "
     "last_surfaced_ts, surface_count, useful_count, noise_count, pinned, "
-    "archived_ts, last_verified_ts"
+    "archived_ts, last_verified_ts, origin_session_id"
 )
 
 
@@ -257,7 +257,8 @@ def match_token_triggers(conn: sqlite3.Connection, first_token: str,
     args = (first_token, project_slug, kind) if kind else (first_token, project_slug)
     return conn.execute(
         "SELECT m.id, m.name, m.body, m.kind, m.scope, m.surface_count, "
-        "       m.useful_count, m.noise_count, m.last_surfaced_ts, m.pinned, t.tokens_json "
+        "       m.useful_count, m.noise_count, m.last_surfaced_ts, m.pinned, "
+        "       m.origin_session_id, t.tokens_json "
         "FROM triggers t JOIN memories m ON m.id = t.memory_id "
         "WHERE t.kind = 'token_subseq' AND t.first_token = ? "
         "  AND m.archived_ts IS NULL "
@@ -274,7 +275,8 @@ def match_path_triggers(conn: sqlite3.Connection, project_slug: str | None,
     args = (project_slug, kind) if kind else (project_slug,)
     return conn.execute(
         "SELECT m.id, m.name, m.body, m.kind, m.scope, m.surface_count, "
-        "       m.useful_count, m.noise_count, m.last_surfaced_ts, m.pinned, t.path_pattern "
+        "       m.useful_count, m.noise_count, m.last_surfaced_ts, m.pinned, "
+        "       m.origin_session_id, t.path_pattern "
         "FROM triggers t JOIN memories m ON m.id = t.memory_id "
         "WHERE t.kind = 'path_glob' AND m.archived_ts IS NULL "
         "  AND (m.scope = 'global' OR m.project_slug = ?)"
@@ -309,13 +311,18 @@ def insert_memory(
     project_slug: str | None,
     pinned: bool,
     created_ts: int,
+    origin_session_id: str | None = None,
 ) -> int:
-    """Insert a memory row, return its id."""
+    """Insert a memory row, return its id. `origin_session_id` is the work
+    session that formed it (NULL for manual saves) — same-session hint
+    suppression keys on it (ADR-0006)."""
     cur = conn.execute(
         "INSERT INTO memories "
-        "(name, description, body, kind, scope, project_slug, pinned, created_ts) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (name, description, body, kind, scope, project_slug, 1 if pinned else 0, created_ts),
+        "(name, description, body, kind, scope, project_slug, pinned, created_ts, "
+        " origin_session_id) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (name, description, body, kind, scope, project_slug, 1 if pinned else 0,
+         created_ts, origin_session_id),
     )
     return int(cur.lastrowid)
 
@@ -336,6 +343,36 @@ def update_memory(
         "UPDATE memories SET name = ?, description = ?, body = ?, kind = ?, "
         "pinned = ?, created_ts = ? WHERE id = ?",
         (name, description, body, kind, 1 if pinned else 0, created_ts, memory_id),
+    )
+
+
+def set_content(conn: sqlite3.Connection, memory_id: int, *,
+                body: str, name: str | None = None,
+                description: str | None = None,
+                verified_ts: int | None = None) -> None:
+    """In-place content correction (`engram edit`): updates body (and optionally
+    name/description), PRESERVES counters/surfaces/triggers, and stamps
+    last_verified_ts — a deliberate correction is the strongest freshness
+    signal the staleness audit gets (ADR-0007)."""
+    sets = ["body = ?", "last_verified_ts = ?"]
+    args: list = [body, verified_ts if verified_ts is not None else int(time.time())]
+    if name is not None:
+        sets.append("name = ?")
+        args.append(name)
+    if description is not None:
+        sets.append("description = ?")
+        args.append(description)
+    args.append(memory_id)
+    conn.execute(f"UPDATE memories SET {', '.join(sets)} WHERE id = ?", args)
+
+
+def set_origin_session(conn: sqlite3.Connection, memory_id: int,
+                       origin_session_id: str | None) -> None:
+    """Re-stamp (or clear) the forming session after a body-replacing update —
+    the updater is now the session whose echo must be suppressed (ADR-0006)."""
+    conn.execute(
+        "UPDATE memories SET origin_session_id = ? WHERE id = ?",
+        (origin_session_id, memory_id),
     )
 
 

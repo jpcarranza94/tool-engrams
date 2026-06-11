@@ -5,8 +5,8 @@ here. The event-driven tick (`tick.py`) and the SessionStart idle-sweep are the
 only callers; no raw `watcher_state` SQL lives outside this module.
 
 A session has TWO watcher roles — `formation` (creates memories) and
-`eval` (judges surfaced memories) — each an independent watcher session with its
-own cursor / resume id / retry streak. `watcher_state` is keyed
+`eval` (judges surfaced memories) — each with its own cursor / retry streak
+(ticks are stateless `claude -p` calls; see ADR-0005). `watcher_state` is keyed
 `(work_session_id, role)`, so every accessor takes a `role` (default
 `'formation'`, which keeps the formation callers untouched).
 
@@ -40,7 +40,6 @@ class TickState:
     """The per-session-per-role state one tick reads and commits."""
 
     last_line_read: int
-    watcher_session_id: str | None
     armed: bool
     fail_streak: int
 
@@ -83,24 +82,21 @@ def read(session_id: str, role: str = "formation") -> TickState:
     """Read the tick state for (session, role). Missing row → fresh zero state."""
     with db.session() as conn:
         row = conn.execute(
-            "SELECT last_line_read, watcher_session_id, armed, fail_streak "
+            "SELECT last_line_read, armed, fail_streak "
             "FROM watcher_state WHERE work_session_id = ? AND role = ?",
             (session_id, role),
         ).fetchone()
     if row is None:
-        return TickState(last_line_read=0, watcher_session_id=None,
-                         armed=False, fail_streak=0)
+        return TickState(last_line_read=0, armed=False, fail_streak=0)
     return TickState(
         last_line_read=row["last_line_read"],
-        watcher_session_id=row["watcher_session_id"],
         armed=bool(row["armed"]),
         fail_streak=row["fail_streak"],
     )
 
 
-def commit_tick(session_id: str, *, watcher_session_id: str | None,
-                last_line: int, armed: int, fail_streak: int,
-                role: str = "formation") -> None:
+def commit_tick(session_id: str, *, last_line: int, armed: int,
+                fail_streak: int, role: str = "formation") -> None:
     """Persist the outcome of one tick: cursor + retry/arm state + timestamps.
 
     Bumps `last_tick_ts` (and `last_checked_ts`) unconditionally so the coalesce
@@ -108,10 +104,10 @@ def commit_tick(session_id: str, *, watcher_session_id: str | None,
     now_ts = int(time.time())
     with db.session() as conn:
         conn.execute(
-            "UPDATE watcher_state SET watcher_session_id = ?, last_line_read = ?, "
+            "UPDATE watcher_state SET last_line_read = ?, "
             "armed = ?, fail_streak = ?, last_tick_ts = ?, last_checked_ts = ? "
             "WHERE work_session_id = ? AND role = ?",
-            (watcher_session_id, last_line, armed, fail_streak, now_ts, now_ts,
+            (last_line, armed, fail_streak, now_ts, now_ts,
              session_id, role),
         )
 
@@ -204,7 +200,7 @@ def prune_dead_sessions(ttl_sec: int) -> int:
     exists and whose last activity is older than `ttl_sec`. Returns rows removed.
 
     The transcript is the source of truth: while it exists the row keeps the
-    cursor (deleting it early would make a resumed session re-read its whole
+    cursor (deleting it early would make the next tick re-read the whole
     transcript and re-form memories). Once Claude Code has cleaned the
     transcript up there is nothing left to read, so the row is dead weight the
     idle-sweep would otherwise re-stat forever. Called from `engram cleanup`."""

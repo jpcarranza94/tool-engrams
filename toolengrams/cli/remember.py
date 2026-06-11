@@ -81,6 +81,8 @@ def main(argv: list[str] | None = None) -> int:
         }))
         return 1
 
+    origin_session = args.origin_session or os.environ.get("ENGRAM_ORIGIN_SESSION") or None
+
     with db.session() as conn:
         candidates = consolidate_vocabulary(conn, candidates)
         project_slug = _resolve_project_slug(
@@ -104,15 +106,28 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if existing:
+            # Echo the body being replaced + a merge instruction: a stateless
+            # formation tick has no memory of what it saved before, so the
+            # replace must be a visible, correctable act (ADR-0005).
+            prev = memory_store.get(conn, existing["id"])
             memory_id = update_existing_memory(
                 conn=conn, existing_id=existing["id"],
                 name=name, description=description, body=body,
                 kind=args.kind, pinned=args.pinned,
                 candidates=candidates, extra_triggers=extra_triggers,
+                origin_session_id=origin_session,
             )
             action = "updated"
+            if prev is not None and prev.body.strip() != body.strip():
+                existing = dict(existing)
+                existing["previous_body"] = prev.body
+                existing["merge_note"] = (
+                    "Your body REPLACED previous_body. If previous_body held "
+                    "still-valid guidance missing from yours, run engram "
+                    "remember again with one merged body."
+                )
         else:
-            memory_id = _insert(conn=conn, **common)
+            memory_id = _insert(conn=conn, origin_session_id=origin_session, **common)
             action = "inserted"
             existing = None
 
@@ -203,6 +218,11 @@ def _build_parser() -> argparse.ArgumentParser:
                               "for scope=project. Useful when calling from a subprocess "
                               "(e.g. the watcher) whose own cwd differs from the user's. "
                               "Falls back to os.getcwd()."))
+    parser.add_argument("--origin-session", default=None,
+                        help=("Work session id that formed this memory. The watcher "
+                              "subprocess carries $ENGRAM_ORIGIN_SESSION instead, so "
+                              "attribution never depends on the model passing a flag. "
+                              "Same-session hint suppression keys on it (ADR-0006)."))
     parser.add_argument("--pinned", action="store_true",
                         help="Pin this memory so reinforcement doesn't gate it.")
     parser.add_argument("--trigger", action="append", default=None,
@@ -323,12 +343,14 @@ def _insert(
     pinned: bool,
     candidates: list[FormationCandidate],
     extra_triggers: list[dict[str, Any]],
+    origin_session_id: str | None = None,
 ) -> int:
     now_ts = int(time.time())
     with db.transaction(conn):
         memory_id = memory_store.insert_memory(
             conn, name=name, description=description, body=body, kind=kind,
             scope=scope, project_slug=project_slug, pinned=pinned, created_ts=now_ts,
+            origin_session_id=origin_session_id,
         )
         insert_candidate_triggers(conn, memory_id, candidates)
         insert_candidate_triggers(conn, memory_id, extras_to_candidates(extra_triggers))

@@ -41,10 +41,10 @@ def test_session_result_carries_cost_from_envelope(tmp_path, monkeypatch):
                                                            returncode=0))
     monkeypatch.setattr(agent, "CLAUDE_BIN", "/usr/bin/claude")
 
-    r = agent.run_watcher_session("formation", "p", resume=None,
+    r = agent.run_watcher_session("formation", "p",
                                   work_session_id="s1", delta="x")
 
-    assert r.ok and r.watcher_session_id == "w1"
+    assert r.ok
     assert r.cost_usd == 0.0231
     assert r.input_tokens == 1200
     assert r.output_tokens == 350
@@ -60,7 +60,7 @@ def test_failed_call_has_no_cost(tmp_path, monkeypatch):
                                                            error="exit 1: boom"))
     monkeypatch.setattr(agent, "CLAUDE_BIN", "/usr/bin/claude")
 
-    r = agent.run_watcher_session("formation", "p", resume="sid",
+    r = agent.run_watcher_session("formation", "p",
                                   work_session_id="s1", delta="x")
 
     assert r.ok is False
@@ -71,8 +71,8 @@ def test_tick_persists_cost_on_run_row(temp_db, tmp_path, monkeypatch):
     transcript = tmp_path / "t.jsonl"
     transcript.write_text(_bash_line("gh pr create"))
 
-    def runner(role, message, resume, run_id=None, **kw):
-        return SessionResult(ok=True, watcher_session_id="w1",
+    def runner(role, message, run_id=None, **kw):
+        return SessionResult(ok=True,
                              cost_usd=0.0231, input_tokens=1200,
                              output_tokens=350, cache_read_tokens=9000,
                              cache_creation_tokens=400)

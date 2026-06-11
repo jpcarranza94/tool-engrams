@@ -12,6 +12,7 @@ import os
 import shutil
 import sqlite3
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from .. import memory_store
 from ..claude_invoke import invoke_claude_agent, parse_claude_json_output, write_agent_settings
 from ..prompts.consolidation import build_consolidation_prompt
 from ..retrieval import session_state
+from ..watcher import runs_store
 from ..reinforcement.scoring import q
 from ..utils import prepend_engram_bin
 from .collect import SessionFile
@@ -72,6 +74,15 @@ def _get_memory_summary(db_path: Path) -> str:
         )
         # Body truncated to 500 chars; agent can `engram recall --id N` for full text.
         lines.append(f"       body: {m.body[:500]}")
+
+    quarantines = runs_store.recent_quarantines(conn, int(time.time()) - 48 * 3600)
+    if quarantines:
+        lines.append(f"\nQuarantined by the eval watcher (last 48h, {len(quarantines)}) — "
+                     "REVIEW EACH: restore (engram forget --restore), repair the body "
+                     "(engram edit <id> --body ...) then restore, or leave archived:")
+        for ev in quarantines:
+            lines.append(f"  [{ev['memory_id']}] \"{ev['memory_name']}\" "
+                         f"reason: {(ev['detail'] or '?')[:200]}")
 
     surfaces = session_state.recent_surfaces_with_memory(conn, limit=20)
     lines.append(f"\nRecent surfaces ({len(surfaces)}):")

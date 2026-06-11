@@ -32,6 +32,13 @@ def _build_v11_db(path: Path) -> None:
     v11 DB and force user_version=11."""
     raw = sqlite3.connect(str(path))
     raw.executescript(db.SCHEMA_PATH.read_text())
+    # Downgrade the v15 bits the live snapshot now carries: old DBs being
+    # simulated here HAD the resume-era columns and LACKED origin_session_id.
+    raw.executescript("""
+        ALTER TABLE memories DROP COLUMN origin_session_id;
+        ALTER TABLE watcher_state ADD COLUMN watcher_session_id TEXT;
+        ALTER TABLE watcher_state ADD COLUMN watcher_pid INTEGER;
+    """)
     raw.executescript("""
         ALTER TABLE memories DROP COLUMN noise_count;
 
@@ -129,13 +136,15 @@ def test_v11_watcher_state_rows_become_formation(tmp_path: Path):
     conn = db.connect(path)
     assert _watcher_state_pk(conn) == {"work_session_id", "role"}
     row = conn.execute(
-        "SELECT role, last_line_read, watcher_session_id, fail_streak "
+        "SELECT role, last_line_read, fail_streak "
         "FROM watcher_state WHERE work_session_id = 'sess-A'"
     ).fetchone()
     assert row["role"] == "formation"          # existing rows default to formation
     assert row["last_line_read"] == 42         # state preserved
-    assert row["watcher_session_id"] == "watch-A"
     assert row["fail_streak"] == 1
+    # v15 then drops the resume-era column on the way through.
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(watcher_state)").fetchall()}
+    assert "watcher_session_id" not in cols
     conn.close()
 
 

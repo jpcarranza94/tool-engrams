@@ -56,7 +56,7 @@ def test_prune_keeps_row_while_transcript_exists(temp_db, tmp_path):
     _seed_row("alive", str(transcript), ticked_ago=10 * 86_400)
 
     assert state.prune_dead_sessions(7 * 86_400) == 0
-    assert _row_exists("alive")  # cursor preserved for a possible resume
+    assert _row_exists("alive")  # cursor preserved while the transcript lives
 
 
 def test_prune_keeps_recent_row_even_without_transcript(temp_db, tmp_path):

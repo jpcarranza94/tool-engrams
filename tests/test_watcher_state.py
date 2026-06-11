@@ -33,17 +33,15 @@ def test_ensure_row_is_idempotent(temp_db):
 
 def test_read_missing_row_returns_fresh_state(temp_db):
     st = state.read("nope")
-    assert st == state.TickState(last_line_read=0, watcher_session_id=None,
-                                 armed=False, fail_streak=0)
+    assert st == state.TickState(last_line_read=0, armed=False, fail_streak=0)
 
 
 def test_commit_tick_roundtrips_and_bumps_last_tick(temp_db):
     state.ensure_row("s", "/t.jsonl", "/cwd")
-    state.commit_tick("s", watcher_session_id="w1", last_line=7, armed=1, fail_streak=2)
+    state.commit_tick("s", last_line=7, armed=1, fail_streak=2)
 
     st = state.read("s")
     assert st.last_line_read == 7
-    assert st.watcher_session_id == "w1"
     assert st.armed is True
     assert st.fail_streak == 2
     # last_tick_ts was bumped off its 0 default.

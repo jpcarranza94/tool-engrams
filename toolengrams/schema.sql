@@ -20,7 +20,10 @@ CREATE TABLE IF NOT EXISTS memories (
     noise_count      INTEGER NOT NULL DEFAULT 0,   -- noise verdicts (trigger over-matched)
     pinned           INTEGER NOT NULL DEFAULT 0,
     archived_ts      INTEGER,
-    last_verified_ts INTEGER DEFAULT NULL
+    last_verified_ts INTEGER DEFAULT NULL,
+    origin_session_id TEXT                -- work session that formed it; NULL for
+                                          -- manual saves. Same-session hint
+                                          -- suppression keys on it (ADR-0006).
 );
 
 CREATE INDEX IF NOT EXISTS idx_memories_scope
@@ -103,8 +106,6 @@ CREATE TABLE IF NOT EXISTS watcher_state (
     work_session_id    TEXT NOT NULL,
     role               TEXT NOT NULL DEFAULT 'formation'
                          CHECK (role IN ('formation','eval')),
-    watcher_session_id TEXT,
-    watcher_pid        INTEGER,
     transcript_path    TEXT,
     last_line_read     INTEGER NOT NULL DEFAULT 0,
     last_checked_ts    INTEGER NOT NULL,
@@ -152,10 +153,11 @@ CREATE TABLE IF NOT EXISTS watcher_run_events (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id       INTEGER NOT NULL REFERENCES watcher_runs(id) ON DELETE CASCADE,
     ts           INTEGER NOT NULL,
-    kind         TEXT NOT NULL CHECK (kind IN ('created','judged')),
+    kind         TEXT NOT NULL CHECK (kind IN ('created','judged','quarantined')),
     memory_id    INTEGER,
     memory_name  TEXT,
-    outcome      TEXT CHECK (outcome IN ('helpful','unused','noise') OR outcome IS NULL)
+    outcome      TEXT CHECK (outcome IN ('helpful','unused','noise') OR outcome IS NULL),
+    detail       TEXT                                      -- quarantine reason
 );
 
 CREATE INDEX IF NOT EXISTS idx_watcher_run_events_run

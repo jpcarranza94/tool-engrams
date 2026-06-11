@@ -14,7 +14,3 @@ def build_watcher_prompt(cwd: str = "") -> str:
     to `engram remember --project-cwd`."""
     return load_prompt("watcher", cwd=cwd)
 
-
-# Header prepended to the delta on a resumed formation session (the standing
-# guidance already lives in the session history; each pass just sends new lines).
-WATCHER_SUBSEQUENT_HEADER = "--- New activity ---\n\n"

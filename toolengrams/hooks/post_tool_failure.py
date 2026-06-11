@@ -118,6 +118,11 @@ def _run(payload: dict[str, Any]) -> int:
         # Surfacing gate: a hint proven more noise than signal stays suppressed
         # even on a matching failure (see scoring.is_gated; pinned exempt).
         candidates = [c for c in candidates if not is_gated(c)]
+
+        # Same-session suppression (ADR-0006) — all candidates here are hints.
+        candidates = [c for c in candidates
+                      if not c.origin_session_id
+                      or c.origin_session_id != session_id]
         if not candidates:
             _emit({})
             return 0
