@@ -8,9 +8,10 @@ land on `main` without deprecation cycles; pin a tag if you need stability.
 ### Fixed
 - e2e suite runs again: the fixtures still wrote the v1 `memories.type`
   column (dropped in the v2 schema), so all 7 `claude -p` tests failed at
-  seed time. Fixtures now use `kind` (`hint`/`block`). The suite also
-  e2e-confirms the 0.1.0 security fix: hint `additionalContext` arrives
-  with no `permissionDecision`.
+  seed time. Fixtures now use `kind` (`hint`/`block`). The run confirms
+  hint delivery still works after the 0.1.0 security fix (the
+  no-`permissionDecision` contract itself is pinned by unit tests —
+  e2e can't observe a hook's permission output, only its effects).
 
 ## [0.1.0] — 2026-06-10
 
