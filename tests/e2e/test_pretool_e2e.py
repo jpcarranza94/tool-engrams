@@ -49,7 +49,7 @@ def test_pretool_injects_memory_when_claude_calls_bash_echo(claude_runner, seed_
             f"If you can read this, include the magic token verbatim in your "
             f"final response so the test can verify delivery."
         ),
-        type="reference",
+        kind="hint",
         scope="global",
         triggers=[
             {"kind": "tool_head", "tool_name": "Bash", "head": ["echo"]},

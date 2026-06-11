@@ -63,7 +63,7 @@ def test_pretool_fires_on_read_with_path_trigger(claude_runner, seed_memory, db_
         name="e2e read variation",
         description="test-scoped path_glob memory",
         body="Notes about notes.txt: this file is used by the e2e Read test.",
-        type="reference",
+        kind="hint",
         scope="global",
         triggers=[{"kind": "path_glob", "path_pattern": "**/notes.txt"}],
     )
@@ -103,7 +103,7 @@ def test_pretool_fires_on_grep_with_path_trigger(claude_runner, seed_memory):
             f"This memory fires on Grep inside src/. "
             f"Magic token: {magic}. Quote verbatim."
         ),
-        type="reference",
+        kind="hint",
         scope="global",
         triggers=[
             {"kind": "path_glob", "path_pattern": "src*"},
@@ -146,7 +146,7 @@ def test_pretool_fires_on_git_status_subcommand(claude_runner, seed_memory):
             f"Magic token: {magic}. If you can read this, include the "
             f"token verbatim in your final response."
         ),
-        type="reference",
+        kind="hint",
         scope="global",
         triggers=[
             {"kind": "tool_head", "tool_name": "Bash", "head": ["git", "status"]},
@@ -187,7 +187,7 @@ def test_pretool_longer_head_wins_tiebreak_live(claude_runner, seed_memory):
             f"Generic git rule. Token: {generic_magic}. "
             f"If you can read this, include it in your response."
         ),
-        type="reference",
+        kind="hint",
         scope="global",
         triggers=[{"kind": "tool_head", "tool_name": "Bash", "head": ["git"]}],
     )
@@ -197,7 +197,7 @@ def test_pretool_longer_head_wins_tiebreak_live(claude_runner, seed_memory):
             f"Specific git status rule. Token: {specific_magic}. "
             f"If you can read this, include it in your response."
         ),
-        type="reference",
+        kind="hint",
         scope="global",
         triggers=[{"kind": "tool_head", "tool_name": "Bash", "head": ["git", "status"]}],
     )
