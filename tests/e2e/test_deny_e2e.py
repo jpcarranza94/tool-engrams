@@ -53,7 +53,7 @@ def test_deny_blocks_first_call_and_retry_uses_corrected_args(
             "Always use `git status --short` instead of plain `git status`. "
             "The short format is required for CI parsing."
         ),
-        type="feedback",
+        kind="block",
         scope="global",
         triggers=[
             {"kind": "tool_head", "tool_name": "Bash", "head": ["git", "status"]},
@@ -111,7 +111,7 @@ def test_deny_dedup_allows_second_call(claude_runner, seed_memory, db_assertions
         name="e2e deny dedup test",
         description="test-scoped for dedup verification",
         body="Use `git status --short` always.",
-        type="feedback",
+        kind="block",
         scope="global",
         triggers=[
             {"kind": "tool_head", "tool_name": "Bash", "head": ["git", "status"]},

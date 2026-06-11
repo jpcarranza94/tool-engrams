@@ -31,6 +31,8 @@ from typing import Any
 
 import pytest
 
+from toolengrams import db
+
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 CLAUDE_BIN = shutil.which("claude")
 PYTHON_BIN = sys.executable
@@ -153,7 +155,7 @@ def claude_runner(tmp_path, monkeypatch) -> ClaudeRunner:
     settings_path = project_dir / ".claude" / "settings.local.json"
 
     # Point the in-process toolengrams at the test DB too — lets the test itself
-    # seed via toolengrams.commands.seed or direct SQL inserts.
+    # seed via the seed_memory fixture or direct SQL inserts.
     monkeypatch.setenv("ENGRAM_DB", str(db_path))
 
     return ClaudeRunner(
@@ -171,18 +173,17 @@ def seed_memory(claude_runner):
         seed_memory(
             name="psql replica is read-only",
             body="Do not INSERT into the replica",
-            type="reference",
+            kind="hint",          # or "block" for the deny path
             scope="global",
             triggers=[{"kind": "tool_head", "tool_name": "Bash", "head": ["psql", "-h"]}],
         )
     """
-    from toolengrams import db
 
     def _insert(
         *,
         name: str,
         body: str,
-        type: str = "reference",
+        kind: str = "hint",
         scope: str = "global",
         description: str = "",
         triggers: list[dict] | None = None,
@@ -191,9 +192,9 @@ def seed_memory(claude_runner):
         now_ts = int(time.time())
         cur = conn.execute(
             "INSERT INTO memories "
-            "(name, description, body, type, scope, project_slug, created_ts) "
+            "(name, description, body, kind, scope, project_slug, created_ts) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (name, description, body, type, scope, None, now_ts),
+            (name, description, body, kind, scope, None, now_ts),
         )
         memory_id = cur.lastrowid
         for t in triggers or []:
@@ -211,7 +212,6 @@ def db_assertions(claude_runner):
     Use this to verify hook pipeline behavior without relying on Claude's
     response (which may be flaky due to injection-defense heuristics).
     """
-    from toolengrams import db
 
     class Assertions:
         def surfaces_for_session(self, hook: str | None = None) -> list[dict]:
@@ -250,8 +250,6 @@ def db_assertions(claude_runner):
 
 
 def _insert_trigger(conn, memory_id: int, trigger: dict) -> None:
-    import json as _json
-
     kind = trigger["kind"]
     # Back-compat shim: some e2e tests use the tool_head/head shape. Convert
     # on the fly into the token_subseq/tokens shape so the fixtures keep working.
@@ -267,7 +265,7 @@ def _insert_trigger(conn, memory_id: int, trigger: dict) -> None:
             "INSERT INTO triggers "
             "(memory_id, kind, first_token, tokens_json) "
             "VALUES (?, 'token_subseq', ?, ?)",
-            (memory_id, tokens[0], _json.dumps(tokens)),
+            (memory_id, tokens[0], json.dumps(tokens)),
         )
     elif kind == "path_glob":
         conn.execute(
