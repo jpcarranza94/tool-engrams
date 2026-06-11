@@ -2,7 +2,6 @@
 
 Wires hook handlers (pretool, session-start, user-prompt, post-tool)
 plus seed and all formation subcommands (remember, forget, pin, recall).
-Export is the only remaining stub.
 """
 
 from __future__ import annotations
@@ -110,8 +109,6 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("migrate-v1-to-v2", help="One-shot migration from a v1-era DB to the v2 schema", add_help=False)
     sub.add_parser("rebuild-triggers", help="Re-extract triggers from memory bodies (post-migration repair)", add_help=False)
 
-    sub.add_parser("export", help="Dump memories to markdown (stub)")
-
     args = parser.parse_args(argv)
 
     handlers: dict[str, Callable[[], int]] = {
@@ -125,18 +122,9 @@ def main(argv: list[str] | None = None) -> int:
         "cleanup": watcher.cleanup.run_cleanup,
         "pause": pause.run_pause,
         "resume": pause.run_resume,
-        "export": _stub_unimpl("export"),
     }
 
     return handlers[args.command]()
-
-
-def _stub_unimpl(name: str) -> Callable[[], int]:
-    def _run() -> int:
-        print(f"engram {name}: not yet implemented", file=sys.stderr)
-        return 0
-
-    return _run
 
 
 if __name__ == "__main__":
