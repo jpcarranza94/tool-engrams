@@ -7,7 +7,8 @@ ToolEngrams is a tool-bound memory system for Claude Code. Memories bind to comm
 ## Key directories
 
 - `toolengrams/` — core package
-  - `commands/` — CLI handlers (one per subcommand: pretool, post_tool, remember, forget, etc.)
+  - `cli/` — user-facing CLI handlers (one per subcommand: remember, forget, recall, judge, doctor, seed, status, etc.)
+  - `hooks/` — Claude Code hook handlers (pretool, post_tool, post_tool_failure, session_start, user_prompt, stop, flush)
   - `prompts/` — all prompt text in one place (session_start, pretool, watcher, consolidation)
   - `consolidation/` — nightly agent (collect sessions, spawn Opus review, launchd schedule)
   - `migrations/` — SQL migration files (auto-discovered by db.py)
@@ -21,7 +22,7 @@ ToolEngrams is a tool-bound memory system for Claude Code. Memories bind to comm
 
 ## How it works
 
-1. **PreToolUse hook** (`pretool.py`) — fires before every whitelisted tool call. Matches memories whose trigger prefix matches the command; a `block` denies the call and injects its body, a `hint` allows with context. A **surfacing gate** suppresses a `hint` whose noise-aware quality `q` has fallen below 0.5 after warm-up (`block`/`pinned` exempt).
+1. **PreToolUse hook** (`pretool.py`) — fires before every whitelisted tool call. Matches memories whose trigger prefix matches the command; a `block` denies the call and injects its body, a `hint` injects context with **no permissionDecision** (an explicit "allow" would bypass the user's permission prompts — hints must never grant approval). A **surfacing gate** suppresses a `hint` whose noise-aware quality `q` has fallen below 0.5 after warm-up (`block`/`pinned` exempt).
 2. **PostToolUse hook** (`post_tool.py`) — increments the per-session turn counter and fires the recovery fast-path tick (formation + eval) on a failure→success. It does **not** credit memories — usefulness is judged by the evaluation watcher (crediting on tool-call success would reinforce any memory that happened to surface).
 3. **Scoring** (`reinforcement/scoring.py`) — `q = (useful_count + 1) / (useful_count + noise_count + 2)` (noise-aware, Laplace-smoothed) drives both ranking and the surfacing gate. `useful_count` / `noise_count` are written **only** by the evaluation watcher via `engram judge`; `unused` verdicts enter neither, so situational memories aren't punished. Recency was removed from ranking (event-driven surfacing makes age a backwards signal).
 4. **Watcher** (`watcher/tick.py`) — detached `engram watcher-tick` per meaningful event, role-dispatched. **Formation** (`engram remember`) fires on **Stop**, failure→success **recovery**, a likely **UserPromptSubmit** correction, and **SessionEnd/PreCompact** flush; it gates out pure-chat turns unless armed by a prior failure. **Evaluation** (`engram judge`) fires at the Stop/flush **after** a surface, *only when surfaces are pending*, reads the transcript **forward**, judges each surfaced memory `helpful`/`unused`/`noise`, defers by not-judging, and is forced to closure on flush. Each role runs a permissioned `claude -p --resume` that calls the engram CLI itself (a per-role allowlist, no JSON schema; recursion-guarded by `ENGRAM_IN_WATCHER` + an internal cwd). Ticks are coalesced and serialized per `(session, role)`; state lives in `watcher_state` via `watcher/state.py`. **Tail recovery:** the next **SessionStart** idle-sweep re-fires a formation flush (and an eval flush if surfaces are still pending) for an abandoned session.

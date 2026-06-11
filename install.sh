@@ -120,6 +120,7 @@ echo ""
 VENV_DIR="$HOME/.local/share/toolengrams/venv"
 echo "1. Installing toolengrams package..."
 install_ok=0
+PATH_WARN=0
 if command -v uv &>/dev/null; then
     echo "  Trying uv..."
     if uv pip install --system -e "$REPO_DIR"; then
@@ -160,11 +161,17 @@ if [ "$install_ok" -eq 0 ]; then
     ln -sf "$VENV_DIR/bin/engram" "$HOME/.local/bin/engram"
     echo "  Installed into $VENV_DIR; linked engram -> ~/.local/bin/engram"
     install_ok=1
-    # The hooks invoke plain `engram`, so ~/.local/bin must be on PATH (it is
-    # by default on Ubuntu login shells; the check below catches it if not).
+    # The hooks invoke plain `engram`, so ~/.local/bin must be on PATH. The
+    # export below only fixes THIS process (it makes the verification and DB
+    # init work) — the user's parent shell still lacks it, so remember to
+    # warn loudly in the closing banner or `engram seed` fails right after a
+    # "successful" install (stock macOS PATH has no ~/.local/bin).
     case ":$PATH:" in
         *":$HOME/.local/bin:"*) ;;
-        *) export PATH="$HOME/.local/bin:$PATH" ;;
+        *)
+            export PATH="$HOME/.local/bin:$PATH"
+            PATH_WARN=1
+            ;;
     esac
 fi
 
@@ -405,6 +412,16 @@ echo ""
 echo "====================="
 echo "ToolEngrams installed!"
 echo ""
+if [ "$PATH_WARN" -eq 1 ]; then
+    echo "ACTION REQUIRED: engram was linked into ~/.local/bin, which is NOT on"
+    echo "your shell's PATH. The install only fixed PATH for this script — add"
+    echo "this to your shell profile (~/.zshrc or ~/.bashrc) and restart the shell:"
+    echo ""
+    echo "    export PATH=\"\$HOME/.local/bin:\$PATH\""
+    echo ""
+    echo "Without it, 'engram' (and the hooks that invoke it) won't be found."
+    echo ""
+fi
 echo "IMPORTANT: hooks load at session start — open a NEW Claude Code session."
 echo "Sessions already running will not pick them up."
 echo ""

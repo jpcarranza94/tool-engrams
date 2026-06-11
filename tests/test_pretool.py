@@ -47,8 +47,10 @@ def _seed_token_memory(conn, name: str, body: str, tokens: list[str], *,
     return mid
 
 
-def test_pretool_hint_memory_surfaces_as_allow(temp_db, monkeypatch):
-    """Seed's psql replica memory is kind=hint → surfaces with allow (not deny)."""
+def test_pretool_hint_memory_injects_without_permission_decision(temp_db, monkeypatch):
+    """Seed's psql replica memory is kind=hint → context only. An explicit
+    'allow' would bypass the user's permission prompts (security: hint
+    triggers form autonomously and must never grant approval)."""
     seed.main([])
 
     payload = {
@@ -61,7 +63,7 @@ def test_pretool_hint_memory_surfaces_as_allow(temp_db, monkeypatch):
     }
     result = _run_pretool(payload, monkeypatch)
     hso = result["hookSpecificOutput"]
-    assert hso["permissionDecision"] == "allow"
+    assert "permissionDecision" not in hso
     assert "replica" in hso["additionalContext"].lower()
 
 
@@ -99,7 +101,7 @@ def test_pretool_default_seed_never_denies_git_commit(temp_db, monkeypatch):
     }
     result = _run_pretool(payload, monkeypatch)
     hso = result["hookSpecificOutput"]
-    assert hso["permissionDecision"] == "allow"
+    assert "permissionDecision" not in hso
     assert "HEREDOC" in hso["additionalContext"]
 
 
@@ -274,7 +276,7 @@ def test_pretool_path_glob_hint_surfaces_as_allow(temp_db, monkeypatch):
     }
     result = _run_pretool(payload, monkeypatch)
     hso = result["hookSpecificOutput"]
-    assert hso["permissionDecision"] == "allow"
+    assert "permissionDecision" not in hso
     assert "Python hint body" in hso["additionalContext"]
 
 

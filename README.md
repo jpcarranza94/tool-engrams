@@ -72,7 +72,7 @@ No network and no LLM on the hot path (hooks are single-digit-ms SQL lookups). B
 
 | Component | Code | Runs when | Role |
 |---|---|---|---|
-| **PreToolUse hook** | `toolengrams/hooks/pretool.py` | Before every whitelisted tool call | Surfaces matching memories: a `block` denies the call + injects its body; a `hint` allows + injects context. The **surfacing gate** drops a hint whose quality `q` has fallen below 0.5. |
+| **PreToolUse hook** | `toolengrams/hooks/pretool.py` | Before every whitelisted tool call | Surfaces matching memories: a `block` denies the call + injects its body; a `hint` injects context only — it never emits a permission decision, so your approval prompts are untouched. The **surfacing gate** drops a hint whose quality `q` has fallen below 0.5. |
 | **PostToolUse hook** | `toolengrams/hooks/post_tool.py` | After a tool call | Increments the per-session turn counter and fires the recovery fast-path tick on a failure→success. **Does not credit usefulness** — that moved to the evaluation watcher. |
 | **PostToolUseFailure hook** | `toolengrams/hooks/post_tool_failure.py` | After a real tool failure | Surfaces `hint`-kind memories as `additionalContext` (gated by `q`); arms the formation watcher. |
 | **Formation watcher** | `toolengrams/watcher/tick.py` (role `formation`) | Detached `claude -p` per turn (Stop), recovery, correction, or session-end flush | Reads the JSONL transcript delta and calls `engram remember` for new patterns. |
@@ -157,7 +157,7 @@ Simple prefix matching breaks for real CLIs because positional IDs sit between v
 
 | kind | Fires at | Effect | When to author |
 |---|---|---|---|
-| **hint** | `PreToolUse` (allow + context) and `PostToolUseFailure` (after a real failure) | Injects body as `additionalContext`, non-blocking | Default. Most discoveries land here. |
+| **hint** | `PreToolUse` (context only) and `PostToolUseFailure` (after a real failure) | Injects body as `additionalContext`, non-blocking, no permission opinion | Default. Most discoveries land here. |
 | **block** | `PreToolUse` (before every whitelisted call) | **Denies** the call + injects body. The deny is invisible to the user; it fails the call *for Claude* and prompts an in-loop retry with context. | Rare. Only for things you actively want to prevent (destructive ops, silently-wrong output). |
 
 Most users will author zero `block` memories. Hints carry the weight. Blocks and pinned memories are **exempt from the surfacing gate** — a safety rule that's rarely visibly-heeded must still fire.
@@ -260,7 +260,7 @@ The hot path (hooks) has **no external dependencies** — stdlib + sqlite3 only.
 
 **What runs in the background.** After a turn completes (Stop), the hooks fire detached `claude -p` sessions: one **formation** tick (forms memories from the transcript delta) and, only when surfaced memories are pending judgment, one **evaluation** tick. Rapid turns coalesce (default 45s window), so it's at most one model call per role per coalesced Stop event — not per tool call. A nightly **consolidation** agent (Opus) reviews the day's sessions. Nothing model-driven runs on the tool-call hot path.
 
-**What it costs.** Preliminary figure from one day of mixed opus/sonnet data: **~$1/day** at moderate use with the default `sonnet` watcher. Evaluation calls cost roughly 5× formation calls (they re-read surfaced context). Treat this as an estimate, not a measured fact, until more sonnet-only data is in.
+**What it costs.** Scales with how many sessions you run: observed sonnet-watcher days range from **~$1 (light use) to ~$9 (a heavy multi-session day — 50 watcher runs)**. Evaluation calls cost roughly 5× formation calls (they re-read surfaced context). Don't trust these numbers — measure your own: `engram monitor` shows per-run USD cost live, and `ENGRAM_WATCHER_MODEL=haiku` cuts the bill if it runs hot.
 
 **The levers.**
 
@@ -281,6 +281,7 @@ The hot path (hooks) has **no external dependencies** — stdlib + sqlite3 only.
 ToolEngrams injects stored text into Claude's context and can deny tool calls — treat its data as part of your attack surface:
 
 - **Memory bodies are untrusted input to future sessions.** They form autonomously from transcripts via a background LLM, and they're injected at PreToolUse — a poisoned or prompt-injecting memory body would speak with the system's voice. `block`-kind memories deserve the most scrutiny: their body is delivered alongside a denied tool call, the moment Claude is most likely to comply. Audit what's stored with `engram recall` and watch formation decisions in `engram monitor`.
+- **Hints never touch the permission system.** A surfaced `hint` emits only `additionalContext` — no `permissionDecision` — so Claude Code's approval prompts fire exactly as they would without ToolEngrams. (An explicit hook "allow" would silently bypass the prompt for any command an autonomously-formed trigger matched; the system deliberately never grants that.) Only `block` emits a decision, and it is always `deny`.
 - **The watcher's containment boundary is a command allowlist, not trust in the model.** Each watcher role runs `claude -p` with a per-role allowlist — the formation session may only run `engram remember`, the evaluation session only `engram judge`. A hijacked watcher can write bad memories (auditable, reversible) but can't run arbitrary commands.
 - **The secrets gate** (above) keeps credentials out of the store, so a leaked DB or surfaced memory can't replay them.
 - **The kill switch** (`engram pause`) takes the whole system offline in one command while you investigate anything suspicious.

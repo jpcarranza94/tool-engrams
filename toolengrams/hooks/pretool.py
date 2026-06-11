@@ -2,10 +2,13 @@
 
 Surfaces BOTH kinds of memory before every whitelisted tool call:
   - block memories -> permissionDecision: deny (Claude retries with context)
-  - hint memories  -> permissionDecision: allow + additionalContext
+  - hint memories  -> additionalContext only, NO permissionDecision
 
 If ANY block matches, the entire call is denied (block takes precedence).
-If only hints match, the call proceeds with injected context.
+If only hints match, the context is injected and the permission flow is left
+untouched — an explicit "allow" here would silently bypass the user's
+permission prompts for any command an autonomously-formed hint trigger
+happens to match, which is an escalation a memory must never grant.
 
 Contract (input):
     {
@@ -135,16 +138,18 @@ def _run(payload: dict[str, Any]) -> int:
                      first_token=first_token)
         memory_store.bump_surface(conn, memory_ids, now_ts)
 
-    # Deny if ANY block matches; allow (with context) if only hints.
+    # Deny if ANY block matches. Hints carry NO permissionDecision: an
+    # explicit "allow" would bypass the user's permission prompts (hint
+    # triggers form autonomously — they must never grant approval).
     has_block = any(c.kind == "block" for c in fresh)
 
-    out: dict[str, Any] = {
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "additionalContext": format_injection(fresh),
-            "permissionDecision": "deny" if has_block else "allow",
-        }
+    hso: dict[str, Any] = {
+        "hookEventName": "PreToolUse",
+        "additionalContext": format_injection(fresh),
     }
+    if has_block:
+        hso["permissionDecision"] = "deny"
+    out: dict[str, Any] = {"hookSpecificOutput": hso}
     notice = surface_notice([c.name for c in fresh])
     if notice:
         out["systemMessage"] = notice
