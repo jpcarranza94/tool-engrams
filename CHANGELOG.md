@@ -5,7 +5,12 @@ land on `main` without deprecation cycles; pin a tag if you need stability.
 
 ## [Unreleased]
 
-(Nothing yet — new entries go here.)
+### Fixed
+- e2e suite runs again: the fixtures still wrote the v1 `memories.type`
+  column (dropped in the v2 schema), so all 7 `claude -p` tests failed at
+  seed time. Fixtures now use `kind` (`hint`/`block`). The suite also
+  e2e-confirms the 0.1.0 security fix: hint `additionalContext` arrives
+  with no `permissionDecision`.
 
 ## [0.1.0] — 2026-06-10
 
