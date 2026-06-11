@@ -19,7 +19,7 @@ do NOT forget + re-remember — that destroys the memory's id and reinforcement
 history (and the two-step dance can be interrupted halfway). Edit it in place:
 
 ```bash
-engram edit <id-or-name> --body "<corrected body>"
+engram edit <id|name> --body "<corrected body>"
 ```
 
 This preserves counters, surfaces, and triggers, and stamps the memory as
