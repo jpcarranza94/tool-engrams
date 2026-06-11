@@ -115,6 +115,7 @@ def main(argv: list[str] | None = None) -> int:
                 name=name, description=description, body=body,
                 kind=args.kind, pinned=args.pinned,
                 candidates=candidates, extra_triggers=extra_triggers,
+                origin_session_id=origin_session,
             )
             action = "updated"
             if prev is not None and prev.body.strip() != body.strip():

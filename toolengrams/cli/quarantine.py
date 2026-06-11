@@ -4,7 +4,8 @@ circulation, reversibly (ADR-0007).
 The evaluation watcher's emergency brake. By construction it can only do three
 reversible, audited things:
 
-  1. soft-demote the memory (recoverable via `engram forget --restore`)
+  1. archive the memory — actually OUT of retrieval immediately (the match
+     queries exclude archived rows); reversible via `engram forget --restore`
   2. record a `quarantined` event with the reason (the audit trail
      consolidation and `engram monitor` read)
   3. mark the memory's unjudged surfaces `noise` (scoped to --session-id when
@@ -35,7 +36,10 @@ def main(argv: list[str] | None = None) -> int:
             return 1
 
         with db.transaction(conn):
-            memory_store.soft_demote(conn, mem.id)
+            # Archive (NOT soft-demote): a soft-demoted memory still matches and
+            # surfaces — with zero judgments the gate can't suppress it. Archive
+            # is the only state retrieval excludes; restore reverses it.
+            memory_store.archive(conn, mem.id)
             surfaces_marked = session_state.mark_unmarked_noise(
                 conn, mem.id, args.session_id,
             )
@@ -52,6 +56,7 @@ def main(argv: list[str] | None = None) -> int:
             "name": mem.name,
             "reason": args.reason,
             "surfaces_marked_noise": surfaces_marked,
+            "out_of_circulation": True,
             "reversible": "engram forget --restore '<name>' restores it",
         }))
         return 0

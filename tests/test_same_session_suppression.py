@@ -100,3 +100,52 @@ def test_dedup_update_echoes_previous_body(temp_db, monkeypatch):
     assert out["action"] == "updated"
     assert "old guidance" in out["existing_match"]["previous_body"]
     assert "merged body" in out["existing_match"]["merge_note"]
+
+
+def test_failure_hook_also_suppresses_origin_session(temp_db, monkeypatch):
+    """PostToolUseFailure shares the ADR-0006 filter (hints only by retrieve-time
+    invariant — pin it so relaxing the kind filter doesn't reopen the loop)."""
+    from toolengrams.hooks import post_tool_failure
+
+    _save(monkeypatch, "failure-path hint body", origin="sess-origin",
+          trigger="flaky-tool run")
+    payload = {
+        "session_id": "sess-origin",
+        "cwd": "/tmp/test-projects/foo",
+        "hook_event_name": "PostToolUseFailure",
+        "tool_name": "Bash",
+        "tool_input": {"command": "flaky-tool run --now"},
+        "tool_use_id": "tu-f",
+        "error": "Exit code 1",
+        "is_interrupt": False,
+        "transcript_path": "",
+    }
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
+    buf = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", buf)
+    assert post_tool_failure.main() == 0
+    out = buf.getvalue().strip()
+    assert (json.loads(out) if out else {}) == {}  # suppressed at home
+
+    payload["session_id"] = "sess-OTHER"
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
+    buf = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", buf)
+    assert post_tool_failure.main() == 0
+    assert "failure-path hint body" in buf.getvalue()  # surfaces elsewhere
+
+
+def test_dedup_update_restamps_origin_to_updating_session(temp_db, monkeypatch):
+    """ADR-0006: a body fully replaced by session B's watcher belongs to B —
+    B's echo is now the one to suppress."""
+    from toolengrams import memory_store
+
+    _save(monkeypatch, "v1 guidance for `mycli deploy`", origin="sess-A",
+          trigger="mycli deploy")
+    _save(monkeypatch, "v2 guidance for `mycli deploy` rewritten", origin="sess-B",
+          trigger="mycli deploy")
+
+    rows = temp_db.execute(
+        "SELECT id, origin_session_id FROM memories").fetchall()
+    assert len(rows) == 1                      # deduped into one row
+    assert rows[0]["origin_session_id"] == "sess-B"  # re-stamped to the updater

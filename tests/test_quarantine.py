@@ -25,7 +25,7 @@ def _seed(conn, useful=4) -> int:
     return mid
 
 
-def test_quarantine_soft_demotes_and_marks_noise(temp_db, capsys):
+def test_quarantine_archives_and_marks_noise(temp_db, capsys):
     mid = _seed(temp_db)
     log_surfaces(temp_db, "sess-q", [mid], "tu-1", HOOK_PRE_TOOL_USE, 1,
                  int(time.time()))
@@ -37,11 +37,27 @@ def test_quarantine_soft_demotes_and_marks_noise(temp_db, capsys):
     out = json.loads(capsys.readouterr().out)
     assert out["action"] == "quarantined"
     assert out["surfaces_marked_noise"] == 1
+    assert out["out_of_circulation"] is True
 
     mem = memory_store.get(temp_db, mid)
-    assert mem.useful_count == 0          # soft-demote zeroes usefulness
-    assert mem.archived_ts is None        # NOT archived — reversible
+    assert mem.archived_ts is not None    # ARCHIVED — out of retrieval, reversibly
     assert not has_pending_surfaces(temp_db, "sess-q")  # judged as noise
+
+
+def test_quarantined_memory_no_longer_surfaces(temp_db, capsys):
+    """The ADR-0007 core promise: quarantine takes the memory out of
+    circulation IMMEDIATELY — the match queries must stop returning it.
+    (A soft-demote would NOT do this: with zero judgments the q-gate
+    can't suppress a young memory.)"""
+    mid = _seed(temp_db)
+    memory_store.add_token_trigger(temp_db, mid, ["dangerctl", "deploy"])
+    before = memory_store.match_token_triggers(temp_db, "dangerctl", None, None)
+    assert any(r["id"] == mid for r in before)
+
+    quarantine.main([str(mid), "--reason", "dangerous"])
+    capsys.readouterr()
+    after = memory_store.match_token_triggers(temp_db, "dangerctl", None, None)
+    assert not any(r["id"] == mid for r in after)
 
 
 def test_quarantine_records_audit_event_in_watcher_context(temp_db, capsys, monkeypatch):
@@ -69,7 +85,7 @@ def test_quarantine_is_restorable(temp_db, capsys):
     capsys.readouterr()
     memory_store.restore(temp_db, mid)
     mem = memory_store.get(temp_db, mid)
-    assert mem.archived_ts is None and mem.surface_count == 0
+    assert mem.archived_ts is None  # back in circulation
 
 
 def test_quarantine_id_only_and_not_found(temp_db, capsys):

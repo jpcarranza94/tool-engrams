@@ -36,6 +36,9 @@ surfaced** — in either surfacing path (PreToolUse and PostToolUseFailure).
   not depend on the model remembering to pass a flag.
 - **Manual saves keep `origin_session_id = NULL`** (a hand-run `engram
   remember` has no session attribution) and are therefore never suppressed.
+- **A body-replacing dedup update re-stamps the origin** to the updating
+  session (or NULL for a manual update): the new body belongs to whoever
+  wrote it, and that session's echo is now the one to suppress.
 - **`block` memories are exempt.** The session where the user just got burned
   and a block was formed is exactly the session where the deny must enforce;
   in-context knowledge is not enforcement. This mirrors the existing

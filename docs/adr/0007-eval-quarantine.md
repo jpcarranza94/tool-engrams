@@ -30,12 +30,15 @@ surface, strictly worse than writing new auditable rows.
 
 By construction it can only do three reversible, audited things:
 
-1. Soft-demote the memory (the existing `forget` non-delete semantics —
-   recoverable with `engram forget --restore`).
+1. Archive the memory — actually out of retrieval immediately (the match
+   queries exclude archived rows; a soft-demote would NOT suppress a young
+   memory, since the gate needs ≥3 judgments). Reversible with
+   `engram forget --restore`.
 2. Record a `quarantined` event in `watcher_run_events` with the reason —
    the audit trail consolidation and `engram monitor` read.
-3. Mark the memory's latest unjudged surface `noise`, so the reinforcement
-   signal reflects the incident.
+3. Mark the memory's unjudged surfaces `noise` (scoped to the given
+   `--session-id` when passed), so the reinforcement signal reflects the
+   incident.
 
 It addresses memories by id only (no fuzzy name matching), one at a time (no
 bulk), and cannot hard-delete. The eval prompt instructs: quarantine only on
@@ -64,9 +67,11 @@ the strongest freshness signal the staleness audit can get.
   could be interrupted halfway.
 
 **Negative / risks**
-- A miscalibrated eval could quarantine good memories. Bounded: soft-demote
+- A miscalibrated eval could quarantine good memories. Bounded: the archive
   is reversible, every event carries a reason, and consolidation re-reviews
-  nightly. A trigger-happy pattern would show up in `engram monitor`.
+  nightly (its prompt receives the quarantine list and must restore, repair
+  via `engram edit`, or confirm). A trigger-happy pattern would show up in
+  `engram monitor`.
 - One more verb in eval's allowlist grows its attack surface. Accepted: the
   verb's worst case (wrongly demoting one memory, audited) is the same class
   as `judge noise`, just stronger — not a new class.

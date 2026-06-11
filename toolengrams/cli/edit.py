@@ -51,6 +51,17 @@ def main(argv: list[str] | None = None) -> int:
             return 1
 
         new_body = args.body if args.body is not None else mem.body
+        # Validate BEFORE mutating: a re-extract that finds no triggers would
+        # orphan the memory (it could never surface again).
+        if args.re_extract_triggers and not extract_candidates(new_body):
+            print(json.dumps({
+                "error": "no_triggers",
+                "message": ("--re-extract-triggers found no triggers in the new "
+                            "body; refusing (the memory would never surface). "
+                            "Include backticked commands or paths, or edit "
+                            "without --re-extract-triggers."),
+            }))
+            return 1
         with db.transaction(conn):
             memory_store.set_content(
                 conn, mem.id, body=new_body,
@@ -59,8 +70,7 @@ def main(argv: list[str] | None = None) -> int:
             retriggered = 0
             if args.re_extract_triggers:
                 memory_store.delete_triggers_for(conn, mem.id)
-                candidates = extract_candidates(new_body)
-                insert_candidate_triggers(conn, mem.id, candidates)
+                insert_candidate_triggers(conn, mem.id, extract_candidates(new_body))
                 retriggered = memory_store.count_triggers_for(conn, mem.id)
 
         updated = memory_store.get(conn, mem.id)

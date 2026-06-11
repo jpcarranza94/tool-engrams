@@ -167,6 +167,18 @@ def prev_window_start(conn: sqlite3.Connection, work_session_id: str,
     return min(r["cursor_from"] or 0 for r in rows)
 
 
+def recent_quarantines(conn: sqlite3.Connection, since_ts: int) -> list[sqlite3.Row]:
+    """Quarantine events since `since_ts` (memory id/name + reason + session) —
+    the nightly consolidation reviews these: restore, repair via `engram edit`,
+    or leave archived (ADR-0007)."""
+    return conn.execute(
+        "SELECT e.ts, e.memory_id, e.memory_name, e.detail, r.work_session_id "
+        "FROM watcher_run_events e JOIN watcher_runs r ON r.id = e.run_id "
+        "WHERE e.kind = 'quarantined' AND e.ts >= ? ORDER BY e.ts DESC",
+        (since_ts,),
+    ).fetchall()
+
+
 def count_runs_before(conn: sqlite3.Connection, cutoff_ts: int) -> int:
     """How many runs are older than `cutoff_ts` — the dry-run prune preview."""
     return int(conn.execute(
@@ -219,7 +231,7 @@ def recent_events(conn: sqlite3.Connection, limit: int = 50) -> list[sqlite3.Row
     """Newest decision-stream events with their run's role + session — created
     (formation) vs judged (eval), newest first."""
     return conn.execute(
-        "SELECT e.ts, e.kind, e.memory_id, e.memory_name, e.outcome, "
+        "SELECT e.ts, e.kind, e.memory_id, e.memory_name, e.outcome, e.detail, "
         "       r.role, r.work_session_id "
         "FROM watcher_run_events e JOIN watcher_runs r ON r.id = e.run_id "
         "ORDER BY e.ts DESC LIMIT ?",

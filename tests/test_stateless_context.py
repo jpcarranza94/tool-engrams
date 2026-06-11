@@ -55,7 +55,7 @@ def test_prior_tail_section_reads_previous_window(temp_db, tmp_path):
     assert "Recent prior activity" in section
     assert "earlier failing command" in section
     assert "current window command" not in section  # only the PRIOR window
-    assert "already processed" in section           # don't re-save framing
+    assert "already considered" in section          # don't re-save framing
 
 
 def test_prior_tail_absent_without_prior_run(temp_db, tmp_path):

@@ -48,9 +48,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 PYTHON_BIN = sys.executable
 
 # Residue younger than this is left alone. Days, not hours: the TTL must
-# comfortably exceed any plausible gap inside a live session, because reaping
-# an active sandbox or watcher transcript orphans its --resume id (harmless —
-# tick.py falls back to a fresh session — but wasteful).
+# comfortably exceed any plausible gap inside a live session, so a live
+# session's sandbox (its delta.txt + permission settings) is never reaped
+# out from under a tick.
 DEFAULT_CLEANUP_TTL_SEC = 7 * 86_400
 
 # How often a cleanup may run, gated by the marker-file mtime. A constant, not

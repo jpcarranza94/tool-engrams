@@ -43,10 +43,13 @@ land on `main` without deprecation cycles; pin a tag if you need stability.
   `--re-extract-triggers` opt-in. Ends the destructive forget-and-re-remember
   dance. Interactive + consolidation tier only.
 - **`engram quarantine <id> --reason` (ADR-0007)** — the eval watcher's
-  emergency brake for demonstrably harmful memories: soft-demote
-  (restorable), audited `quarantined` run-event with the reason, unjudged
-  surfaces marked `noise`. Id-only, no bulk, no hard delete; added to the
-  eval allowlist alongside `engram judge`.
+  emergency brake for demonstrably harmful memories: archives the memory
+  (out of retrieval immediately; restorable via `engram forget --restore`),
+  records an audited `quarantined` run-event with the reason, and
+  noise-marks unjudged surfaces. Id-only, no bulk, no hard delete; added to
+  the eval allowlist alongside `engram judge`. Nightly consolidation
+  receives the quarantine list and must restore, repair (`engram edit`),
+  or confirm each.
 
 ### Fixed
 - e2e suite runs again: the fixtures still wrote the v1 `memories.type`

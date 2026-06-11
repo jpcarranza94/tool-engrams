@@ -74,3 +74,13 @@ def test_edit_requires_a_change(temp_db, capsys):
 def test_edit_not_found(temp_db, capsys):
     assert edit.main(["999", "--body", "x `y z`"]) == 1
     assert json.loads(capsys.readouterr().out)["error"] == "not_found"
+
+
+def test_edit_refuses_re_extract_that_orphans(temp_db, capsys):
+    """A re-extract finding zero triggers must refuse, not orphan the memory."""
+    mid = _seed(temp_db)
+    rc = edit.main([str(mid), "--body", "prose with no commands or paths at all",
+                    "--re-extract-triggers"])
+    assert rc == 1
+    assert json.loads(capsys.readouterr().out)["error"] == "no_triggers"
+    assert len(memory_store.triggers_for(temp_db, mid)) == 1  # untouched

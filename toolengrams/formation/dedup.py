@@ -99,14 +99,19 @@ def update_existing_memory(
     pinned: bool,
     candidates: list[FormationCandidate],
     extra_triggers: list[dict[str, Any]],
+    origin_session_id: str | None = None,
 ) -> int:
-    """Replace body/name/kind on an existing memory, merge triggers."""
+    """Replace body/name/kind on an existing memory, merge triggers. The origin
+    is re-stamped to the UPDATING session (or cleared for manual updates) — the
+    replaced body belongs to whoever wrote it now, and that session's echo is
+    the one ADR-0006 must suppress."""
     now_ts = int(time.time())
     with db.transaction(conn):
         memory_store.update_memory(
             conn, existing_id, name=name, description=description, body=body,
             kind=kind, pinned=pinned, created_ts=now_ts,
         )
+        memory_store.set_origin_session(conn, existing_id, origin_session_id)
         memory_store.delete_triggers_for(conn, existing_id)
         insert_candidate_triggers(conn, existing_id, candidates)
         insert_candidate_triggers(conn, existing_id, extras_to_candidates(extra_triggers))

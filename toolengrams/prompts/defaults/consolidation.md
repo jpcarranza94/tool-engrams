@@ -157,3 +157,18 @@ Before the JSON block, include a human-readable report with:
 - Every memory you create must use --trigger or --path to specify what it binds to
 - When in doubt, don't create. False negatives are cheap; false positives become permanent noise
 - A good memory answers "what would Claude get WRONG without this?", not "what did Claude do today?"
+
+## Quarantine review (ADR-0007)
+
+The memory summary may list memories the evaluation watcher QUARANTINED
+(archived with a reason) since the last run. Review each with full context —
+the eval watcher acted on one session's evidence; you have the day's:
+
+- The reason holds and the memory is unsalvageable → leave it archived.
+- The content is fixable (wrong flag, stale path, overbroad claim) → repair it
+  with `engram edit <id> --body "..."`, then restore it with
+  `engram forget --restore "<name>"`.
+- The quarantine was a false positive → `engram forget --restore "<name>"`.
+
+Never leave a quarantine unreviewed: an archived-but-good memory is silent
+knowledge loss.

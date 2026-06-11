@@ -366,6 +366,16 @@ def set_content(conn: sqlite3.Connection, memory_id: int, *,
     conn.execute(f"UPDATE memories SET {', '.join(sets)} WHERE id = ?", args)
 
 
+def set_origin_session(conn: sqlite3.Connection, memory_id: int,
+                       origin_session_id: str | None) -> None:
+    """Re-stamp (or clear) the forming session after a body-replacing update —
+    the updater is now the session whose echo must be suppressed (ADR-0006)."""
+    conn.execute(
+        "UPDATE memories SET origin_session_id = ? WHERE id = ?",
+        (origin_session_id, memory_id),
+    )
+
+
 def set_kind(conn: sqlite3.Connection, memory_id: int, kind: str) -> None:
     """Change only a memory's kind (seed realigns legacy demo memories)."""
     conn.execute(

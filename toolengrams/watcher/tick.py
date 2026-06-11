@@ -321,7 +321,8 @@ def _prior_tail_section(session_id: str, transcript_path: str, cursor: int) -> s
     return ("\n\n--- Recent prior activity (context only) ---\n"
             "The tail of the previous window(s), for episodes that span passes "
             "(e.g. a failure there, its fix in the new activity). Do not save "
-            "memories from this section alone — it was already processed:\n"
+            "memories from this section alone — it was already considered by "
+            "an earlier pass:\n"
             + tail)
 
 
