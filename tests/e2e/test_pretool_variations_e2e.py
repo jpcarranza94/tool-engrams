@@ -140,7 +140,7 @@ def test_pretool_fires_on_git_status_subcommand(claude_runner, seed_memory):
 
     seed_memory(
         name="e2e git status variation",
-        description="test-scoped subcommand-level head",
+        description="test-scoped subcommand-level trigger",
         body=(
             f"This memory fires on `git status` specifically. "
             f"Magic token: {magic}. If you can read this, include the "
@@ -173,8 +173,8 @@ def test_pretool_fires_on_git_status_subcommand(claude_runner, seed_memory):
 
 
 @pytest.mark.e2e
-def test_pretool_longer_head_wins_tiebreak_live(claude_runner, seed_memory):
-    """Two memories, one [git] and one [git, status] — the longer head
+def test_pretool_longer_trigger_wins_tiebreak_live(claude_runner, seed_memory):
+    """Two memories, one [git] and one [git, status] — the longer trigger
     should rank first when Claude runs `git status`."""
     generic_magic = "ENGRAM_E2E_TOKEN_ZK7QV9P_GENERIC_GIT"
     specific_magic = "ENGRAM_E2E_TOKEN_ZK7QV9P_SPECIFIC_STATUS"
@@ -217,8 +217,8 @@ def test_pretool_longer_head_wins_tiebreak_live(claude_runner, seed_memory):
     assert result.payload is not None
     assert not result.is_error
     # Both should surface (top-3 injection + both match), but the specific
-    # one (longer head) MUST appear. Generic is a nice-to-have.
+    # one (longer trigger) MUST appear. Generic is a nice-to-have.
     assert specific_magic in result.text, (
-        f"Specific memory (head=[git, status]) missing.\n"
+        f"Specific memory (trigger=[git, status]) missing.\n"
         f"Response: {result.text[:1500]}"
     )

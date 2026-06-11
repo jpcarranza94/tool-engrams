@@ -208,9 +208,12 @@ def seed_memory(claude_runner):
         for t in triggers or []:
             if t["kind"] == "token_subseq":
                 tokens = list(t["tokens"])
-                memory_store.add_token_trigger(
-                    conn, memory_id, tokens[0].lower(), tokens
-                )
+                if not tokens:
+                    raise ValueError("token_subseq trigger needs at least one token")
+                # first_token passed as-is: production writers don't lowercase
+                # and the lookup is case-sensitive — the fixture must mirror
+                # production, not the stale schema comment.
+                memory_store.add_token_trigger(conn, memory_id, tokens[0], tokens)
             elif t["kind"] == "path_glob":
                 memory_store.add_path_trigger(conn, memory_id, t["path_pattern"])
             else:
@@ -254,11 +257,8 @@ def db_assertions(claude_runner):
         def surface_count(self, memory_id: int) -> int:
             conn = db.connect(claude_runner.db_path)
             try:
-                row = conn.execute(
-                    "SELECT surface_count FROM memories WHERE id = ?",
-                    (memory_id,),
-                ).fetchone()
-                return row["surface_count"] if row else 0
+                mem = memory_store.get(conn, memory_id)
+                return mem.surface_count if mem else 0
             finally:
                 conn.close()
 
