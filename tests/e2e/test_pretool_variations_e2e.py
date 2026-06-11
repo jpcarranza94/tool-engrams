@@ -130,7 +130,7 @@ def test_pretool_fires_on_grep_with_path_trigger(claude_runner, seed_memory):
 
 @pytest.mark.e2e
 def test_pretool_fires_on_git_status_subcommand(claude_runner, seed_memory):
-    """Bash git status → tool_head trigger on [git, status] → memory injected."""
+    """Bash git status → token_subseq trigger on [git, status] → memory injected."""
     magic = "ENGRAM_E2E_TOKEN_ZK7QV9P_GIT_STATUS"
 
     # Make the project dir a real git repo so `git status` succeeds and
@@ -149,7 +149,7 @@ def test_pretool_fires_on_git_status_subcommand(claude_runner, seed_memory):
         kind="hint",
         scope="global",
         triggers=[
-            {"kind": "tool_head", "tool_name": "Bash", "head": ["git", "status"]},
+            {"kind": "token_subseq", "tokens": ["git", "status"]},
         ],
     )
 
@@ -189,7 +189,7 @@ def test_pretool_longer_head_wins_tiebreak_live(claude_runner, seed_memory):
         ),
         kind="hint",
         scope="global",
-        triggers=[{"kind": "tool_head", "tool_name": "Bash", "head": ["git"]}],
+        triggers=[{"kind": "token_subseq", "tokens": ["git"]}],
     )
     seed_memory(
         name="specific git status memory",
@@ -199,7 +199,7 @@ def test_pretool_longer_head_wins_tiebreak_live(claude_runner, seed_memory):
         ),
         kind="hint",
         scope="global",
-        triggers=[{"kind": "tool_head", "tool_name": "Bash", "head": ["git", "status"]}],
+        triggers=[{"kind": "token_subseq", "tokens": ["git", "status"]}],
     )
 
     claude_runner.write_hook_settings(_pretool_hook(claude_runner, "Bash"))

@@ -56,8 +56,8 @@ def test_deny_blocks_first_call_and_retry_uses_corrected_args(
         kind="block",
         scope="global",
         triggers=[
-            {"kind": "tool_head", "tool_name": "Bash", "head": ["git", "status"]},
-            {"kind": "tool_head", "tool_name": "Bash", "head": ["git"]},
+            {"kind": "token_subseq", "tokens": ["git", "status"]},
+            {"kind": "token_subseq", "tokens": ["git"]},
         ],
     )
 
@@ -114,8 +114,8 @@ def test_deny_dedup_allows_second_call(claude_runner, seed_memory, db_assertions
         kind="block",
         scope="global",
         triggers=[
-            {"kind": "tool_head", "tool_name": "Bash", "head": ["git", "status"]},
-            {"kind": "tool_head", "tool_name": "Bash", "head": ["git"]},
+            {"kind": "token_subseq", "tokens": ["git", "status"]},
+            {"kind": "token_subseq", "tokens": ["git"]},
         ],
     )
 
