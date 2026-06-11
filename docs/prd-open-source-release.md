@@ -103,7 +103,7 @@ not refreshed.
 
 ### 1.6 Cost & privacy section in README **[UX + OSS]**
 The biggest undisclosed surprise. State: what runs in the background (one sonnet
-`claude -p` per coalesced Stop event per role), spend (~$1/day moderate use —
+`claude -p` per coalesced Stop event per role), spend (~$1/day moderate use [superseded: README now states $1-$9/day from sonnet data] —
 preliminary, one day of mixed-model data; see open question 4; eval ≈ 5× formation
 per call), the levers (`ENGRAM_WATCHER_MODEL=haiku`, per-role
 overrides, `engram pause`), live visibility (`engram monitor`), what is stored where
@@ -232,7 +232,7 @@ templates, `CHANGELOG.md` + `v0.1.0` tag, `py.typed`, author contact in
    from day one? Leaning: explicit `0.1.0` at announcement, unset until then.
 3. Does the marketplace listing need `defaultEnabled: false` given the system spends
    money once enabled? Leaning yes + first-run cost notice via SessionStart context.
-4. The 1.6 "~$1/day" figure is one day of mixed opus/sonnet data — preliminary.
+4. The 1.6 "~$1/day" figure is one day of mixed opus/sonnet data — preliminary. (Superseded: README's Cost section now carries an observed $1-$9/day sonnet range.)
    Collect a week of sonnet-only `engram monitor` data before the README cost table
    is presented as measured fact (gate on this only for the announcement, not the
    repo going public).

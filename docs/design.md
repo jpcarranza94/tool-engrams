@@ -55,7 +55,7 @@ to be **intelligent** and run at the **right moment**.
 ### 2.1 The moment: the next Stop, reading forward
 
 A memory's effect is visible only **after** the surface line. PreToolUse injects a
-`block` (deny → the model retries) or a `hint` (`allow` + context → the model proceeds);
+`block` (deny → the model retries) or a `hint` (context only, no permission decision — the normal permission flow proceeds untouched);
 in both cases whether the model heeds shows in its **subsequent** actions.
 
 ```

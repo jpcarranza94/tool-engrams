@@ -3,6 +3,10 @@
 All notable changes to ToolEngrams. The project is alpha — breaking changes
 land on `main` without deprecation cycles; pin a tag if you need stability.
 
+## [Unreleased]
+
+(Nothing yet — new entries go here.)
+
 ## [0.1.0] — 2026-06-10
 
 First tagged release. Everything before this point — the system itself.

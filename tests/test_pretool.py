@@ -1,7 +1,8 @@
 """End-to-end PreToolUse handler test against a temp SQLite.
 
-PreToolUse only surfaces `block`-kind memories and always denies.
-`hint`-kind memories live on the PostToolUseFailure track.
+PreToolUse surfaces BOTH kinds: a `block` denies the call; a `hint` injects
+additionalContext with no permissionDecision (an explicit allow would bypass
+the user's permission prompts — see pretool.py).
 """
 
 from __future__ import annotations
@@ -29,8 +30,8 @@ def _seed_token_memory(conn, name: str, body: str, tokens: list[str], *,
                        kind: str = "block") -> int:
     """Helper: insert a memory + token_subseq trigger.
 
-    Defaults to kind=block since this is the pretool test; hint memories
-    don't surface in pretool.
+    Defaults to kind=block; pass kind="hint" to exercise the context-only
+    (no permissionDecision) surface path.
     """
     now_ts = int(time.time())
     cur = conn.execute(
@@ -251,8 +252,8 @@ def test_pretool_path_glob_block_on_file_tool(temp_db, monkeypatch):
     assert "Python file rule" in hso["additionalContext"]
 
 
-def test_pretool_path_glob_hint_surfaces_as_allow(temp_db, monkeypatch):
-    """A hint-kind path_glob memory surfaces in pretool with allow."""
+def test_pretool_path_glob_hint_surfaces_without_permission_decision(temp_db, monkeypatch):
+    """A hint-kind path_glob memory surfaces context-only in pretool."""
     now_ts = int(time.time())
     cur = temp_db.execute(
         "INSERT INTO memories (name, description, body, kind, scope, project_slug, created_ts) "

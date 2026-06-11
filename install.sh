@@ -163,9 +163,9 @@ if [ "$install_ok" -eq 0 ]; then
     install_ok=1
     # The hooks invoke plain `engram`, so ~/.local/bin must be on PATH. The
     # export below only fixes THIS process (it makes the verification and DB
-    # init work) — the user's parent shell still lacks it, so remember to
-    # warn loudly in the closing banner or `engram seed` fails right after a
-    # "successful" install (stock macOS PATH has no ~/.local/bin).
+    # init work) — the user's parent shell still lacks it (stock macOS PATH
+    # has no ~/.local/bin), so PATH_WARN makes the closing banner tell them
+    # to persist it.
     case ":$PATH:" in
         *":$HOME/.local/bin:"*) ;;
         *)
