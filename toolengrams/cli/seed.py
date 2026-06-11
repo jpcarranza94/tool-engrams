@@ -185,6 +185,6 @@ def _insert_triggers(conn, memory_id: int, triggers: list[dict]) -> None:
             tokens = list(t["tokens"])
             if not tokens:
                 continue
-            memory_store.add_token_trigger(conn, memory_id, tokens[0], tokens)
+            memory_store.add_token_trigger(conn, memory_id, tokens)
         elif kind == "path_glob":
             memory_store.add_path_trigger(conn, memory_id, t["path_pattern"])

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import time
+
+import pytest
 
 from toolengrams import memory_store as ms
 from toolengrams.models import Memory
@@ -103,7 +106,7 @@ def test_search_matches_body(temp_db):
 
 def test_triggers_roundtrip_and_match(temp_db):
     mid = _insert(temp_db, name="gh pr", scope="global")
-    ms.add_token_trigger(temp_db, mid, "gh", ["gh", "pr", "create"])
+    ms.add_token_trigger(temp_db, mid, ["gh", "pr", "create"])
     ms.add_path_trigger(temp_db, mid, "*.tf")
 
     trigs = ms.triggers_for(temp_db, mid)
@@ -122,8 +125,8 @@ def test_match_token_triggers_kind_filter(temp_db):
     # The kind-filtered SQL combination: only memories of the asked kind come back.
     block = _insert(temp_db, name="blk", kind="block", scope="global")
     hint = _insert(temp_db, name="hnt", kind="hint", scope="global")
-    ms.add_token_trigger(temp_db, block, "git", ["git", "push"])
-    ms.add_token_trigger(temp_db, hint, "git", ["git", "push"])
+    ms.add_token_trigger(temp_db, block, ["git", "push"])
+    ms.add_token_trigger(temp_db, hint, ["git", "push"])
 
     ids = {r["id"] for r in ms.match_token_triggers(temp_db, "git", None, kind="block")}
     assert block in ids and hint not in ids
@@ -133,8 +136,8 @@ def test_match_token_triggers_kind_filter(temp_db):
 
 def test_delete_triggers_and_single(temp_db):
     mid = _insert(temp_db)
-    ms.add_token_trigger(temp_db, mid, "a", ["a", "b"])
-    ms.add_token_trigger(temp_db, mid, "c", ["c", "d"])
+    ms.add_token_trigger(temp_db, mid, ["a", "b"])
+    ms.add_token_trigger(temp_db, mid, ["c", "d"])
     assert ms.count_triggers_for(temp_db, mid) == 2
     one = ms.triggers_for(temp_db, mid)[0]
     ms.delete_trigger(temp_db, one.id)
@@ -146,8 +149,8 @@ def test_delete_triggers_and_single(temp_db):
 def test_count_trigger_owners(temp_db):
     a = _insert(temp_db, name="a")
     b = _insert(temp_db, name="b")
-    ms.add_token_trigger(temp_db, a, "git", ["git", "push"])
-    ms.add_token_trigger(temp_db, b, "git", ["git", "push"])
+    ms.add_token_trigger(temp_db, a, ["git", "push"])
+    ms.add_token_trigger(temp_db, b, ["git", "push"])
     assert ms.count_token_trigger_owners(temp_db, ["git", "push"]) == 2
     assert ms.count_token_trigger_owners(temp_db, ["git", "pull"]) == 0
 
@@ -208,7 +211,7 @@ def test_set_pinned_and_verified(temp_db):
 
 def test_delete_memory_cascades_triggers(temp_db):
     mid = _insert(temp_db)
-    ms.add_token_trigger(temp_db, mid, "x", ["x"])
+    ms.add_token_trigger(temp_db, mid, ["x"])
     ms.delete_memory(temp_db, mid)
     assert ms.get(temp_db, mid) is None
     assert ms.count_triggers_for(temp_db, mid) == 0
@@ -220,7 +223,7 @@ def test_delete_memory_cascades_triggers(temp_db):
 def test_summary_and_health_stats(temp_db):
     h = _insert(temp_db, name="h", kind="hint")
     b = _insert(temp_db, name="b", kind="block")
-    ms.add_token_trigger(temp_db, h, "git", ["git"])
+    ms.add_token_trigger(temp_db, h, ["git"])
     ms.bump_surface(temp_db, [h], int(time.time()))
     ms.bump_useful(temp_db, [h])
 
@@ -231,3 +234,23 @@ def test_summary_and_health_stats(temp_db):
     health = ms.health_stats(temp_db)
     assert health["active"] == 2
     assert health["total_surfaces"] == 1 and health["total_useful"] == 1
+
+
+def test_add_token_trigger_derives_first_token_verbatim(temp_db):
+    """first_token is owned by the seam: derived from tokens[0], stored
+    as-is — no case folding, because the lookup is case-sensitive like
+    command names (Make != make)."""
+    mid = _insert(temp_db, name="case test")
+    ms.add_token_trigger(temp_db, mid, ["Make", "build"])
+    row = temp_db.execute(
+        "SELECT first_token, tokens_json FROM triggers WHERE memory_id = ?",
+        (mid,),
+    ).fetchone()
+    assert row["first_token"] == "Make"
+    assert json.loads(row["tokens_json"]) == ["Make", "build"]
+
+
+def test_add_token_trigger_rejects_empty_tokens(temp_db):
+    mid = _insert(temp_db, name="empty test")
+    with pytest.raises(ValueError):
+        ms.add_token_trigger(temp_db, mid, [])

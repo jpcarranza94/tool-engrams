@@ -6,6 +6,12 @@ land on `main` without deprecation cycles; pin a tag if you need stability.
 ## [Unreleased]
 
 ### Changed
+- `memory_store.add_token_trigger` now derives `first_token` itself
+  (signature: `(conn, memory_id, tokens)`) and rejects empty token lists.
+  Settles the casing contract in one place: stored as-is, matched
+  case-sensitively (command names are case-sensitive); the schema comment
+  claiming lowercasing was stale and is corrected. No behavioral change
+  for existing data — no writer ever lowercased.
 - e2e `seed_memory` fixture now writes through `memory_store` (the
   documented seam) instead of raw SQL, so fixture/schema drift is caught
   by unit tests instead of a paid `claude -p` run. The v1
