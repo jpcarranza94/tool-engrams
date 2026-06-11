@@ -31,7 +31,7 @@ from typing import Any
 
 import pytest
 
-from toolengrams import db
+from toolengrams import db, memory_store
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 CLAUDE_BIN = shutil.which("claude")
@@ -169,13 +169,18 @@ def claude_runner(tmp_path, monkeypatch) -> ClaudeRunner:
 def seed_memory(claude_runner):
     """Helper fixture: insert a single memory + triggers into the test DB.
 
+    Writes go through memory_store (the documented seam for all
+    memories/triggers SQL) so the fixture cannot drift from the live
+    schema — raw SQL here is exactly how the suite silently broke when
+    the v2 schema dropped the `type` column.
+
     Usage:
         seed_memory(
             name="psql replica is read-only",
             body="Do not INSERT into the replica",
             kind="hint",          # or "block" for the deny path
             scope="global",
-            triggers=[{"kind": "tool_head", "tool_name": "Bash", "head": ["psql", "-h"]}],
+            triggers=[{"kind": "token_subseq", "tokens": ["psql", "-h"]}],
         )
     """
 
@@ -189,16 +194,30 @@ def seed_memory(claude_runner):
         triggers: list[dict] | None = None,
     ) -> int:
         conn = db.connect(claude_runner.db_path)
-        now_ts = int(time.time())
-        cur = conn.execute(
-            "INSERT INTO memories "
-            "(name, description, body, kind, scope, project_slug, created_ts) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (name, description, body, kind, scope, None, now_ts),
+        memory_id = memory_store.insert_memory(
+            conn,
+            name=name,
+            description=description,
+            body=body,
+            kind=kind,
+            scope=scope,
+            project_slug=None,
+            pinned=False,
+            created_ts=int(time.time()),
         )
-        memory_id = cur.lastrowid
         for t in triggers or []:
-            _insert_trigger(conn, memory_id, t)
+            if t["kind"] == "token_subseq":
+                tokens = list(t["tokens"])
+                if not tokens:
+                    raise ValueError("token_subseq trigger needs at least one token")
+                # first_token passed as-is: production writers don't lowercase
+                # and the lookup is case-sensitive — the fixture must mirror
+                # production, not the stale schema comment.
+                memory_store.add_token_trigger(conn, memory_id, tokens[0], tokens)
+            elif t["kind"] == "path_glob":
+                memory_store.add_path_trigger(conn, memory_id, t["path_pattern"])
+            else:
+                raise ValueError(f"unknown trigger kind: {t['kind']}")
         conn.close()
         return memory_id
 
@@ -238,38 +257,9 @@ def db_assertions(claude_runner):
         def surface_count(self, memory_id: int) -> int:
             conn = db.connect(claude_runner.db_path)
             try:
-                row = conn.execute(
-                    "SELECT surface_count FROM memories WHERE id = ?",
-                    (memory_id,),
-                ).fetchone()
-                return row["surface_count"] if row else 0
+                mem = memory_store.get(conn, memory_id)
+                return mem.surface_count if mem else 0
             finally:
                 conn.close()
 
     return Assertions()
-
-
-def _insert_trigger(conn, memory_id: int, trigger: dict) -> None:
-    kind = trigger["kind"]
-    # Back-compat shim: some e2e tests use the tool_head/head shape. Convert
-    # on the fly into the token_subseq/tokens shape so the fixtures keep working.
-    if kind == "tool_head":
-        kind = "token_subseq"
-        trigger = {"kind": kind, "tokens": list(trigger["head"])}
-
-    if kind == "token_subseq":
-        tokens = list(trigger["tokens"])
-        if not tokens:
-            return
-        conn.execute(
-            "INSERT INTO triggers "
-            "(memory_id, kind, first_token, tokens_json) "
-            "VALUES (?, 'token_subseq', ?, ?)",
-            (memory_id, tokens[0], json.dumps(tokens)),
-        )
-    elif kind == "path_glob":
-        conn.execute(
-            "INSERT INTO triggers (memory_id, kind, path_pattern) "
-            "VALUES (?, 'path_glob', ?)",
-            (memory_id, trigger["path_pattern"]),
-        )

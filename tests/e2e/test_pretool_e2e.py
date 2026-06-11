@@ -52,7 +52,7 @@ def test_pretool_injects_memory_when_claude_calls_bash_echo(claude_runner, seed_
         kind="hint",
         scope="global",
         triggers=[
-            {"kind": "tool_head", "tool_name": "Bash", "head": ["echo"]},
+            {"kind": "token_subseq", "tokens": ["echo"]},
         ],
     )
 

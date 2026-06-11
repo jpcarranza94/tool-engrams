@@ -5,6 +5,13 @@ land on `main` without deprecation cycles; pin a tag if you need stability.
 
 ## [Unreleased]
 
+### Changed
+- e2e `seed_memory` fixture now writes through `memory_store` (the
+  documented seam) instead of raw SQL, so fixture/schema drift is caught
+  by unit tests instead of a paid `claude -p` run. The v1
+  `tool_head`/`head` trigger shape and its conftest shim are gone — e2e
+  tests author `token_subseq`/`path_glob` directly.
+
 ### Fixed
 - e2e suite runs again: the fixtures still wrote the v1 `memories.type`
   column (dropped in the v2 schema), so all 7 `claude -p` tests failed at

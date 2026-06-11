@@ -130,7 +130,7 @@ def test_pretool_fires_on_grep_with_path_trigger(claude_runner, seed_memory):
 
 @pytest.mark.e2e
 def test_pretool_fires_on_git_status_subcommand(claude_runner, seed_memory):
-    """Bash git status → tool_head trigger on [git, status] → memory injected."""
+    """Bash git status → token_subseq trigger on [git, status] → memory injected."""
     magic = "ENGRAM_E2E_TOKEN_ZK7QV9P_GIT_STATUS"
 
     # Make the project dir a real git repo so `git status` succeeds and
@@ -140,7 +140,7 @@ def test_pretool_fires_on_git_status_subcommand(claude_runner, seed_memory):
 
     seed_memory(
         name="e2e git status variation",
-        description="test-scoped subcommand-level head",
+        description="test-scoped subcommand-level trigger",
         body=(
             f"This memory fires on `git status` specifically. "
             f"Magic token: {magic}. If you can read this, include the "
@@ -149,7 +149,7 @@ def test_pretool_fires_on_git_status_subcommand(claude_runner, seed_memory):
         kind="hint",
         scope="global",
         triggers=[
-            {"kind": "tool_head", "tool_name": "Bash", "head": ["git", "status"]},
+            {"kind": "token_subseq", "tokens": ["git", "status"]},
         ],
     )
 
@@ -173,8 +173,8 @@ def test_pretool_fires_on_git_status_subcommand(claude_runner, seed_memory):
 
 
 @pytest.mark.e2e
-def test_pretool_longer_head_wins_tiebreak_live(claude_runner, seed_memory):
-    """Two memories, one [git] and one [git, status] — the longer head
+def test_pretool_longer_trigger_wins_tiebreak_live(claude_runner, seed_memory):
+    """Two memories, one [git] and one [git, status] — the longer trigger
     should rank first when Claude runs `git status`."""
     generic_magic = "ENGRAM_E2E_TOKEN_ZK7QV9P_GENERIC_GIT"
     specific_magic = "ENGRAM_E2E_TOKEN_ZK7QV9P_SPECIFIC_STATUS"
@@ -189,7 +189,7 @@ def test_pretool_longer_head_wins_tiebreak_live(claude_runner, seed_memory):
         ),
         kind="hint",
         scope="global",
-        triggers=[{"kind": "tool_head", "tool_name": "Bash", "head": ["git"]}],
+        triggers=[{"kind": "token_subseq", "tokens": ["git"]}],
     )
     seed_memory(
         name="specific git status memory",
@@ -199,7 +199,7 @@ def test_pretool_longer_head_wins_tiebreak_live(claude_runner, seed_memory):
         ),
         kind="hint",
         scope="global",
-        triggers=[{"kind": "tool_head", "tool_name": "Bash", "head": ["git", "status"]}],
+        triggers=[{"kind": "token_subseq", "tokens": ["git", "status"]}],
     )
 
     claude_runner.write_hook_settings(_pretool_hook(claude_runner, "Bash"))
@@ -217,8 +217,8 @@ def test_pretool_longer_head_wins_tiebreak_live(claude_runner, seed_memory):
     assert result.payload is not None
     assert not result.is_error
     # Both should surface (top-3 injection + both match), but the specific
-    # one (longer head) MUST appear. Generic is a nice-to-have.
+    # one (longer trigger) MUST appear. Generic is a nice-to-have.
     assert specific_magic in result.text, (
-        f"Specific memory (head=[git, status]) missing.\n"
+        f"Specific memory (trigger=[git, status]) missing.\n"
         f"Response: {result.text[:1500]}"
     )
