@@ -14,6 +14,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 INSTALL_SH = REPO_ROOT / "install.sh"
+CLAUDE_TARGET_SH = REPO_ROOT / "install" / "targets" / "claude-code.sh"
 
 HOOK_EVENTS = {
     "SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse",
@@ -21,10 +22,26 @@ HOOK_EVENTS = {
 }
 
 
-def test_install_sh_wires_all_eight_events():
-    text = INSTALL_SH.read_text()
+def test_claude_target_script_wires_all_eight_events():
+    text = CLAUDE_TARGET_SH.read_text()
     for event in HOOK_EVENTS:
-        assert f'"{event}"' in text, f"install.sh no longer wires {event}"
+        assert f'"{event}"' in text, f"claude-code.sh no longer wires {event}"
+
+
+def test_wired_commands_carry_target_flag():
+    text = CLAUDE_TARGET_SH.read_text()
+    assert "engram pretool --target claude-code" in text
+    assert "engram flush --target claude-code" in text
+
+
+def test_install_sh_rejects_unknown_target(tmp_path):
+    proc = subprocess.run(
+        ["bash", str(INSTALL_SH), "--target", "betamax"],
+        capture_output=True, text=True,
+        env={"HOME": str(tmp_path), "PATH": "/usr/bin:/bin"},
+    )
+    assert proc.returncode == 2
+    assert "unknown target" in proc.stdout
 
 
 # ---------- home migration (behavioral: runs the real function bytes) ----------

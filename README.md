@@ -457,7 +457,7 @@ e2e stays local.
 ## Uninstall
 
 ```bash
-./install.sh --uninstall              # removes hooks, permission, skill symlinks
+./install.sh --uninstall              # removes hooks, permission, skill symlinks (all targets)
 rm -rf ~/.tool-engrams/               # only if you also want the memories gone
 rm -f ~/.claude/tool-engrams          # ...plus the compatibility symlink migration left
 pip uninstall toolengrams             # venv-fallback installs instead:

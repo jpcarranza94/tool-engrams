@@ -17,7 +17,7 @@ from datetime import date, timedelta
 from .. import db, pause
 from ..consolidation import runs
 from ..consolidation.agent import run_consolidation_agent
-from ..consolidation.collect import collect_sessions
+from ..target.claude_code.collect import collect_sessions
 from ..consolidation.schedule import install_schedule, uninstall_schedule
 from ..retrieval import session_state
 from ..watcher import runs_store

@@ -31,12 +31,13 @@ import sys
 
 from .. import pause
 from ..prompts.session_start import FORMATION_GUIDANCE
+from ..target import get_target
 from ..utils import is_watcher_child
-from ..watcher import cleanup, derive_transcript_path, tick
+from ..watcher import cleanup, tick
 from ._skip import is_internal_cwd
 
 
-def main() -> int:
+def main(target_name: str = "claude-code") -> int:
     if pause.is_disabled():
         _emit({})
         return 0
@@ -46,7 +47,7 @@ def main() -> int:
         payload = {}
 
     try:
-        _ensure_session_tracked(payload)
+        _ensure_session_tracked(payload, get_target(target_name))
     except Exception:
         pass  # watcher is best-effort -- never block the hook
 
@@ -64,7 +65,7 @@ def main() -> int:
         return 0
 
 
-def _ensure_session_tracked(payload: dict) -> None:
+def _ensure_session_tracked(payload: dict, target) -> None:
     """Register the session in watcher_state so event-driven ticks have a cursor
     and config to read. No long-running process is spawned — ticks fire from the
     Stop / SessionEnd / failure→success / user-correction hooks.
@@ -83,8 +84,10 @@ def _ensure_session_tracked(payload: dict) -> None:
     # Skip non-user sessions (consolidation agent, old observer, etc.)
     if is_internal_cwd(cwd):
         return
-    transcript_path = derive_transcript_path(session_id, cwd)
-    tick.ensure_row(session_id, transcript_path, cwd)
+    # Payload-first (older code derived unconditionally and ignored the
+    # payload's own transcript_path).
+    transcript_path = target.transcript_path(payload)
+    tick.ensure_row(session_id, transcript_path, cwd, target=target.NAME)
     tick.sweep_idle_sessions(session_id)
     # Once a day (marker-gated; one stat on the common path), reap cold watcher
     # residue in a detached process: dead watcher_state rows, stale sandbox

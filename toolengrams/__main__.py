@@ -12,6 +12,8 @@ import sys
 from typing import Callable
 
 from . import pause, watcher
+from .harness_names import CLAUDE_CODE
+from .target import TARGETS
 from .cli import (
     consolidate,
     dashboard,
@@ -115,13 +117,21 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="engram")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser("pretool", help="PreToolUse hook handler (reads JSON on stdin)")
-    sub.add_parser("session-start", help="SessionStart hook handler (reads JSON on stdin)")
-    sub.add_parser("post-tool", help="PostToolUse hook handler — success reinforcement (reads JSON on stdin)")
-    sub.add_parser("post-tool-failure", help="PostToolUseFailure hook handler — hint injection + arms the watcher (reads JSON on stdin)")
-    sub.add_parser("user-prompt", help="UserPromptSubmit hook handler — fires a watcher tick on a likely correction (reads JSON on stdin)")
-    sub.add_parser("stop", help="Stop hook handler — primary event-driven watcher trigger (reads JSON on stdin)")
-    sub.add_parser("flush", help="SessionEnd/PreCompact hook handler — final watcher flush tick (reads JSON on stdin)")
+    # Hook handlers all take --target: the wired hook command names the harness
+    # it fires from (install-time decision, never payload-sniffed). Defaults to
+    # claude-code so pre-seam installs keep working unchanged.
+    _hook_help = {
+        "pretool": "PreToolUse hook handler (reads JSON on stdin)",
+        "session-start": "SessionStart hook handler (reads JSON on stdin)",
+        "post-tool": "PostToolUse hook handler — success reinforcement (reads JSON on stdin)",
+        "post-tool-failure": "PostToolUseFailure hook handler — hint injection + arms the watcher (reads JSON on stdin)",
+        "user-prompt": "UserPromptSubmit hook handler — fires a watcher tick on a likely correction (reads JSON on stdin)",
+        "stop": "Stop hook handler — primary event-driven watcher trigger (reads JSON on stdin)",
+        "flush": "SessionEnd/PreCompact hook handler — final watcher flush tick (reads JSON on stdin)",
+    }
+    for _name, _help in _hook_help.items():
+        hp = sub.add_parser(_name, help=_help)
+        hp.add_argument("--target", default=CLAUDE_CODE, choices=sorted(TARGETS))
     sub.add_parser("seed", help="Insert example memories for smoke testing "
                                 "(--with-block, --remove)", add_help=False)
     sub.add_parser("cleanup", help="Reap cold watcher residue: dead watcher_state rows, stale sandboxes, internal transcripts")
@@ -154,7 +164,7 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
 
-    handlers: dict[str, Callable[[], int]] = {
+    hook_handlers: dict[str, Callable[[str], int]] = {
         "pretool": pretool.main,
         "session-start": session_start.main,
         "post-tool": post_tool.main,
@@ -162,11 +172,15 @@ def main(argv: list[str] | None = None) -> int:
         "user-prompt": user_prompt.main,
         "stop": stop.main,
         "flush": flush.main,
+    }
+    if args.command in hook_handlers:
+        return hook_handlers[args.command](args.target)
+
+    handlers: dict[str, Callable[[], int]] = {
         "cleanup": watcher.cleanup.run_cleanup,
         "pause": pause.run_pause,
         "resume": pause.run_resume,
     }
-
     return handlers[args.command]()
 
 

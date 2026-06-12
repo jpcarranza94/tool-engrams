@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
+
+from ..interface import SessionFile
 
 
 CLAUDE_PROJECTS_DIR = Path.home() / ".claude" / "projects"
@@ -29,15 +30,6 @@ _INTERNAL_PROJECT_RE = re.compile(
 def _is_internal_project(project_slug: str) -> bool:
     """True if the slug looks like one of our own temp-dir sessions."""
     return bool(_INTERNAL_PROJECT_RE.search(project_slug))
-
-
-@dataclass(slots=True)
-class SessionFile:
-    path: Path
-    session_id: str
-    project_slug: str
-    modified_ts: float
-    size_bytes: int
 
 
 def collect_sessions(

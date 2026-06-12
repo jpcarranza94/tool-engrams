@@ -20,7 +20,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .. import db
-from ..utils import slugify_cwd
 from .log import _log
 
 # `seconds_since_tick` returns this when a session has never ticked (or on
@@ -52,28 +51,35 @@ class IdleSession:
     session_id: str
     transcript_path: str
     cwd: str
-
-
-def derive_transcript_path(session_id: str, cwd: str) -> str:
-    """Derive the JSONL transcript path from session_id and cwd."""
-    slug = slugify_cwd(cwd)
-    return str(Path.home() / ".claude" / "projects" / slug / f"{session_id}.jsonl")
+    target: str = "claude-code"
 
 
 def ensure_row(session_id: str, transcript_path: str, cwd: str,
-               role: str = "formation") -> None:
+               role: str = "formation", target: str = "claude-code") -> None:
     """Create the watcher_state row for (session, role) if missing (idempotent).
     Called by SessionStart and defensively by the tick so ticks are
-    self-sufficient."""
+    self-sufficient. `target` names the harness whose transcript format the
+    detached tick must parse.
+
+    INSERT OR IGNORE means a row born with an empty transcript_path never
+    heals on its own — when a later hook supplies one, fill it in."""
     try:
         now_ts = int(time.time())
         with db.session() as conn:
             conn.execute(
                 "INSERT OR IGNORE INTO watcher_state "
                 "(work_session_id, role, transcript_path, last_line_read, "
-                " last_checked_ts, cwd, created_ts) VALUES (?, ?, ?, 0, ?, ?, ?)",
-                (session_id, role, transcript_path, now_ts, cwd, now_ts),
+                " last_checked_ts, cwd, created_ts, target) "
+                "VALUES (?, ?, ?, 0, ?, ?, ?, ?)",
+                (session_id, role, transcript_path, now_ts, cwd, now_ts, target),
             )
+            if transcript_path:
+                conn.execute(
+                    "UPDATE watcher_state SET transcript_path = ? "
+                    "WHERE work_session_id = ? AND role = ? "
+                    "  AND (transcript_path = '' OR transcript_path IS NULL)",
+                    (transcript_path, session_id, role),
+                )
     except Exception:
         pass
 
@@ -176,7 +182,8 @@ def sweep_idle(idle_sec: int, exclude_session_id: str = "",
         cutoff = int(time.time()) - idle_sec
         with db.session() as conn:
             rows = conn.execute(
-                "SELECT work_session_id, transcript_path, cwd, last_line_read "
+                "SELECT work_session_id, transcript_path, cwd, last_line_read, "
+                "       target "
                 "FROM watcher_state "
                 "WHERE role = 'formation' AND last_tick_ts > 0 AND last_tick_ts < ? "
                 "  AND transcript_path != '' AND work_session_id != ? "
@@ -189,6 +196,7 @@ def sweep_idle(idle_sec: int, exclude_session_id: str = "",
                     session_id=row["work_session_id"],
                     transcript_path=row["transcript_path"],
                     cwd=row["cwd"] or "",
+                    target=row["target"] or "claude-code",
                 ))
     except Exception as e:
         _log(f"SWEEP-ERROR error={e}")

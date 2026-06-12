@@ -39,7 +39,6 @@ from typing import Any
 
 from .. import db, memory_store, pause
 from ..prompts.pretool import format_injection
-from ..retrieval.extract import extract_hints
 from ..reinforcement.scoring import is_gated
 from ..retrieval.rank import now, retrieve_candidates
 from ..retrieval.session_state import (
@@ -48,12 +47,13 @@ from ..retrieval.session_state import (
     get_session_turn,
     log_surfaces,
 )
+from ..target import get_target
 from ..utils import is_watcher_child, slugify_cwd
 from ..watcher import tick
-from ._skip import WHITELIST, max_memories_per_call, surface_notice
+from ._skip import max_memories_per_call, surface_notice
 
 
-def main() -> int:
+def main(target_name: str = "claude-code") -> int:
     if pause.is_disabled():
         _emit({})
         return 0
@@ -65,14 +65,14 @@ def main() -> int:
         return 0
 
     try:
-        return _run(payload)
+        return _run(payload, get_target(target_name))
     except Exception as e:  # pragma: no cover - fail-open safety net
         print(f"engram post-tool-failure: unexpected error: {e}", file=sys.stderr)
         _emit({})
         return 0
 
 
-def _run(payload: dict[str, Any]) -> int:
+def _run(payload: dict[str, Any], target) -> int:
     # A watcher session's own tool calls must not surface hints or arm anything.
     if is_watcher_child():
         _emit({})
@@ -92,7 +92,7 @@ def _run(payload: dict[str, Any]) -> int:
             tick.arm(sid, payload.get("transcript_path") or "", payload.get("cwd") or "")
 
     tool_name = payload.get("tool_name") or ""
-    if tool_name not in WHITELIST:
+    if tool_name not in target.tool_whitelist:
         _emit({})
         return 0
 
@@ -102,7 +102,7 @@ def _run(payload: dict[str, Any]) -> int:
     cwd = payload.get("cwd") or ""
     project_slug = slugify_cwd(cwd) if cwd else None
 
-    hint = extract_hints(tool_name, tool_input)
+    hint = target.extract_hints(tool_name, tool_input)
     if not hint.tokens and not hint.paths:
         _emit({})
         return 0

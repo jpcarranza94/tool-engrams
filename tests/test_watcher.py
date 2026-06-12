@@ -29,7 +29,7 @@ def test_format_delta_assistant_text():
         "message": {"role": "assistant", "content": "Let me query the database."},
     })
     result = _format_delta([line])
-    assert 'CLAUDE: "Let me query the database."' in result
+    assert 'AGENT: "Let me query the database."' in result
 
 
 def test_format_delta_tool_use_bash():

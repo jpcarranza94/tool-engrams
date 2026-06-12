@@ -114,6 +114,7 @@ CREATE TABLE IF NOT EXISTS watcher_state (
     armed              INTEGER NOT NULL DEFAULT 0,
     last_tick_ts       INTEGER NOT NULL DEFAULT 0,
     fail_streak        INTEGER NOT NULL DEFAULT 0,
+    target             TEXT NOT NULL DEFAULT 'claude-code',  -- which harness's transcript format to parse
     PRIMARY KEY (work_session_id, role)
 );
 
@@ -139,7 +140,8 @@ CREATE TABLE IF NOT EXISTS watcher_runs (
     input_tokens     INTEGER,                              -- (all NULL when the call errored
     output_tokens    INTEGER,                              --  or predates v14)
     cache_read_tokens     INTEGER,
-    cache_creation_tokens INTEGER
+    cache_creation_tokens INTEGER,
+    engine           TEXT                                   -- engine adapter that ran the call (NULL predates v16)
 );
 
 CREATE INDEX IF NOT EXISTS idx_watcher_runs_recent

@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from toolengrams.consolidation.collect import (
+from toolengrams.target.claude_code.collect import (
     _INTERNAL_PROJECT_RE,
     _is_internal_project,
     collect_sessions,

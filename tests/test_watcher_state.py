@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 
 from toolengrams import db
+from toolengrams.target import claude_code as target_claude
 from toolengrams.watcher import state
 
 
@@ -145,5 +146,5 @@ def test_has_unread_lines_boundaries(tmp_path):
 
 
 def test_derive_transcript_path_shape():
-    p = state.derive_transcript_path("sess-1", "/Users/x/proj")
+    p = target_claude.derive_transcript_path("sess-1", "/Users/x/proj")
     assert p.endswith("/.claude/projects/-Users-x-proj/sess-1.jsonl")

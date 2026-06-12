@@ -53,16 +53,6 @@ def _clip_ends(text: str, limit: int) -> str:
     return f"{text[:head]}…[+{len(text) - limit} chars]…{text[-tail:]}"
 
 
-def _read_lines_from(path: str, start_line: int) -> list[str]:
-    """Read JSONL lines from start_line to EOF."""
-    try:
-        with open(path) as f:
-            lines = f.readlines()
-        return lines[start_line:]
-    except (FileNotFoundError, OSError):
-        return []
-
-
 def _format_delta(lines: list[str]) -> str:
     """Convert JSONL lines to human-readable conversation format.
 
@@ -136,7 +126,7 @@ def _format_delta(lines: list[str]) -> str:
             if isinstance(content, str):
                 text = content.strip()
                 if text and "system-reminder" not in text:
-                    parts.append(f'CLAUDE: "{text[:300]}"')
+                    parts.append(f'AGENT: "{text[:300]}"')
             elif isinstance(content, list):
                 for block in content:
                     if not isinstance(block, dict):
@@ -151,7 +141,7 @@ def _format_delta(lines: list[str]) -> str:
                     if block_type == "text":
                         text = block.get("text", "").strip()
                         if text and "system-reminder" not in text:
-                            parts.append(f'CLAUDE: "{text[:300]}"')
+                            parts.append(f'AGENT: "{text[:300]}"')
 
                     elif block_type == "tool_use":
                         tool_name = block.get("name", "unknown")

@@ -8,7 +8,7 @@ The session runs on the active engine (toolengrams/engine/); model selection
 lives in the adapter (claude-code: `$ENGRAM_WATCHER_MODEL`, default sonnet).
 
 Module layout:
-  - transcript_format.py — pure JSONL → readable-conversation
+  - transcript_io.py     — format-agnostic cursor reads (parsers live in target/)
   - agent.py             — permissioned engine session runner (per role)
   - state.py             — watcher_state persistence, keyed (session, role)
   - log.py               — watcher log sink
@@ -18,6 +18,16 @@ Module layout:
 
 from . import cleanup, tick
 from ..engine.claude_code import DEFAULT_WATCHER_MODEL
+from ..target.claude_code import derive_transcript_path
+from ..target.claude_code.transcript import (
+    MAX_BASH_CMD_CHARS,
+    MAX_DELTA_CHARS,
+    MAX_RESULT_CHARS,
+    _cap_delta,
+    _clip_ends,
+    _clip_head,
+    _format_delta,
+)
 from .agent import (
     DEFAULT_WATCHER_TIMEOUT,
     ROLE_ALLOWED_VERBS,
@@ -29,18 +39,8 @@ from .agent import (
     _watcher_timeout,
 )
 from .log import log_path
-from .state import derive_transcript_path
 from .tick import MAX_FORM_RETRIES, _retry_decision
-from .transcript_format import (
-    MAX_BASH_CMD_CHARS,
-    MAX_DELTA_CHARS,
-    MAX_RESULT_CHARS,
-    _cap_delta,
-    _clip_ends,
-    _clip_head,
-    _format_delta,
-    _read_lines_from,
-)
+from .transcript_io import _read_lines_from
 
 __all__ = [
     # Public API

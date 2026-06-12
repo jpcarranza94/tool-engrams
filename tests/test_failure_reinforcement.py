@@ -52,13 +52,13 @@ def captured_ticks(monkeypatch):
     calls: list[dict] = []
     monkeypatch.setattr(
         post_tool.tick, "trigger",
-        lambda session_id, tpath, cwd, reason, flush=False: calls.append(
+        lambda session_id, tpath, cwd, reason, flush=False, target="claude-code": calls.append(
             {"kind": "formation", "reason": reason}
         ),
     )
     monkeypatch.setattr(
         post_tool.tick, "trigger_eval",
-        lambda session_id, tpath, cwd, reason, flush=False: calls.append(
+        lambda session_id, tpath, cwd, reason, flush=False, target="claude-code": calls.append(
             {"kind": "eval", "reason": reason}
         ),
     )
