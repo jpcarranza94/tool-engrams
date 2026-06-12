@@ -89,7 +89,8 @@ def _run(payload: dict[str, Any], target) -> int:
     if not is_watcher_child():
         sid = payload.get("session_id") or ""
         if sid:
-            tick.arm(sid, payload.get("transcript_path") or "", payload.get("cwd") or "")
+            tick.arm(sid, payload.get("transcript_path") or "",
+                     payload.get("cwd") or "", target=target.NAME)
 
     tool_name = payload.get("tool_name") or ""
     if tool_name not in target.tool_whitelist:

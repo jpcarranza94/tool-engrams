@@ -1,4 +1,4 @@
-"""Tests for consolidation.collect — particularly the internal-project skip filter.
+"""Tests for target.claude_code.collect — particularly the internal-project skip filter.
 
 The skip filter regressed once already (substring + endswith logic was both
 too loose and wrong-shape). These tests pin down the contract: only slugs

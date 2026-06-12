@@ -79,6 +79,11 @@ while [ $# -gt 0 ]; do
 done
 [ ${#TARGETS[@]} -eq 0 ] && TARGETS=("claude-code")
 for t in "${TARGETS[@]}"; do
+    case "$t" in
+        *[!a-z0-9-]*|"")
+            echo "ERROR: invalid target name '$t'."
+            exit 2 ;;
+    esac
     if [ ! -f "$REPO_DIR/install/targets/$t.sh" ]; then
         echo "ERROR: unknown target '$t' (no install/targets/$t.sh)."
         exit 2
@@ -227,7 +232,16 @@ for t in "${TARGETS[@]}"; do
     bash "$REPO_DIR/install/targets/$t.sh" install
 done
 bash "$REPO_DIR/install/engines/$ENGINE.sh" install
+echo ""
 
+# 3. Initialize DB + verify the wiring. Opening the DB runs the migrations;
+#    doctor then re-checks the hook wiring, PATH, claude version, and DB.
+echo "3. Initializing database + verifying wiring..."
+# Migration MUST precede anything that creates $DB_DIR (including the engine
+# persistence below): migrate_legacy_home only moves the legacy home when the
+# new one does not exist yet.
+migrate_legacy_home
+mkdir -p "$DB_DIR"
 # Persist the engine choice where launchd/cron's minimal env still finds it
 # (engine selection precedence: $ENGRAM_ENGINE -> config.json -> default).
 mkdir -p "$DB_DIR"
@@ -245,13 +259,6 @@ cfg["engine"] = sys.argv[2]
 path.write_text(json.dumps(cfg, indent=2) + "\n")
 print(f"  Engine '{sys.argv[2]}' recorded in {path}")
 PYCONF
-echo ""
-
-# 4. Initialize DB + verify the wiring. Opening the DB runs the migrations;
-#    doctor then re-checks the hook wiring, PATH, claude version, and DB.
-echo "4. Initializing database + verifying wiring..."
-migrate_legacy_home
-mkdir -p "$DB_DIR"
 if ! engram doctor; then
     echo ""
     echo "ERROR: 'engram doctor' reported failures above — fix them and re-run this script."
@@ -260,8 +267,8 @@ fi
 echo "  Database ready at $DB_DIR/db.sqlite"
 echo ""
 
-# 5. Optional: install nightly consolidation schedule.
-echo "5. Nightly consolidation schedule"
+# 4. Optional: install nightly consolidation schedule.
+echo "4. Nightly consolidation schedule"
 echo "   The consolidation agent reviews yesterday's sessions at 8 AM."
 OS="$(uname -s)"
 case "$OS" in

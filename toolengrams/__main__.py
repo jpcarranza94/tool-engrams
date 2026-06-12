@@ -13,7 +13,6 @@ from typing import Callable
 
 from . import pause, watcher
 from .harness_names import CLAUDE_CODE
-from .target import TARGETS
 from .cli import (
     consolidate,
     dashboard,
@@ -131,7 +130,11 @@ def main(argv: list[str] | None = None) -> int:
     }
     for _name, _help in _hook_help.items():
         hp = sub.add_parser(_name, help=_help)
-        hp.add_argument("--target", default=CLAUDE_CODE, choices=sorted(TARGETS))
+        # No choices= constraint: an unknown --target must degrade through
+        # get_target's claude-code fallback (stderr warn), never argparse-exit
+        # 2 — exit 2 is a BLOCKING hook error in Claude Code, and the typo'd
+        # or version-skewed target is exactly the fail-open case.
+        hp.add_argument("--target", default=CLAUDE_CODE)
     sub.add_parser("seed", help="Insert example memories for smoke testing "
                                 "(--with-block, --remove)", add_help=False)
     sub.add_parser("cleanup", help="Reap cold watcher residue: dead watcher_state rows, stale sandboxes, internal transcripts")

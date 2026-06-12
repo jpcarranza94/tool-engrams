@@ -56,7 +56,7 @@ from .agent import (
 from .log import _log, log_path
 from .state import ensure_row
 from ..engine import get_engine
-from ..target import get_target
+from ..target import TARGETS, get_target
 from .transcript_io import _read_lines_from
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -123,12 +123,13 @@ def _idle_sweep_sec() -> int:
 # ---------- hook-side helpers (cheap; run inside the hook process) ----------
 
 
-def arm(session_id: str, transcript_path: str = "", cwd: str = "") -> None:
+def arm(session_id: str, transcript_path: str = "", cwd: str = "",
+        target: str = "claude-code") -> None:
     """Mark the formation role 'armed' (a tool failure happened). The next turn-
     boundary formation tick runs the model even if that turn had no tool_use
     lines, so an error→fix episode is never gated out."""
     if transcript_path:
-        ensure_row(session_id, transcript_path, cwd, role="formation")
+        ensure_row(session_id, transcript_path, cwd, role="formation", target=target)
     state.arm(session_id, role="formation")
 
 
@@ -340,6 +341,8 @@ def _prior_tail_section(session_id: str, transcript_path: str, cursor: int,
 def _eval_decision(session_id: str, cwd: str, delta: str, n_lines: int,
                    flush: bool, armed: bool, transcript_path: str = "",
                    cursor: int = 0, target: str = "claude-code") -> _Decision:
+    # `target` is unused here (eval reads the already-formatted delta) but kept
+    # for the uniform _DECIDERS signature.
     """Decide an eval window. Run only when surfaces are pending; with pending
     surfaces but no new evidence (and not a flush), DEFER (hold the cursor)."""
     with db.session() as conn:
@@ -429,6 +432,11 @@ def run_tick(session_id: str, transcript_path: str, cwd: str,
     """One event-driven tick for (session, role). See module docstring."""
     if not engine_available() or not session_id or role not in _DECIDERS:
         return 0
+    if target not in TARGETS:
+        # get_target degrades to claude-code below; spawn_tick sends stderr to
+        # DEVNULL, so the watcher log is the only place this is diagnosable.
+        _log(f"TICK-UNKNOWN-TARGET session={session_id} target={target!r} "
+             "— parsing as claude-code")
     ensure_row(session_id, transcript_path, cwd, role, target)
 
     with _tick_lock(session_id, role) as got:

@@ -21,9 +21,9 @@ from .transcript import _format_delta
 
 NAME = "claude-code"
 
-# Claude Code emits a dedicated PostToolUseFailure event (needs >= 2.1.117);
-# detect_failure below is only used by the PostToolUse recovery path.
-has_failure_event = True
+# Claude Code emits a dedicated PostToolUseFailure event — that's what the
+# minimum version buys; detect_failure below is only used by the PostToolUse
+# recovery path.
 min_version = "2.1.117"
 
 # Tools whose pre/post-failure events trigger memory surfacing. New tools
@@ -98,21 +98,3 @@ def collect_sessions(target_date: date, projects_dir: Path | None = None):
 
 def hook_markers() -> dict[str, str]:
     return dict(_HOOK_MARKERS)
-
-
-def is_wired() -> bool:
-    """All hook events present in ~/.claude/settings.json (marker prefix
-    match, same rule doctor uses)."""
-    path = Path.home() / ".claude" / "settings.json"
-    try:
-        hooks = json.loads(path.read_text()).get("hooks", {})
-    except (OSError, json.JSONDecodeError):
-        return False
-    for event, marker in _HOOK_MARKERS.items():
-        if not any(
-            h.get("command", "") == marker or h.get("command", "").startswith(marker + " ")
-            for entry in hooks.get(event, [])
-            for h in entry.get("hooks", [])
-        ):
-            return False
-    return True

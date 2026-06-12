@@ -40,9 +40,6 @@ class TargetAdapter(Protocol):
     NAME: str
     # Tool names whose pre/post-failure events carry memory bindings.
     tool_whitelist: frozenset[str]
-    # Does the harness emit a dedicated tool-failure hook event? When False,
-    # the PostToolUse path runs failure surfacing via detect_failure().
-    has_failure_event: bool
     # Minimum harness version the install supports (doctor enforces).
     min_version: str
 
@@ -58,5 +55,3 @@ class TargetAdapter(Protocol):
                          projects_dir: Path | None = None) -> list[SessionFile]: ...
 
     def hook_markers(self) -> dict[str, str]: ...
-
-    def is_wired(self) -> bool: ...

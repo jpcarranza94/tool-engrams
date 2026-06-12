@@ -76,14 +76,16 @@ WIRING = [
      "engram flush --target claude-code", "", 5000, None),
 ]
 
+# post-tool's marker is a prefix of post-tool-failure's command; the
+# space-suffix startswith below disambiguates ("engram post-tool " does not
+# prefix "engram post-tool-failure ..."). Pre-seam commands without --target
+# also match — re-runs over old wiring report "already present", never
+# double-wire.
 for event, marker, command, matcher, timeout, status in WIRING:
     present = any(
         h.get("command", "") == marker or h.get("command", "").startswith(marker + " ")
         for entry in hooks.get(event, [])
         for h in entry.get("hooks", [])
-        # post-tool's marker is a prefix of post-tool-failure's command; the
-        # space-suffix startswith above already disambiguates ("engram
-        # post-tool " does not prefix "engram post-tool-failure ...").
     )
     if present:
         print(f"  {event} hook already present")

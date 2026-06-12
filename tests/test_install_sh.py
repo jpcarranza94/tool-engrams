@@ -34,6 +34,42 @@ def test_wired_commands_carry_target_flag():
     assert "engram flush --target claude-code" in text
 
 
+def test_migration_runs_before_engine_persistence():
+    """Ordering pin for a real stranding bug: anything that creates $DB_DIR
+    (the config.json engine write) must come AFTER migrate_legacy_home, whose
+    [ ! -e "$DB_DIR" ] guard otherwise sees the fresh dir and never migrates
+    the legacy home."""
+    text = INSTALL_SH.read_text()
+    migrate_call = text.index("\nmigrate_legacy_home\n")
+    config_write = text.index("config.json")
+    assert migrate_call < config_write
+
+
+def test_target_install_idempotent_over_preseam_wiring(tmp_path):
+    """Re-running the installer over OLD-format wiring (commands without
+    --target) must report already-present — never double-wire."""
+    claude_dir = tmp_path / ".claude"
+    claude_dir.mkdir(parents=True)
+    settings_path = claude_dir / "settings.json"
+    settings_path.write_text(json.dumps({
+        "hooks": {"Stop": [
+            {"matcher": "", "hooks": [
+                {"type": "command", "command": "engram stop", "timeout": 5000}]}
+        ]},
+        "permissions": {"allow": ["Bash(engram *)"]},
+    }))
+    env = {"HOME": str(tmp_path), "PATH": "/usr/bin:/bin",
+           "REPO_DIR": str(REPO_ROOT), "SETTINGS": str(settings_path),
+           "SKILLS_DIR": str(claude_dir / "skills")}
+    proc = subprocess.run(["bash", str(CLAUDE_TARGET_SH), "install"],
+                          capture_output=True, text=True, env=env)
+    assert proc.returncode == 0, proc.stderr
+    settings = json.loads(settings_path.read_text())
+    stop_cmds = [h["command"] for e in settings["hooks"]["Stop"] for h in e["hooks"]]
+    assert stop_cmds == ["engram stop"]          # untouched, not double-wired
+    assert "Stop hook already present" in proc.stdout
+
+
 def test_install_sh_rejects_unknown_target(tmp_path):
     proc = subprocess.run(
         ["bash", str(INSTALL_SH), "--target", "betamax"],

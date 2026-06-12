@@ -3,6 +3,10 @@ claude-code adapter's payload handling."""
 
 from __future__ import annotations
 
+import io
+import json
+
+from toolengrams.__main__ import main as engram_main
 from toolengrams.target import TARGETS, TargetAdapter, get_target
 from toolengrams.target import claude_code
 from toolengrams.watcher import state, tick
@@ -42,12 +46,27 @@ def test_detect_failure_matrix():
 
 
 def test_format_delta_uses_agent_label():
-    import json
     line = json.dumps({"type": "message", "message": {
         "role": "assistant", "content": [{"type": "text", "text": "hi"}]}})
     out = claude_code.format_delta([line])
     assert 'AGENT: "hi"' in out
     assert "CLAUDE:" not in out
+
+
+# ---------- the CLI entry point must stay fail-open on a bad --target ----------
+
+
+def test_unknown_target_through_main_is_fail_open(monkeypatch, capsys):
+    """exit 2 from argparse would be a BLOCKING hook error in Claude Code —
+    an unknown --target must degrade through get_target's fallback instead."""
+    payload = {"session_id": "s", "cwd": "/tmp",
+               "tool_name": "Bash", "tool_input": {"command": "echo hi"}}
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(payload)))
+    rc = engram_main(["pretool", "--target", "betamax"])
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert "unknown target" in captured.err
+    json.loads(captured.out)            # still emits valid hook JSON
 
 
 # ---------- target plumbed through the detached tick ----------

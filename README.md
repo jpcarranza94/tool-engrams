@@ -248,7 +248,7 @@ toolengrams/
     ├── tick.py                role-dispatched tick engine + coalesce + idle-sweep
     ├── agent.py               permissioned per-role `claude -p` session runner
     ├── state.py               watcher_state seam, keyed (work_session_id, role)
-    ├── transcript_format.py   JSONL → readable delta
+    ├── transcript_io.py   JSONL → readable delta
     └── log.py                 shared log sink
 ```
 
