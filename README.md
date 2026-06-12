@@ -408,6 +408,8 @@ engram rebuild-triggers           Re-extract triggers from bodies (post-migratio
 |---|---|---|
 | `ENGRAM_HOME` | `~/.tool-engrams` | Data home (DB, watcher log, sandboxes, prompt overrides). Legacy `~/.claude/tool-engrams` still resolves until migrated. Machine-wide contract: set it everywhere (shell + launchd) or nowhere — see `docs/adr/0008` |
 | `ENGRAM_DB` | `<home>/db.sqlite` | SQLite DB path (beats `ENGRAM_HOME` for the DB file) |
+| `ENGRAM_ENGINE` | `claude-code` | Which engine runs background LLM work (watcher ticks, consolidation). Unknown values fall back to `claude-code`; `engram doctor` flags them |
+| `ENGRAM_ALLOWED_VERBS` | unset | Containment backstop: when set (watcher children set it per role), `engram` refuses any other subcommand at dispatch. Not a user knob |
 | `ENGRAM_DISABLED` | unset | `1`/`true` disables the whole system (beats the `engram pause` flag file; `0`/`false` force-enables) |
 | `ENGRAM_SURFACE_NOTICE` | unset | `1`/`true` adds a visible `ToolEngrams surfaced: …` line to the transcript whenever a memory is injected — for the post-install smoke test and surfacing debugging |
 | `ENGRAM_WATCHER_MODEL` | `sonnet` | Model passed to `claude -p` for both watcher roles (e.g. `haiku` for a cheaper, faster watcher) |

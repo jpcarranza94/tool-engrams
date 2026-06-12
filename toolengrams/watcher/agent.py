@@ -1,13 +1,13 @@
-"""Watcher permissioned `claude -p` sessions: formation + evaluation.
+"""Watcher permissioned engine sessions: formation + evaluation.
 
 A watcher session does its job by CALLING the engram CLI, not by returning a
 constrained JSON schema the harness parses (see ADR-0001).
 
-Mechanics mirror the consolidation agent: a sandbox work dir with a
-`settings.local.json` that grants exactly the role's command surface, ENGRAM_DB
-in the env, and ENGRAM_IN_WATCHER set so the session's own tool calls don't
-recursively trigger engram hooks (the recursion guard). Every tick is a FRESH
-`claude -p` call (ADR-0005) — the sandbox dir stays stable per (work session,
+Mechanics mirror the consolidation agent: a sandbox work dir whose native
+engine grants cover exactly the role's command surface, ENGRAM_DB in the env,
+and ENGRAM_IN_WATCHER set so the session's own tool calls don't recursively
+trigger engram hooks (the recursion guard). Every tick is a FRESH engine
+call (ADR-0005) — the sandbox dir stays stable per (work session,
 role) only so its transcripts stay out of work projects, the recursion guard
 recognizes it, and `engram cleanup` can reap it cold. The user's real cwd is
 handed to the model in the prompt so it can pass `--project-cwd` to
@@ -17,35 +17,21 @@ Safety is the **command surface**, not a schema:
     formation → `engram remember` only
     eval      → `engram judge` + `engram quarantine` only
 
-Model selection via `$ENGRAM_WATCHER_MODEL` (default sonnet); timeout via
-`$ENGRAM_WATCHER_TIMEOUT`.
+Model selection lives in the engine adapter (claude-code: per-role env →
+`$ENGRAM_WATCHER_MODEL` → sonnet); timeout via `$ENGRAM_WATCHER_TIMEOUT`
+(engine-neutral wall-clock budget).
 """
 
 from __future__ import annotations
 
-import json
 import os
-import shutil
 import stat
 from dataclasses import dataclass
 from pathlib import Path
 
 from .. import db
-from ..claude_invoke import invoke_claude_agent, write_agent_settings
+from ..engine import EngineRequest, SandboxSpec, get_engine
 from ..utils import WATCHER_CHILD_ENV, prepend_engram_bin, safe_filename_id
-
-CLAUDE_BIN = shutil.which("claude")
-
-# Sonnet, not opus: judging surfaced memories and extracting tool lessons from
-# a transcript delta is not opus-grade work, and the watcher makes ~dozens of
-# background calls a day. Override per tick via $ENGRAM_WATCHER_MODEL, or per
-# role via $ENGRAM_FORMATION_MODEL / $ENGRAM_EVAL_MODEL — formation (pattern
-# extraction) and eval (verdict judging) have different difficulty/cost
-# profiles, so they can run different models.
-DEFAULT_WATCHER_MODEL = "sonnet"
-
-_ROLE_MODEL_ENV = {"formation": "ENGRAM_FORMATION_MODEL",
-                   "eval": "ENGRAM_EVAL_MODEL"}
 
 # Per-call wall-clock budget for the watcher's `claude -p`. Tool-calling is
 # multi-round-trip, so a busy window can run long; the tick HOLDS the cursor and
@@ -55,16 +41,25 @@ _ROLE_MODEL_ENV = {"formation": "ENGRAM_FORMATION_MODEL",
 # SKIP-GIVEUP on every window, so no judgments ever landed.
 DEFAULT_WATCHER_TIMEOUT = 300
 
-# The command surface each role is granted in its sandbox settings. This — not a
-# JSON schema — is what keeps a per-turn judge from nuking a good memory: eval
-# can only judge surfaces and (reversibly, audited) quarantine by id.
-# Space-glob form mirrors the consolidation agent's proven `Bash(engram *)`
-# grant — restricted here to the single verb each role is allowed to run.
-ROLE_ALLOWLIST: dict[str, list[str]] = {
-    "formation": ["Bash(engram remember *)"],
+# The command surface each role is granted in its sandbox. This — not a JSON
+# schema — is what keeps a per-turn judge from nuking a good memory: eval can
+# only judge surfaces and (reversibly, audited) quarantine by id. Neutral
+# prefixes; the engine adapter translates them to its native grant form
+# (claude-code: `Bash(<prefix> *)`), and the same prefixes' verbs feed the
+# engine-agnostic $ENGRAM_ALLOWED_VERBS dispatch guard.
+ROLE_COMMAND_PREFIXES: dict[str, tuple[str, ...]] = {
+    "formation": ("engram remember",),
     # quarantine is eval's emergency brake (ADR-0007): id-only, soft-demote,
     # audited — structurally weaker than `forget`, which stays off-list.
-    "eval": ["Bash(engram judge *)", "Bash(engram quarantine *)"],
+    "eval": ("engram judge", "engram quarantine"),
+}
+
+# The defense-in-depth twin of the prefixes above, DERIVED so the two can
+# never drift: the engram CLI itself refuses any other subcommand when this
+# env var is set (see __main__.py).
+ROLE_ALLOWED_VERBS: dict[str, str] = {
+    role: ",".join(p.removeprefix("engram ") for p in prefixes)
+    for role, prefixes in ROLE_COMMAND_PREFIXES.items()
 }
 
 # Sandbox-dir prefix per role — must stay in sync with
@@ -111,14 +106,16 @@ class SessionResult:
     cache_creation_tokens: int | None = None
 
 
-def _watcher_model(role: str | None = None) -> str:
-    """Resolve the model for a role: per-role env ($ENGRAM_FORMATION_MODEL /
-    $ENGRAM_EVAL_MODEL) → watcher-wide ($ENGRAM_WATCHER_MODEL) → default.
-    Read each call so overrides apply live."""
-    per_role = os.environ.get(_ROLE_MODEL_ENV.get(role or "", ""), "") if role else ""
-    if per_role:
-        return per_role
-    return os.environ.get("ENGRAM_WATCHER_MODEL", DEFAULT_WATCHER_MODEL)
+def _watcher_model(role: str | None = None) -> str | None:
+    """The model the active engine will use for `role` — kept here because the
+    tick stamps it on the run row; resolution itself lives in the adapter."""
+    return get_engine().resolve_model(role)
+
+
+def engine_available() -> bool:
+    """Is the active engine's binary reachable? Checked at call time (PATH may
+    not be set yet at import under launchd)."""
+    return get_engine().is_available()
 
 
 def _watcher_timeout() -> int:
@@ -153,11 +150,12 @@ def run_watcher_session(role: str, message: str,
     process failure. The side effects happen in-band via the model's `engram`
     calls — there is nothing to parse.
     """
-    if not CLAUDE_BIN:
-        return SessionResult(ok=False, error="claude CLI not found")
+    engine = get_engine()
+    if not engine.is_available():
+        return SessionResult(ok=False, error=f"{engine.NAME} CLI not found")
 
-    allow = ROLE_ALLOWLIST.get(role)
-    if allow is None:
+    prefixes = ROLE_COMMAND_PREFIXES.get(role)
+    if prefixes is None:
         return SessionResult(ok=False, error=f"unknown role {role!r}")
 
     try:
@@ -173,58 +171,45 @@ def run_watcher_session(role: str, message: str,
                 error=f"sandbox is not a directory we own: {work_dir}")
         delta_path = work_dir / DELTA_FILENAME
         delta_path.write_text(delta or "(no new activity)")
-        # Grant read access to exactly that file alongside the role's one verb.
-        # `allow + [...]` builds a NEW list — never mutate the module ROLE_ALLOWLIST.
-        write_agent_settings(Path(work_dir), allow + [f"Read({delta_path})"])
+        # Grant read access to exactly that file alongside the role's verbs.
+        engine.prepare_sandbox(work_dir, SandboxSpec(
+            command_prefixes=prefixes,
+            readable_paths=(str(delta_path),),
+        ))
         env = prepend_engram_bin(os.environ.copy())
         env[WATCHER_CHILD_ENV] = "1"
         env["ENGRAM_DB"] = str(db.db_path())
+        # Defense in depth alongside the engine sandbox: the engram CLI itself
+        # refuses subcommands outside the role's verbs (see __main__.py).
+        env["ENGRAM_ALLOWED_VERBS"] = ROLE_ALLOWED_VERBS[role]
         # Attribution for same-session suppression (ADR-0006): the child's
         # `engram remember` reads this — attribution never depends on the
         # model passing --origin-session itself.
         env["ENGRAM_ORIGIN_SESSION"] = work_session_id
         if run_id is not None:
             env["ENGRAM_RUN_ID"] = str(run_id)
-        result = invoke_claude_agent(
-            message,
+        result = engine.invoke(EngineRequest(
+            prompt=message,
             timeout=_watcher_timeout(),
-            model=_watcher_model(role),
+            role=role,
             cwd=str(work_dir),
             env=env,
-            claude_bin=CLAUDE_BIN,
-        )
+        ))
     except Exception as e:
         # Sandbox setup failed (mkdir / delta write / settings). Fail open so
         # the tick finalizes the run row as error instead of crashing.
         return SessionResult(ok=False, error=f"session setup failed: {e}")
 
-    if result.error or result.returncode != 0:
+    if not result.ok:
         return SessionResult(ok=False,
                              error=result.error or f"exit {result.returncode}")
-    # The JSON envelope reports the call's exact cost and token usage — captured
-    # here so the run row (and `engram monitor`) can show watcher spend.
-    payload = _envelope(result.stdout) or {}
-    usage = payload.get("usage") or {}
+    # The engine's own accounting — captured here so the run row (and
+    # `engram monitor`) can show watcher spend.
     return SessionResult(
         ok=True,
-        cost_usd=payload.get("total_cost_usd"),
-        input_tokens=usage.get("input_tokens"),
-        output_tokens=usage.get("output_tokens"),
-        cache_read_tokens=usage.get("cache_read_input_tokens"),
-        cache_creation_tokens=usage.get("cache_creation_input_tokens"),
+        cost_usd=result.cost_usd,
+        input_tokens=result.input_tokens,
+        output_tokens=result.output_tokens,
+        cache_read_tokens=result.cache_read_tokens,
+        cache_creation_tokens=result.cache_creation_tokens,
     )
-
-
-def _envelope(stdout: str) -> dict | None:
-    """The result envelope from `claude -p --output-format json`: the first
-    parseable JSON line carrying a session_id."""
-    for line in stdout.splitlines():
-        line = line.strip()
-        if line.startswith("{"):
-            try:
-                payload = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if payload.get("session_id"):
-                return payload
-    return None

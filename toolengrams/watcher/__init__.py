@@ -4,11 +4,12 @@ Hooks fire a detached `engram watcher-tick` per meaningful event; each tick read
 the transcript delta since its (session, role) cursor and runs a permissioned
 `claude -p` session that does its job by calling the engram CLI — `engram
 remember` (formation) or `engram judge` (evaluation). No JSON schema, no parsing.
-Model via `$ENGRAM_WATCHER_MODEL` (default sonnet).
+The session runs on the active engine (toolengrams/engine/); model selection
+lives in the adapter (claude-code: `$ENGRAM_WATCHER_MODEL`, default sonnet).
 
 Module layout:
   - transcript_format.py — pure JSONL → readable-conversation
-  - agent.py             — permissioned claude -p session runner (per role)
+  - agent.py             — permissioned engine session runner (per role)
   - state.py             — watcher_state persistence, keyed (session, role)
   - log.py               — watcher log sink
   - tick.py              — event-driven tick engine + coalesce + idle sweep
@@ -16,14 +17,14 @@ Module layout:
 """
 
 from . import cleanup, tick
+from ..engine.claude_code import DEFAULT_WATCHER_MODEL
 from .agent import (
-    CLAUDE_BIN,
-    DEFAULT_WATCHER_MODEL,
     DEFAULT_WATCHER_TIMEOUT,
-    ROLE_ALLOWLIST,
+    ROLE_ALLOWED_VERBS,
+    ROLE_COMMAND_PREFIXES,
     SessionResult,
+    engine_available,
     run_watcher_session,
-    _envelope,
     _watcher_model,
     _watcher_timeout,
 )
@@ -47,8 +48,8 @@ __all__ = [
     "tick",
     "derive_transcript_path",
     "run_watcher_session",
+    "engine_available",
     # Configuration constants
-    "CLAUDE_BIN",
     "DEFAULT_WATCHER_MODEL",
     "DEFAULT_WATCHER_TIMEOUT",
     "log_path",
@@ -56,13 +57,13 @@ __all__ = [
     "MAX_DELTA_CHARS",
     "MAX_FORM_RETRIES",
     "MAX_RESULT_CHARS",
-    "ROLE_ALLOWLIST",
+    "ROLE_ALLOWED_VERBS",
+    "ROLE_COMMAND_PREFIXES",
     "SessionResult",
     # Internals re-exported for tests / introspection
     "_cap_delta",
     "_clip_ends",
     "_clip_head",
-    "_envelope",
     "_format_delta",
     "_read_lines_from",
     "_retry_decision",

@@ -26,7 +26,7 @@ def _user_line(text: str) -> str:
 
 
 def _wire(monkeypatch, tmp_path, runner):
-    monkeypatch.setattr(tick, "CLAUDE_BIN", "claude")
+    monkeypatch.setattr(tick, "engine_available", lambda: True)
     monkeypatch.setattr(tick, "log_path", lambda: tmp_path / "watcher.log")
     monkeypatch.setattr(wlog, "log_path", lambda: tmp_path / "watcher.log")
     monkeypatch.setattr(tick, "run_watcher_session", runner)
