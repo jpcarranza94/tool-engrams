@@ -22,7 +22,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from .. import db, memory_store, pause
+from .. import db, memory_store, paths, pause
 from ..retrieval.session_state import last_activity_ts
 from ..watcher import state as watcher_state
 
@@ -79,6 +79,7 @@ def run_checks() -> list[dict]:
         _check_permission(),
         _check_engram_on_path(),
         _check_claude_version(),
+        _check_home(),
         _check_db(),
         _check_kill_switch(),
         _check_hook_liveness(),
@@ -180,6 +181,15 @@ def _claude_version() -> str | None:
 
 def _version_tuple(version: str) -> tuple[int, ...]:
     return tuple(int(x) for x in version.split(".")[:3])
+
+
+def _check_home() -> dict:
+    home = paths.engram_home()
+    if home == paths.LEGACY_HOME:
+        return _check("home", PASS,
+                      f"data home: {home} (legacy location — re-run "
+                      "./install.sh to migrate to ~/.tool-engrams)")
+    return _check("home", PASS, f"data home: {home}")
 
 
 def _check_db() -> dict:

@@ -58,9 +58,9 @@ Read per tick (each tick is a fresh process), so changes apply to the next event
 
 `MAX_FORM_RETRIES` (tick.py) bounds how many ticks a failed transcript window is retried (cursor held, `fail_streak` persisted in `watcher_state`) before giving up and advancing past it; it is a correctness bound, not an env knob.
 
-## DB location
+## Data home & DB location
 
-`~/.claude/tool-engrams/db.sqlite` (override with `$ENGRAM_DB`). Schema in `toolengrams/schema.sql`, migrations in `toolengrams/migrations/`.
+All persistent state lives under the engram home, resolved by `toolengrams/paths.py`: `$ENGRAM_HOME` → `~/.tool-engrams/` (neutral default) → `~/.claude/tool-engrams/` (legacy fallback; install.sh migrates it and leaves a symlink). The DB is `<home>/db.sqlite` (override the file directly with `$ENGRAM_DB`). Schema in `toolengrams/schema.sql`, migrations in `toolengrams/migrations/`.
 
 ## CLI entry point
 

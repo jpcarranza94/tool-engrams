@@ -2,7 +2,7 @@
 
 Lookup order:
     1. $ENGRAM_EVAL_PROMPT_PATH
-    2. ~/.claude/tool-engrams/prompts/eval.md
+    2. <engram home>/prompts/eval.md
     3. toolengrams/prompts/defaults/eval.md
 """
 

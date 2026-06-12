@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
-from toolengrams import db
+from toolengrams import db, paths
 
 
 def test_fresh_db_gets_all_tables(tmp_path):
@@ -62,6 +60,6 @@ def test_env_var_override(tmp_path, monkeypatch):
     assert db.db_path() == override
 
 
-def test_default_db_path():
-    expected = Path.home() / ".claude" / "tool-engrams" / "db.sqlite"
-    assert db.DEFAULT_DB_PATH == expected
+def test_default_db_path(monkeypatch):
+    monkeypatch.delenv("ENGRAM_DB", raising=False)
+    assert db.db_path() == paths.engram_home() / "db.sqlite"

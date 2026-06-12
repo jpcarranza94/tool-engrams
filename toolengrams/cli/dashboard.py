@@ -12,8 +12,7 @@ from pathlib import Path
 from .. import db, memory_store
 from ..consolidation import runs as consolidation_runs
 from ..retrieval import session_state
-
-LOG_PATH = Path.home() / ".claude" / "tool-engrams" / "watcher.log"
+from ..watcher.log import LOG_PATH
 
 # The watcher is no longer a long-lived process, so "active" = a tracked session
 # that ticked within this window, not a live PID.

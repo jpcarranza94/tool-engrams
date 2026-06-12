@@ -8,7 +8,10 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 SETTINGS="$HOME/.claude/settings.json"
 SKILLS_DIR="$HOME/.claude/skills"
-DB_DIR="$HOME/.claude/tool-engrams"
+# Data home: $ENGRAM_HOME overrides; default is the harness-neutral
+# ~/.tool-engrams (the legacy ~/.claude/tool-engrams is migrated below).
+LEGACY_DIR="$HOME/.claude/tool-engrams"
+DB_DIR="${ENGRAM_HOME:-$HOME/.tool-engrams}"
 
 MIN_PYTHON="3.10"
 MIN_CLAUDE="2.1.117"
@@ -357,6 +360,19 @@ echo ""
 # 4. Initialize DB + verify the wiring. Opening the DB runs the migrations;
 #    doctor then re-checks the hook wiring, PATH, claude version, and DB.
 echo "4. Initializing database + verifying wiring..."
+# One-time migration of the legacy data home. Move, then leave a symlink
+# behind so anything still resolving the legacy path (running sessions,
+# older checkouts) lands on the same data.
+if [ -z "${ENGRAM_HOME:-}" ] && [ -d "$LEGACY_DIR" ] && [ ! -L "$LEGACY_DIR" ]; then
+    if [ ! -e "$DB_DIR" ]; then
+        echo "  Migrating data home: $LEGACY_DIR -> $DB_DIR"
+        mv "$LEGACY_DIR" "$DB_DIR"
+        ln -s "$DB_DIR" "$LEGACY_DIR"
+    else
+        echo "  WARNING: both $DB_DIR and $LEGACY_DIR exist — using $DB_DIR."
+        echo "           Merge or remove $LEGACY_DIR manually to silence this."
+    fi
+fi
 mkdir -p "$DB_DIR"
 if ! engram doctor; then
     echo ""

@@ -2,7 +2,7 @@
 
 Lookup order:
     1. $ENGRAM_WATCHER_PROMPT_PATH
-    2. ~/.claude/tool-engrams/prompts/watcher.md
+    2. <engram home>/prompts/watcher.md
     3. toolengrams/prompts/defaults/watcher.md
 """
 

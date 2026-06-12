@@ -26,6 +26,14 @@ def test_install_sh_wires_all_eight_events():
         assert f'"{event}"' in text, f"install.sh no longer wires {event}"
 
 
+def test_install_sh_migrates_legacy_home():
+    text = INSTALL_SH.read_text()
+    assert 'LEGACY_DIR="$HOME/.claude/tool-engrams"' in text
+    assert 'DB_DIR="${ENGRAM_HOME:-$HOME/.tool-engrams}"' in text
+    assert 'mv "$LEGACY_DIR" "$DB_DIR"' in text
+    assert 'ln -s "$DB_DIR" "$LEGACY_DIR"' in text
+
+
 def test_install_sh_rejects_unknown_flags(tmp_path):
     proc = subprocess.run(
         ["bash", str(INSTALL_SH), "--uninstal"],  # typo'd flag

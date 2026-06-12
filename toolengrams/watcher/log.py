@@ -1,15 +1,17 @@
 """Watcher log sink — the single place that owns the watcher log file.
 
-A leaf module (no intra-package imports beyond stdlib) so both the tick engine
-(`tick.py`) and the state store (`state.py`) can append without an import cycle.
+A leaf module (no intra-package imports beyond the `paths` leaf) so both the
+tick engine (`tick.py`) and the state store (`state.py`) can append without an
+import cycle.
 """
 
 from __future__ import annotations
 
 import time
-from pathlib import Path
 
-LOG_PATH = Path.home() / ".claude" / "tool-engrams" / "watcher.log"
+from ..paths import engram_home
+
+LOG_PATH = engram_home() / "watcher.log"
 
 
 def _log(msg: str) -> None:
