@@ -22,7 +22,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from .. import db, memory_store, pause
+from .. import db, memory_store, paths, pause
 from ..retrieval.session_state import last_activity_ts
 from ..watcher import state as watcher_state
 
@@ -79,6 +79,7 @@ def run_checks() -> list[dict]:
         _check_permission(),
         _check_engram_on_path(),
         _check_claude_version(),
+        _check_home(),
         _check_db(),
         _check_kill_switch(),
         _check_hook_liveness(),
@@ -180,6 +181,22 @@ def _claude_version() -> str | None:
 
 def _version_tuple(version: str) -> tuple[int, ...]:
     return tuple(int(x) for x in version.split(".")[:3])
+
+
+def _check_home() -> dict:
+    home = paths.engram_home()
+    if home == paths.LEGACY_HOME:
+        return _check("home", WARN,
+                      f"data home: {home} (legacy location — re-run "
+                      f"./install.sh to migrate to {paths.DEFAULT_HOME})")
+    # Split-brain: resolution picked `home`, but a real (non-symlink) legacy
+    # dir still exists — old package versions write there, new ones here.
+    if paths.LEGACY_HOME.is_dir() and not paths.LEGACY_HOME.is_symlink():
+        return _check("home", WARN,
+                      f"data home: {home}, but {paths.LEGACY_HOME} also exists "
+                      "— old engram versions still write there; merge or "
+                      "remove it (or re-run ./install.sh)")
+    return _check("home", PASS, f"data home: {home}")
 
 
 def _check_db() -> dict:

@@ -78,8 +78,8 @@ def test_tick_persists_cost_on_run_row(temp_db, tmp_path, monkeypatch):
                              cache_creation_tokens=400)
 
     monkeypatch.setattr(tick, "CLAUDE_BIN", "claude")
-    monkeypatch.setattr(tick, "LOG_PATH", tmp_path / "watcher.log")
-    monkeypatch.setattr(wlog, "LOG_PATH", tmp_path / "watcher.log")
+    monkeypatch.setattr(tick, "log_path", lambda: tmp_path / "watcher.log")
+    monkeypatch.setattr(wlog, "log_path", lambda: tmp_path / "watcher.log")
     monkeypatch.setattr(tick, "run_watcher_session", runner)
     tick.ensure_row("s", str(transcript), "/cwd")
 

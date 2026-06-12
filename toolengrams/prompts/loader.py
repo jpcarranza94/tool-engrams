@@ -2,8 +2,11 @@
 
 Lookup order (first match wins):
     1. $ENGRAM_{NAME_UPPER}_PROMPT_PATH  (explicit file override)
-    2. ~/.claude/tool-engrams/prompts/{name}.md  (per-user override)
+    2. <engram home>/prompts/{name}.md           (per-user override)
     3. toolengrams/prompts/defaults/{name}.md    (packaged default)
+
+The engram home resolves via paths.engram_home() ($ENGRAM_HOME, then
+~/.tool-engrams, then the legacy ~/.claude/tool-engrams).
 
 Interpolation uses str.format — curly braces in the prompt itself must be
 escaped by doubling (`{{` / `}}`). Variable names come from the caller.
@@ -14,8 +17,15 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from ..paths import engram_home
+
 _DEFAULTS_DIR = Path(__file__).parent / "defaults"
-_USER_OVERRIDE_DIR = Path.home() / ".claude" / "tool-engrams" / "prompts"
+
+
+def _user_override_dir() -> Path:
+    """Resolved at call time so the whole seam shares one contract with
+    db.db_path() — no import-order surprises around $ENGRAM_HOME."""
+    return engram_home() / "prompts"
 
 
 class PromptNotFound(RuntimeError):
@@ -35,7 +45,7 @@ def resolve_prompt_path(prompt_name: str) -> Path:
         if p.is_file():
             return p
 
-    user = _USER_OVERRIDE_DIR / f"{prompt_name}.md"
+    user = _user_override_dir() / f"{prompt_name}.md"
     if user.is_file():
         return user
 

@@ -8,11 +8,11 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
+from . import paths
+
 SCHEMA_VERSION = 15
 SCHEMA_PATH = Path(__file__).parent / "schema.sql"
 MIGRATIONS_DIR = Path(__file__).parent / "migrations"
-
-DEFAULT_DB_PATH = Path.home() / ".claude" / "tool-engrams" / "db.sqlite"
 
 
 def db_path() -> Path:
@@ -20,7 +20,7 @@ def db_path() -> Path:
     override = os.environ.get("ENGRAM_DB")
     if override:
         return Path(override)
-    return DEFAULT_DB_PATH
+    return paths.engram_home() / "db.sqlite"
 
 
 def connect(path: Path | None = None) -> sqlite3.Connection:

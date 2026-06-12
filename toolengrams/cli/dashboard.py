@@ -12,8 +12,7 @@ from pathlib import Path
 from .. import db, memory_store
 from ..consolidation import runs as consolidation_runs
 from ..retrieval import session_state
-
-LOG_PATH = Path.home() / ".claude" / "tool-engrams" / "watcher.log"
+from ..watcher.log import log_path
 
 # The watcher is no longer a long-lived process, so "active" = a tracked session
 # that ticked within this window, not a live PID.
@@ -53,9 +52,10 @@ def _read_watcher_stats() -> dict:
     """Parse watcher.log for recent activity stats."""
     stats = {"total": 0, "today": 0, "last_entry": "---"}
     try:
-        if not LOG_PATH.exists():
+        path = log_path()
+        if not path.exists():
             return stats
-        lines = LOG_PATH.read_text().splitlines()
+        lines = path.read_text().splitlines()
         stats["total"] = len(lines)
         today = time.strftime("%Y-%m-%d")
         stats["today"] = sum(1 for l in lines if l.startswith(today))

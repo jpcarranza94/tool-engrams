@@ -164,7 +164,7 @@ plugin updates, removed on uninstall (with prompt). Source: the official plugin
 reference (code.claude.com/docs/en/plugins-reference.md) documents
 `${CLAUDE_PLUGIN_DATA}` and its persistence/uninstall semantics — **verify against
 live docs at Phase 2 start before building on it**, since both 2.2 and 2.3 hinge on
-it. `$ENGRAM_DB` already makes this a one-line change; keep `~/.claude/tool-engrams/`
+it. `$ENGRAM_DB` already makes this a one-line change; keep `~/.claude/tool-engrams/` (superseded: the data home is now `$ENGRAM_HOME` → `~/.tool-engrams/`, see toolengrams/paths.py)
 for the legacy install path and document a migration note (`mv` the DB or set
 `$ENGRAM_DB`).
 

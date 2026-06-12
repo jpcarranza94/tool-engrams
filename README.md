@@ -57,7 +57,7 @@ Hooks talk to Claude Code on the hot path; two background LLM roles (formation +
         │              │     └──────┬────────┘ └──────┬────────┘
         ▼              ▼            ▼                 ▼
    ┌────────────────────────────────────────────────────┐
-   │               SQLite  (~/.claude/tool-engrams/)    │
+   │               SQLite  (~/.tool-engrams/)           │
    │  memories │ triggers │ session_surfaces │ ...      │
    └────────────────────────────────────────────────────┘
                            ▲
@@ -270,7 +270,7 @@ The hot path (hooks) has **no external dependencies** — stdlib + sqlite3 only.
 
 **What is stored where.** Everything is local; nothing leaves your machine except the `claude -p` calls themselves (same data path as your normal Claude Code usage).
 
-- Memory bodies, triggers, and surface history: SQLite at `~/.claude/tool-engrams/db.sqlite`.
+- Memory bodies, triggers, and surface history: SQLite at `~/.tool-engrams/db.sqlite`.
 - Transcript deltas the watcher reads: written to per-(session, role) sandbox working dirs; transcript excerpts may appear in watcher decision logs.
 - Watcher residue (sandbox cwds, internal transcripts, dead state rows) is reaped by a once-daily cleanup after 7 days (`ENGRAM_CLEANUP_TTL_SEC`).
 
@@ -308,7 +308,7 @@ The installer:
    - `PostToolUse` (turn counter + recovery tick)
    - `PostToolUseFailure` (hint surfacing + arms the watcher)
 3. Symlinks skills (`/engram-remember`, `/engram-forget`, `/engram-recall`)
-4. Initializes the SQLite DB at `~/.claude/tool-engrams/db.sqlite` and verifies
+4. Initializes the SQLite DB at `~/.tool-engrams/db.sqlite` (migrating a legacy `~/.claude/tool-engrams/` home if present) and verifies
    the whole wiring with `engram doctor`
 5. Optionally schedules the nightly consolidation agent (skipped automatically
    on non-interactive installs)
@@ -406,7 +406,8 @@ engram rebuild-triggers           Re-extract triggers from bodies (post-migratio
 
 | Env var | Default | Effect |
 |---|---|---|
-| `ENGRAM_DB` | `~/.claude/tool-engrams/db.sqlite` | SQLite DB path |
+| `ENGRAM_HOME` | `~/.tool-engrams` | Data home (DB, watcher log, sandboxes, prompt overrides). Legacy `~/.claude/tool-engrams` still resolves until migrated. Machine-wide contract: set it everywhere (shell + launchd) or nowhere — see `docs/adr/0008` |
+| `ENGRAM_DB` | `<home>/db.sqlite` | SQLite DB path (beats `ENGRAM_HOME` for the DB file) |
 | `ENGRAM_DISABLED` | unset | `1`/`true` disables the whole system (beats the `engram pause` flag file; `0`/`false` force-enables) |
 | `ENGRAM_SURFACE_NOTICE` | unset | `1`/`true` adds a visible `ToolEngrams surfaced: …` line to the transcript whenever a memory is injected — for the post-install smoke test and surfacing debugging |
 | `ENGRAM_WATCHER_MODEL` | `sonnet` | Model passed to `claude -p` for both watcher roles (e.g. `haiku` for a cheaper, faster watcher) |
@@ -427,7 +428,7 @@ The watcher (formation), evaluation, and consolidation agents use markdown-file 
 **Lookup order** (first match wins):
 
 1. `$ENGRAM_<NAME>_PROMPT_PATH` — explicit file path (`<NAME>` ∈ `WATCHER`, `EVAL`, `CONSOLIDATION`)
-2. `~/.claude/tool-engrams/prompts/<name>.md` — per-user override
+2. `~/.tool-engrams/prompts/<name>.md` — per-user override
 3. Packaged defaults at `toolengrams/prompts/defaults/*.md`
 
 Variable interpolation uses `str.format` — the formation prompt expects `{cwd}`; the consolidation prompt expects `{target_date}`, `{session_list}`, `{memory_summary}`.
@@ -455,7 +456,8 @@ e2e stays local.
 
 ```bash
 ./install.sh --uninstall              # removes hooks, permission, skill symlinks
-rm -rf ~/.claude/tool-engrams/        # only if you also want the memories gone
+rm -rf ~/.tool-engrams/               # only if you also want the memories gone
+rm -f ~/.claude/tool-engrams          # ...plus the compatibility symlink migration left
 pip uninstall toolengrams             # venv-fallback installs instead:
                                       #   rm -rf ~/.local/share/toolengrams/venv ~/.local/bin/engram
 ```

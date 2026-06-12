@@ -11,12 +11,18 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from ..paths import engram_home
+
 PLIST_NAME = "com.toolengrams.consolidate"
 PLIST_DIR = Path.home() / "Library" / "LaunchAgents"
 PLIST_PATH = PLIST_DIR / f"{PLIST_NAME}.plist"
 CRON_MARKER = "# toolengrams-consolidate"
 
-LOG_DIR = Path.home() / ".claude" / "tool-engrams"
+# Resolved at import time of the installing process and baked into the
+# launchd plist / cron line — the scheduled job runs with a minimal env where
+# $ENGRAM_HOME may be absent, so the resolved path (not the env var) is what
+# must persist.
+LOG_DIR = engram_home()
 
 
 def _get_platform() -> str:

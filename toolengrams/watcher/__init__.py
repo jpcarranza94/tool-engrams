@@ -27,7 +27,7 @@ from .agent import (
     _watcher_model,
     _watcher_timeout,
 )
-from .log import LOG_PATH
+from .log import log_path
 from .state import derive_transcript_path
 from .tick import MAX_FORM_RETRIES, _retry_decision
 from .transcript_format import (
@@ -51,7 +51,7 @@ __all__ = [
     "CLAUDE_BIN",
     "DEFAULT_WATCHER_MODEL",
     "DEFAULT_WATCHER_TIMEOUT",
-    "LOG_PATH",
+    "log_path",
     "MAX_BASH_CMD_CHARS",
     "MAX_DELTA_CHARS",
     "MAX_FORM_RETRIES",

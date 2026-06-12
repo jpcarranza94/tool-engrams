@@ -53,7 +53,7 @@ from .agent import (
     _watcher_model,
     run_watcher_session,
 )
-from .log import LOG_PATH, _log
+from .log import _log, log_path
 from .state import ensure_row
 from .transcript_format import _format_delta, _read_lines_from
 
@@ -215,7 +215,7 @@ def sweep_idle_sessions(current_session_id: str) -> int:
 def _tick_lock(session_id: str, role: str = "formation"):
     """Non-blocking per-(session, role) file lock. Yields True if acquired, False
     if a tick for that (session, role) is already running."""
-    lock_dir = LOG_PATH.parent / "locks"
+    lock_dir = log_path().parent / "locks"
     try:
         lock_dir.mkdir(parents=True, exist_ok=True)
     except Exception:

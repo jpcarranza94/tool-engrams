@@ -2,7 +2,7 @@
 
 Lookup order:
     1. $ENGRAM_CONSOLIDATION_PROMPT_PATH
-    2. ~/.claude/tool-engrams/prompts/consolidation.md
+    2. <engram home>/prompts/consolidation.md
     3. toolengrams/prompts/defaults/consolidation.md
 
 Variables interpolated: {target_date}, {session_list}, {memory_summary}.

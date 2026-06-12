@@ -30,7 +30,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--db",
         default=None,
-        help="Path to the v1 DB. Defaults to $ENGRAM_DB or ~/.claude/tool-engrams/db.sqlite.",
+        help="Path to the v1 DB. Defaults to $ENGRAM_DB or <engram home>/db.sqlite.",
     )
     parser.add_argument(
         "--dry-run",

@@ -8,7 +8,43 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 SETTINGS="$HOME/.claude/settings.json"
 SKILLS_DIR="$HOME/.claude/skills"
-DB_DIR="$HOME/.claude/tool-engrams"
+# Data home: $ENGRAM_HOME overrides; default is the harness-neutral
+# ~/.tool-engrams (the legacy ~/.claude/tool-engrams is migrated below).
+LEGACY_DIR="$HOME/.claude/tool-engrams"
+DB_DIR="${ENGRAM_HOME:-$HOME/.tool-engrams}"
+
+# One-time migration of the legacy data home into $DB_DIR. Move, then leave a
+# symlink behind so anything still resolving the legacy path (running
+# sessions, older checkouts) lands on the same data. Note: a cross-filesystem
+# mv degrades to copy+unlink — if a stray hook holds the sqlite open mid-copy
+# the copy can tear; in the default layout both paths share $HOME.
+# tests/test_install_sh.py extracts and runs this function — keep it
+# self-contained (only $LEGACY_DIR / $DB_DIR / $ENGRAM_HOME).
+migrate_legacy_home() {
+    if [ -n "${ENGRAM_HOME:-}" ]; then
+        if [ -d "$LEGACY_DIR" ] && [ ! -L "$LEGACY_DIR" ]; then
+            echo "  WARNING: \$ENGRAM_HOME is set ($DB_DIR) but your existing data is at $LEGACY_DIR."
+            echo "           It will NOT be migrated automatically — move it yourself or unset ENGRAM_HOME."
+        fi
+        return 0
+    fi
+    if [ -d "$LEGACY_DIR" ] && [ ! -L "$LEGACY_DIR" ]; then
+        if [ ! -e "$DB_DIR" ]; then
+            echo "  Migrating data home: $LEGACY_DIR -> $DB_DIR"
+            mv "$LEGACY_DIR" "$DB_DIR"
+            # An old-package hook can recreate the legacy dir between mv and
+            # ln (their mkdir is exist_ok=True) — warn instead of dying
+            # mid-install under set -e.
+            if ! ln -s "$DB_DIR" "$LEGACY_DIR" 2>/dev/null; then
+                echo "  WARNING: couldn't leave a compatibility symlink at $LEGACY_DIR."
+                echo "           Re-link manually: rm -rf '$LEGACY_DIR' && ln -s '$DB_DIR' '$LEGACY_DIR'"
+            fi
+        else
+            echo "  WARNING: both $DB_DIR and $LEGACY_DIR exist — using $DB_DIR."
+            echo "           Merge or remove $LEGACY_DIR manually to silence this."
+        fi
+    fi
+}
 
 MIN_PYTHON="3.10"
 MIN_CLAUDE="2.1.117"
@@ -64,6 +100,7 @@ PYEOF
     done
     command -v engram &>/dev/null && engram consolidate --uninstall-schedule >/dev/null 2>&1 || true
     echo "  Done. Kept: the DB at $DB_DIR (your memories) and the Python package."
+    [ -L "$LEGACY_DIR" ] && echo "  (kept the $LEGACY_DIR compatibility symlink — remove it together with the DB)" || true
     if [ -d "$HOME/.local/share/toolengrams/venv" ]; then
         echo "  This was a venv-fallback install; to remove the package:"
         echo "    rm -rf ~/.local/share/toolengrams/venv ~/.local/bin/engram"
@@ -357,6 +394,7 @@ echo ""
 # 4. Initialize DB + verify the wiring. Opening the DB runs the migrations;
 #    doctor then re-checks the hook wiring, PATH, claude version, and DB.
 echo "4. Initializing database + verifying wiring..."
+migrate_legacy_home
 mkdir -p "$DB_DIR"
 if ! engram doctor; then
     echo ""

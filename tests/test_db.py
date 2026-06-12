@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from toolengrams import db
 
 
@@ -62,6 +60,7 @@ def test_env_var_override(tmp_path, monkeypatch):
     assert db.db_path() == override
 
 
-def test_default_db_path():
-    expected = Path.home() / ".claude" / "tool-engrams" / "db.sqlite"
-    assert db.DEFAULT_DB_PATH == expected
+def test_default_db_path_follows_engram_home(tmp_path, monkeypatch):
+    monkeypatch.delenv("ENGRAM_DB", raising=False)
+    monkeypatch.setenv("ENGRAM_HOME", str(tmp_path))
+    assert db.db_path() == tmp_path / "db.sqlite"

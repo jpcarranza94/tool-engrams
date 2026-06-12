@@ -15,6 +15,7 @@ ToolEngrams is a tool-bound memory system for Claude Code. Memories bind to comm
   - `watcher/` — event-driven background LLM work with **two roles**: `formation` (creates memories) and `evaluation` (judges how surfaced memories fared). `tick.py` is the core (one read→decide→`claude -p` per event, role-dispatched, plus coalesce policy + the SessionStart idle-sweep); `state.py` is the single seam over `watcher_state`, keyed `(work_session_id, role)` (cursor / armed / fail_streak / last_tick_ts, plus `sweep_idle`; no resume id — ticks are stateless per ADR-0005); `agent.py` runs the fresh permissioned per-role `claude -p` call (a command allowlist, NOT a JSON schema); `transcript_format.py` the JSONL→text delta; `log.py` the shared log sink. Model via `$ENGRAM_WATCHER_MODEL` (default `sonnet`).
   - `memory_store.py` — the Memory aggregate persistence seam: **every** SQL statement against `memories` / `triggers` / `memories_fts` lives here. Reads return typed `Memory` / `Trigger` objects (models.py); writes (insert/update/delete, reinforcement counter bumps, trigger persistence) go through its named functions. The PreToolUse hot path (`match_token_triggers` / `match_path_triggers`) returns raw rows so rank.py can build the lean `Candidate` with no per-call allocation. Each table has exactly one seam: `memories`/`triggers`/`memories_fts` → `memory_store.py`; `session_surfaces`/`session_turns` → `retrieval/session_state.py`; `consolidation_runs` → `consolidation/runs.py`; `watcher_state` → `watcher/state.py`. (Exception: `cli/migrate_v1_to_v2.py` keeps its own SQL — it reads the OLD v1 schema the stores don't model.)
   - `triggers.py` — trigger extraction validation (delegates trigger writes to memory_store)
+  - `paths.py` — data-home resolution seam (`engram_home()`): `$ENGRAM_HOME` → `~/.tool-engrams` → legacy `~/.claude/tool-engrams`; everything persistent (DB, watcher log, sandboxes, prompt overrides, pause flag) routes through it
   - `formation.py` — pure trigger extraction from memory body text (no DB writes)
 - `skills/` — Claude Code skill files (symlinked to ~/.claude/skills/ by install.sh; skill name comes from the folder basename — no frontmatter `name`). A plugin packaging was built and rejected — see `docs/adr/0004`; install.sh is the single install path.
 - `tests/` — unit tests + `tests/e2e/` for claude -p integration tests
@@ -58,9 +59,9 @@ Read per tick (each tick is a fresh process), so changes apply to the next event
 
 `MAX_FORM_RETRIES` (tick.py) bounds how many ticks a failed transcript window is retried (cursor held, `fail_streak` persisted in `watcher_state`) before giving up and advancing past it; it is a correctness bound, not an env knob.
 
-## DB location
+## Data home & DB location
 
-`~/.claude/tool-engrams/db.sqlite` (override with `$ENGRAM_DB`). Schema in `toolengrams/schema.sql`, migrations in `toolengrams/migrations/`.
+All persistent state lives under the engram home, resolved by `toolengrams/paths.py`: `$ENGRAM_HOME` → `~/.tool-engrams/` (neutral default) → `~/.claude/tool-engrams/` (legacy fallback; install.sh migrates it and leaves a symlink). The DB is `<home>/db.sqlite` (override the file directly with `$ENGRAM_DB`). Schema in `toolengrams/schema.sql`, migrations in `toolengrams/migrations/`.
 
 ## CLI entry point
 

@@ -17,7 +17,7 @@ from toolengrams.watcher import SessionResult, agent, log as wlog, tick
 @pytest.fixture(autouse=True)
 def _sandbox_root(tmp_path, monkeypatch):
     """The stable sandbox dirs persist across calls by design — root them under
-    tmp_path so tests don't touch the real ~/.claude/tool-engrams/sandboxes."""
+    tmp_path so tests don't touch the real <engram home>/sandboxes."""
     monkeypatch.setattr(agent, "_sandbox_root", lambda: tmp_path)
 
 
@@ -178,8 +178,8 @@ def test_tick_routes_activity_through_delta_not_inline(temp_db, tmp_path, monkey
         return SessionResult(ok=True)
 
     monkeypatch.setattr(tick, "CLAUDE_BIN", "claude")
-    monkeypatch.setattr(tick, "LOG_PATH", tmp_path / "watcher.log")
-    monkeypatch.setattr(wlog, "LOG_PATH", tmp_path / "watcher.log")
+    monkeypatch.setattr(tick, "log_path", lambda: tmp_path / "watcher.log")
+    monkeypatch.setattr(wlog, "log_path", lambda: tmp_path / "watcher.log")
     monkeypatch.setattr(tick, "run_watcher_session", runner)
     tick.ensure_row("s", str(transcript), "/cwd")
 
