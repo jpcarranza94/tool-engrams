@@ -7,6 +7,7 @@ plus seed and all formation subcommands (remember, forget, pin, recall).
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from typing import Callable
 
@@ -71,8 +72,41 @@ _SELF_PARSING = {
 }
 
 
+# Hook handlers stay reachable under $ENGRAM_ALLOWED_VERBS: they fire inside
+# engine sandbox sessions (no --bare), are fail-open by contract, and already
+# self-skip there via the ENGRAM_IN_WATCHER recursion guard — denying them
+# here would surface as hook errors inside every watcher session.
+_HOOK_COMMANDS = frozenset({
+    "pretool", "session-start", "post-tool", "post-tool-failure",
+    "user-prompt", "stop", "flush",
+})
+
+
+def _verb_guard(raw: list[str]) -> int | None:
+    """Engine-agnostic containment backstop: when $ENGRAM_ALLOWED_VERBS is set
+    (watcher children: `remember` / `judge,quarantine`), refuse any other
+    subcommand at dispatch — even an engine whose native sandbox can't express
+    a per-command allowlist still can't reach `engram forget` through us."""
+    allowed = os.environ.get("ENGRAM_ALLOWED_VERBS", "")
+    if not allowed or not raw:
+        return None
+    verb = raw[0]
+    if verb in _HOOK_COMMANDS or verb in ("-h", "--help"):
+        return None
+    verbs = {v.strip() for v in allowed.split(",") if v.strip()}
+    if verb in verbs:
+        return None
+    print(f"engram: subcommand {verb!r} is not permitted in this context "
+          f"(ENGRAM_ALLOWED_VERBS={allowed})", file=sys.stderr)
+    return 2
+
+
 def main(argv: list[str] | None = None) -> int:
     raw = list(sys.argv[1:] if argv is None else argv)
+
+    denied = _verb_guard(raw)
+    if denied is not None:
+        return denied
 
     # Fast-path: self-parsing subcommands get forwarded directly.
     if raw and raw[0] in _SELF_PARSING:

@@ -47,10 +47,10 @@ from ..retrieval import session_state
 from ..utils import WATCHER_CHILD_ENV, safe_filename_id as _safe
 from . import runs_store, state
 from .agent import (
-    CLAUDE_BIN,
     DELTA_FILENAME,
     SessionResult,
     _watcher_model,
+    engine_available,
     run_watcher_session,
 )
 from .log import _log, log_path
@@ -415,7 +415,7 @@ def _close_run(run_id: int | None, result: SessionResult, *, ok: bool,
 def run_tick(session_id: str, transcript_path: str, cwd: str,
              role: str = "formation", flush: bool = False) -> int:
     """One event-driven tick for (session, role). See module docstring."""
-    if not CLAUDE_BIN or not session_id or role not in _DECIDERS:
+    if not engine_available() or not session_id or role not in _DECIDERS:
         return 0
     ensure_row(session_id, transcript_path, cwd, role)
 

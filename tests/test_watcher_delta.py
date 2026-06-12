@@ -10,8 +10,10 @@ from pathlib import Path
 
 import pytest
 
-from toolengrams.claude_invoke import ClaudeResult
+from toolengrams.engine import EngineResult
 from toolengrams.watcher import SessionResult, agent, log as wlog, tick
+
+from .conftest import make_fake_engine
 
 
 @pytest.fixture(autouse=True)
@@ -33,16 +35,16 @@ def _bash_line(cmd: str) -> str:
 def test_run_watcher_session_writes_delta_file_and_grants_scoped_read(monkeypatch):
     captured = {}
 
-    def fake_invoke(message, **kw):
-        cwd = Path(kw["cwd"])
-        captured["message"] = message
+    def fake_invoke(req):
+        cwd = Path(req.cwd)
+        captured["message"] = req.prompt
         captured["delta"] = (cwd / "delta.txt").read_text()
         captured["settings"] = json.loads(
             (cwd / ".claude" / "settings.local.json").read_text())
-        return ClaudeResult(stdout='{"session_id": "w1", "result": "ok"}', returncode=0)
+        captured["env"] = req.env
+        return EngineResult(ok=True, engine="claude-code")
 
-    monkeypatch.setattr(agent, "invoke_claude_agent", fake_invoke)
-    monkeypatch.setattr(agent, "CLAUDE_BIN", "/usr/bin/claude")
+    monkeypatch.setattr(agent, "get_engine", lambda: make_fake_engine(fake_invoke))
 
     r = agent.run_watcher_session(
         "formation", "PROMPT: read ./delta.txt",
@@ -57,31 +59,38 @@ def test_run_watcher_session_writes_delta_file_and_grants_scoped_read(monkeypatc
     allow = captured["settings"]["permissions"]["allow"]
     assert "Bash(engram remember *)" in allow
     assert any(a.startswith("Read(") and "delta.txt" in a for a in allow)
+    # The engine-agnostic dispatch guard rides along in the child env.
+    assert captured["env"]["ENGRAM_ALLOWED_VERBS"] == "remember"
 
 
-def test_run_session_does_not_mutate_role_allowlist(monkeypatch):
-    """`allow + [Read(...)]` must build a new list — never grow the module-level
-    ROLE_ALLOWLIST across calls."""
-    monkeypatch.setattr(agent, "invoke_claude_agent",
-                        lambda message, **kw: ClaudeResult(stdout='{"session_id": "w"}',
-                                                           returncode=0))
-    monkeypatch.setattr(agent, "CLAUDE_BIN", "/usr/bin/claude")
-    before = list(agent.ROLE_ALLOWLIST["formation"])
+def test_role_grants_do_not_grow_across_calls(monkeypatch):
+    """Repeated sessions in one sandbox must regenerate identical grants —
+    never accumulate (the old mutate-the-module-allowlist bug class)."""
+    seen = []
+
+    def fake_invoke(req):
+        seen.append(json.loads(
+            (Path(req.cwd) / ".claude" / "settings.local.json").read_text()))
+        return EngineResult(ok=True, engine="claude-code")
+
+    monkeypatch.setattr(agent, "get_engine", lambda: make_fake_engine(fake_invoke))
 
     agent.run_watcher_session("formation", "p",
                               work_session_id="s1", delta="a")
     agent.run_watcher_session("formation", "p",
                               work_session_id="s1", delta="b")
 
-    assert agent.ROLE_ALLOWLIST["formation"] == before   # unchanged after two calls
-    assert len(agent.ROLE_ALLOWLIST["formation"]) == 1
+    assert seen[0] == seen[1]
+    allow = seen[0]["permissions"]["allow"]
+    assert allow.count("Bash(engram remember *)") == 1
+    assert agent.ROLE_COMMAND_PREFIXES["formation"] == ("engram remember",)
 
 
 def test_run_session_fail_open_on_delta_write_error(monkeypatch):
     """A sandbox-setup failure (e.g. the delta write) must not raise into the
     tick — it returns ok=False with a reason so the run row finalizes as error."""
     import pathlib
-    monkeypatch.setattr(agent, "CLAUDE_BIN", "/usr/bin/claude")
+    monkeypatch.setattr(agent, "get_engine", lambda: make_fake_engine())
     monkeypatch.setattr(pathlib.Path, "write_text",
                         lambda self, *a, **k: (_ for _ in ()).throw(OSError("disk full")))
 
@@ -97,11 +106,9 @@ def test_sandbox_cwd_is_stable_per_session_and_role(monkeypatch):
     be the SAME across ticks of one (work session, role) — and different across
     sessions and roles (stable slug for the recursion guard + cleanup)."""
     cwds = []
-    monkeypatch.setattr(agent, "invoke_claude_agent",
-                        lambda message, **kw: (cwds.append(kw["cwd"]),
-                                               ClaudeResult(stdout='{"session_id": "w"}',
-                                                            returncode=0))[1])
-    monkeypatch.setattr(agent, "CLAUDE_BIN", "/usr/bin/claude")
+    monkeypatch.setattr(agent, "get_engine", lambda: make_fake_engine(
+        lambda req: (cwds.append(req.cwd),
+                     EngineResult(ok=True, engine="claude-code"))[1]))
 
     agent.run_watcher_session("formation", "p",
                               work_session_id="sess-a", delta="a")
@@ -124,11 +131,9 @@ def test_sandbox_cwd_is_stable_per_session_and_role(monkeypatch):
 def test_sandbox_id_is_sanitized_against_traversal(tmp_path, monkeypatch):
     """A hostile or malformed session id must not escape the sandbox root."""
     cwds = []
-    monkeypatch.setattr(agent, "invoke_claude_agent",
-                        lambda message, **kw: (cwds.append(kw["cwd"]),
-                                               ClaudeResult(stdout='{"session_id": "w"}',
-                                                            returncode=0))[1])
-    monkeypatch.setattr(agent, "CLAUDE_BIN", "/usr/bin/claude")
+    monkeypatch.setattr(agent, "get_engine", lambda: make_fake_engine(
+        lambda req: (cwds.append(req.cwd),
+                     EngineResult(ok=True, engine="claude-code"))[1]))
 
     r = agent.run_watcher_session("formation", "p",
                                   work_session_id="../../../etc/evil", delta="x")
@@ -143,10 +148,7 @@ def test_sandbox_created_user_only_and_symlink_rejected(tmp_path, monkeypatch):
     """The sandbox holds transcript excerpts and the settings.local.json
     permission boundary: 0700 on create, and a pre-existing symlink (squat /
     swap) is refused rather than silently used."""
-    monkeypatch.setattr(agent, "invoke_claude_agent",
-                        lambda message, **kw: ClaudeResult(stdout='{"session_id": "w"}',
-                                                           returncode=0))
-    monkeypatch.setattr(agent, "CLAUDE_BIN", "/usr/bin/claude")
+    monkeypatch.setattr(agent, "get_engine", lambda: make_fake_engine())
 
     r = agent.run_watcher_session("formation", "p",
                                   work_session_id="sess-perm", delta="x")
@@ -177,7 +179,7 @@ def test_tick_routes_activity_through_delta_not_inline(temp_db, tmp_path, monkey
         seen["delta"] = delta
         return SessionResult(ok=True)
 
-    monkeypatch.setattr(tick, "CLAUDE_BIN", "claude")
+    monkeypatch.setattr(tick, "engine_available", lambda: True)
     monkeypatch.setattr(tick, "log_path", lambda: tmp_path / "watcher.log")
     monkeypatch.setattr(wlog, "log_path", lambda: tmp_path / "watcher.log")
     monkeypatch.setattr(tick, "run_watcher_session", runner)
