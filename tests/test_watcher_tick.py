@@ -314,7 +314,7 @@ def test_eval_tick_flush_forces_run_without_new_lines(temp_db, tmp_path, monkeyp
 def test_trigger_eval_skips_without_pending(temp_db, tmp_path, monkeypatch):
     spawned = []
     monkeypatch.setattr(tick, "spawn_tick",
-                        lambda sid, tp, cwd, flush=False, role="formation": spawned.append(role))
+                        lambda sid, tp, cwd, flush=False, role="formation", target="claude-code": spawned.append(role))
     tick.trigger_eval("s", "/t.jsonl", "/cwd", reason="stop")
     assert spawned == []
 
@@ -323,7 +323,7 @@ def test_trigger_eval_spawns_with_pending(temp_db, tmp_path, monkeypatch):
     _seed_pending_surface("s")
     spawned = []
     monkeypatch.setattr(tick, "spawn_tick",
-                        lambda sid, tp, cwd, flush=False, role="formation": spawned.append(role))
+                        lambda sid, tp, cwd, flush=False, role="formation", target="claude-code": spawned.append(role))
     tick.trigger_eval("s", "/t.jsonl", "/cwd", reason="stop")
     assert spawned == ["eval"]
 
@@ -346,7 +346,7 @@ def test_sweep_idle_sessions_fires_flush_tick(temp_db, tmp_path, monkeypatch):
 
     spawned = []
     monkeypatch.setattr(tick, "spawn_tick",
-                        lambda sid, tp, cwd, flush=False, role="formation": spawned.append((sid, flush, role)))
+                        lambda sid, tp, cwd, flush=False, role="formation", target="claude-code": spawned.append((sid, flush, role)))
 
     n = tick.sweep_idle_sessions("current-session")
 
@@ -372,7 +372,7 @@ def test_sweep_caps_spawns_to_avoid_herd(temp_db, tmp_path, monkeypatch):
 
     spawned = []
     monkeypatch.setattr(tick, "spawn_tick",
-                        lambda sid, tp, cwd, flush=False, role="formation": spawned.append(sid))
+                        lambda sid, tp, cwd, flush=False, role="formation", target="claude-code": spawned.append(sid))
 
     n = tick.sweep_idle_sessions("current-session")
 

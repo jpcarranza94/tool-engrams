@@ -7,7 +7,8 @@ import time
 from datetime import date, timezone, datetime
 from pathlib import Path
 
-from toolengrams.consolidation.collect import SessionFile, collect_sessions
+from toolengrams.target.claude_code.collect import collect_sessions
+from toolengrams.target.interface import SessionFile
 
 
 # ---------- session collection ----------

@@ -1,13 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ToolEngrams installer
-# Installs the package, wires hooks into Claude Code, symlinks skills,
-# initializes the database, and optionally installs the nightly schedule.
+# ToolEngrams installer — the centralized trunk.
+# Shared steps (python preflight, package install, data-home migration, DB
+# init, doctor, schedule) live here; everything harness-specific lives in
+# per-harness scripts dispatched on the --target / --engine flags:
+#   install/targets/<name>.sh   hook wiring + uninstall surgery per TARGET
+#   install/engines/<name>.sh   preflight per ENGINE
+#
+# Usage: ./install.sh [--target <name>]... [--engine <name>] [--uninstall]
+# Defaults (--target claude-code --engine claude-code) keep the historic
+# one-command install byte-compatible.
 
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 SETTINGS="$HOME/.claude/settings.json"
 SKILLS_DIR="$HOME/.claude/skills"
+export REPO_DIR SETTINGS SKILLS_DIR
 # Data home: $ENGRAM_HOME overrides; default is the harness-neutral
 # ~/.tool-engrams (the legacy ~/.claude/tool-engrams is migrated below).
 LEGACY_DIR="$HOME/.claude/tool-engrams"
@@ -47,56 +55,53 @@ migrate_legacy_home() {
 }
 
 MIN_PYTHON="3.10"
-MIN_CLAUDE="2.1.117"
 
+# ---- Flags: [--target <name>]... [--engine <name>] [--uninstall] ----
 # Reject unknown flags so a typo'd --uninstall can't silently run a full install.
-if [ -n "${1:-}" ] && [ "${1}" != "--uninstall" ]; then
-    echo "Usage: ./install.sh [--uninstall]"
+USAGE="Usage: ./install.sh [--target <name>]... [--engine <name>] [--uninstall]"
+TARGETS=()
+ENGINE="claude-code"
+UNINSTALL=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --target)
+            [ -n "${2:-}" ] || { echo "$USAGE"; exit 2; }
+            TARGETS+=("$2"); shift 2 ;;
+        --engine)
+            [ -n "${2:-}" ] || { echo "$USAGE"; exit 2; }
+            ENGINE="$2"; shift 2 ;;
+        --uninstall)
+            UNINSTALL=1; shift ;;
+        *)
+            echo "$USAGE"
+            exit 2 ;;
+    esac
+done
+[ ${#TARGETS[@]} -eq 0 ] && TARGETS=("claude-code")
+for t in "${TARGETS[@]}"; do
+    case "$t" in
+        *[!a-z0-9-]*|"")
+            echo "ERROR: invalid target name '$t'."
+            exit 2 ;;
+    esac
+    if [ ! -f "$REPO_DIR/install/targets/$t.sh" ]; then
+        echo "ERROR: unknown target '$t' (no install/targets/$t.sh)."
+        exit 2
+    fi
+done
+if [ ! -f "$REPO_DIR/install/engines/$ENGINE.sh" ]; then
+    echo "ERROR: unknown engine '$ENGINE' (no install/engines/$ENGINE.sh)."
     exit 2
 fi
 
-# --uninstall: remove what this script wired up (hooks, permission, skill
-# symlinks). The DB and the Python package stay — memories are user data.
-if [ "${1:-}" = "--uninstall" ]; then
+# --uninstall: every target script's uninstall arm runs (hooks, permission,
+# skill symlinks — regardless of which targets were selected, so a plain
+# --uninstall cleans a multi-target install). The DB and the Python package
+# stay — memories are user data.
+if [ "$UNINSTALL" -eq 1 ]; then
     echo "ToolEngrams uninstaller (script-install path)"
-    if [ -f "$SETTINGS" ]; then
-        cp -p "$SETTINGS" "$SETTINGS.uninstall.bak"
-        python3 - "$SETTINGS" << 'PYEOF'
-import json
-import sys
-from pathlib import Path
-
-settings_path = Path(sys.argv[1])
-settings = json.loads(settings_path.read_text())
-hooks = settings.get("hooks", {})
-removed = 0
-for event in list(hooks):
-    kept_entries = []
-    for entry in hooks[event]:
-        entry_hooks = entry.get("hooks", [])
-        # Marker: the same "engram <subcommand>" commands install.sh writes.
-        # Filter at the individual-hook level so a hand-merged entry mixing
-        # engram with another tool's hook keeps the other tool's hooks.
-        kept_hooks = [h for h in entry_hooks
-                      if not h.get("command", "").startswith("engram ")]
-        removed += len(entry_hooks) - len(kept_hooks)
-        if kept_hooks:
-            entry["hooks"] = kept_hooks
-            kept_entries.append(entry)
-    if kept_entries:
-        hooks[event] = kept_entries
-    else:
-        hooks.pop(event, None)
-perms = settings.get("permissions", {}).get("allow", [])
-if "Bash(engram *)" in perms:
-    perms.remove("Bash(engram *)")
-    removed += 1
-settings_path.write_text(json.dumps(settings, indent=2) + "\n")
-print(f"  Removed {removed} engram hooks/permissions from settings.json")
-PYEOF
-    fi
-    for link in engram-remember engram-forget engram-recall; do
-        [ -L "$SKILLS_DIR/$link" ] && rm "$SKILLS_DIR/$link" && echo "  Removed skill symlink $link"
+    for script in "$REPO_DIR"/install/targets/*.sh; do
+        bash "$script" uninstall
     done
     command -v engram &>/dev/null && engram consolidate --uninstall-schedule >/dev/null 2>&1 || true
     echo "  Done. Kept: the DB at $DB_DIR (your memories) and the Python package."
@@ -129,24 +134,10 @@ sys.exit(0 if sys.version_info[:len(need)] >= need else 1)' "$MIN_PYTHON"; then
 fi
 echo "  $(python3 --version 2>&1) OK"
 
-if ! command -v claude &>/dev/null; then
-    echo "ERROR: Claude Code CLI ('claude') not found on PATH."
-    echo "  Install it first: https://claude.com/claude-code"
-    exit 1
-fi
-CLAUDE_VERSION="$(claude --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
-if [ -z "$CLAUDE_VERSION" ]; then
-    echo "WARNING: could not parse 'claude --version' output; continuing."
-elif ! python3 -c 'import sys
-have = [int(x) for x in sys.argv[1].split(".")[:3]]
-need = [int(x) for x in sys.argv[2].split(".")[:3]]
-sys.exit(0 if have >= need else 1)' "$CLAUDE_VERSION" "$MIN_CLAUDE"; then
-    echo "ERROR: claude >= $MIN_CLAUDE required (for the hook events ToolEngrams uses), found $CLAUDE_VERSION."
-    echo "  Update Claude Code, then re-run this script."
-    exit 1
-else
-    echo "  claude $CLAUDE_VERSION OK"
-fi
+for t in "${TARGETS[@]}"; do
+    bash "$REPO_DIR/install/targets/$t.sh" preflight
+done
+bash "$REPO_DIR/install/engines/$ENGINE.sh" preflight
 echo ""
 
 # 1. Install the Python package.
@@ -235,167 +226,39 @@ if ! command -v engram &>/dev/null; then
 fi
 echo ""
 
-# 2. Wire hooks into settings.json.
-echo "2. Configuring Claude Code hooks..."
-mkdir -p "$(dirname "$SETTINGS")"
-
-# Back up only the FIRST time, so a re-run can't clobber the pre-engram
-# original with already-modified settings.
-if [ -f "$SETTINGS" ]; then
-    if [ ! -f "$SETTINGS.bak" ]; then
-        cp -p "$SETTINGS" "$SETTINGS.bak"
-        echo "  Backed up settings.json to settings.json.bak"
-    fi
-else
-    echo '{}' > "$SETTINGS"
-fi
-
-python3 << 'PYEOF'
-import json
-from pathlib import Path
-
-settings_path = Path.home() / ".claude" / "settings.json"
-settings = json.loads(settings_path.read_text())
-
-# Ensure hooks section exists.
-hooks = settings.setdefault("hooks", {})
-
-# SessionStart
-if not any("engram session-start" in str(h) for h in hooks.get("SessionStart", [])):
-    hooks.setdefault("SessionStart", []).append({
-        "hooks": [{
-            "type": "command",
-            "command": "engram session-start",
-            "timeout": 5000,
-            "statusMessage": "Loading memories...",
-        }]
-    })
-    print("  Added SessionStart hook")
-else:
-    print("  SessionStart hook already present")
-
-# PreToolUse
-if not any("engram pretool" in str(h) for h in hooks.get("PreToolUse", [])):
-    hooks.setdefault("PreToolUse", []).append({
-        "matcher": "Bash|Read|Edit|Write|Grep|Glob|WebFetch|NotebookEdit",
-        "hooks": [{
-            "type": "command",
-            "command": "engram pretool",
-            "timeout": 3000,
-            "statusMessage": "Recalling...",
-        }]
-    })
-    print("  Added PreToolUse hook")
-else:
-    print("  PreToolUse hook already present")
-
-# PostToolUse (success reinforcement + turn counter)
-if not any("engram post-tool" in str(h) and "post-tool-failure" not in str(h)
-           for h in hooks.get("PostToolUse", [])):
-    hooks.setdefault("PostToolUse", []).append({
-        "matcher": "Bash|Read|Edit|Write|Grep|Glob|WebFetch|NotebookEdit",
-        "hooks": [{
-            "type": "command",
-            "command": "engram post-tool",
-            "timeout": 3000,
-        }]
-    })
-    print("  Added PostToolUse hook")
-else:
-    print("  PostToolUse hook already present")
-
-# PostToolUseFailure (hint injection on real tool failures)
-if not any("engram post-tool-failure" in str(h)
-           for h in hooks.get("PostToolUseFailure", [])):
-    hooks.setdefault("PostToolUseFailure", []).append({
-        "matcher": "Bash|Read|Edit|Write|Grep|Glob|WebFetch|NotebookEdit",
-        "hooks": [{
-            "type": "command",
-            "command": "engram post-tool-failure",
-            "timeout": 3000,
-        }]
-    })
-    print("  Added PostToolUseFailure hook")
-else:
-    print("  PostToolUseFailure hook already present")
-
-# UserPromptSubmit — fires a watcher tick on a likely user correction
-if not any("engram user-prompt" in str(h) for h in hooks.get("UserPromptSubmit", [])):
-    hooks.setdefault("UserPromptSubmit", []).append({
-        "matcher": "",
-        "hooks": [{
-            "type": "command",
-            "command": "engram user-prompt",
-            "timeout": 2000,
-        }]
-    })
-    print("  Added UserPromptSubmit hook")
-else:
-    print("  UserPromptSubmit hook already present")
-
-# Stop — primary event-driven watcher trigger (one tick per completed turn)
-if not any("engram stop" in str(h) for h in hooks.get("Stop", [])):
-    hooks.setdefault("Stop", []).append({
-        "matcher": "",
-        "hooks": [{
-            "type": "command",
-            "command": "engram stop",
-            "timeout": 5000,
-        }]
-    })
-    print("  Added Stop hook")
-else:
-    print("  Stop hook already present")
-
-# SessionEnd + PreCompact — final watcher flush tick (process the tail)
-for _event in ("SessionEnd", "PreCompact"):
-    if not any("engram flush" in str(h) for h in hooks.get(_event, [])):
-        hooks.setdefault(_event, []).append({
-            "matcher": "",
-            "hooks": [{
-                "type": "command",
-                "command": "engram flush",
-                "timeout": 5000,
-            }]
-        })
-        print(f"  Added {_event} hook")
-    else:
-        print(f"  {_event} hook already present")
-
-# Permission for engram CLI.
-perms = settings.setdefault("permissions", {}).setdefault("allow", [])
-if "Bash(engram *)" not in perms:
-    perms.append("Bash(engram *)")
-    print("  Added Bash(engram *) permission")
-else:
-    print("  Bash(engram *) permission already present")
-
-settings_path.write_text(json.dumps(settings, indent=2) + "\n")
-print("  Settings saved")
-PYEOF
-echo ""
-
-# 3. Symlink skills.
-echo "3. Symlinking skills..."
-mkdir -p "$SKILLS_DIR"
-for skill in engram-remember engram-forget engram-recall; do
-    target="$REPO_DIR/skills/$skill"
-    link="$SKILLS_DIR/$skill"
-    # ln -sfn also re-points a stale symlink left by an older checkout.
-    if [ -L "$link" ] || [ ! -e "$link" ]; then
-        ln -sfn "$target" "$link"
-        echo "  Linked $skill"
-    else
-        echo "  $skill exists as a real (non-symlink) path — left untouched"
-    fi
+# 2. Per-harness setup, dispatched on the selected targets + engine.
+echo "2. Configuring targets (${TARGETS[*]}) and engine ($ENGINE)..."
+for t in "${TARGETS[@]}"; do
+    bash "$REPO_DIR/install/targets/$t.sh" install
 done
+bash "$REPO_DIR/install/engines/$ENGINE.sh" install
 echo ""
 
-# 4. Initialize DB + verify the wiring. Opening the DB runs the migrations;
+# 3. Initialize DB + verify the wiring. Opening the DB runs the migrations;
 #    doctor then re-checks the hook wiring, PATH, claude version, and DB.
-echo "4. Initializing database + verifying wiring..."
+echo "3. Initializing database + verifying wiring..."
+# Migration MUST precede anything that creates $DB_DIR (including the engine
+# persistence below): migrate_legacy_home only moves the legacy home when the
+# new one does not exist yet.
 migrate_legacy_home
 mkdir -p "$DB_DIR"
+# Persist the engine choice where launchd/cron's minimal env still finds it
+# (engine selection precedence: $ENGRAM_ENGINE -> config.json -> default).
+mkdir -p "$DB_DIR"
+python3 - "$DB_DIR/config.json" "$ENGINE" << 'PYCONF'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+try:
+    cfg = json.loads(path.read_text())
+except (OSError, ValueError):
+    cfg = {}
+cfg["engine"] = sys.argv[2]
+path.write_text(json.dumps(cfg, indent=2) + "\n")
+print(f"  Engine '{sys.argv[2]}' recorded in {path}")
+PYCONF
 if ! engram doctor; then
     echo ""
     echo "ERROR: 'engram doctor' reported failures above — fix them and re-run this script."
@@ -404,8 +267,8 @@ fi
 echo "  Database ready at $DB_DIR/db.sqlite"
 echo ""
 
-# 5. Optional: install nightly consolidation schedule.
-echo "5. Nightly consolidation schedule"
+# 4. Optional: install nightly consolidation schedule.
+echo "4. Nightly consolidation schedule"
 echo "   The consolidation agent reviews yesterday's sessions at 8 AM."
 OS="$(uname -s)"
 case "$OS" in

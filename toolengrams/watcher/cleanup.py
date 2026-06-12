@@ -38,7 +38,7 @@ import time
 from pathlib import Path
 
 from .. import db
-from ..consolidation.collect import CLAUDE_PROJECTS_DIR, _is_internal_project
+from ..target.claude_code.collect import CLAUDE_PROJECTS_DIR, _is_internal_project
 from ..utils import WATCHER_CHILD_ENV
 from . import state
 from .agent import _sandbox_root

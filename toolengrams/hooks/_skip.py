@@ -6,10 +6,6 @@
     consolidation agent's own transcript gets watched, which caused big
     irrelevant transcripts to hit the 60s watcher-model timeout.
 
-  - `WHITELIST` is the set of tool names whose calls carry user-facing memory
-    bindings — shared by pretool.py and post_tool_failure.py so we never
-    drift on which tools surface memories.
-
   - `max_memories_per_call()` returns the per-call cap on injected memories.
     Char-bounded truncation downstream still kicks in, but a hard count cap
     prevents a noisy first-token bucket from spraying Claude's context.
@@ -21,13 +17,6 @@
 from __future__ import annotations
 
 import os
-
-# Tools whose pre/post-failure events trigger memory surfacing. New tools
-# added to Claude Code that should bind memories go here, not in two places.
-WHITELIST: frozenset[str] = frozenset({
-    "Bash", "Read", "Edit", "Write", "MultiEdit", "Grep", "Glob",
-    "WebFetch", "NotebookEdit",
-})
 
 DEFAULT_MAX_MEMORIES_PER_CALL = 2
 # Hard ceiling defends against typo overrides like ENGRAM_MAX_MEMORIES_PER_CALL=200

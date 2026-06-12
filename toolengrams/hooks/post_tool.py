@@ -25,17 +25,17 @@ import time
 from typing import Any
 
 from .. import db, pause
-from ..retrieval.extract import extract_hints
 from ..retrieval.session_state import (
     get_prior_failure_surfaces,
     increment_session_turn,
 )
+from ..target import get_target
 from ..utils import is_watcher_child
-from ..watcher import derive_transcript_path, tick
+from ..watcher import tick
 from ._skip import is_internal_cwd
 
 
-def main() -> int:
+def main(target_name: str = "claude-code") -> int:
     if pause.is_disabled():
         _emit({})
         return 0
@@ -47,14 +47,14 @@ def main() -> int:
         return 0
 
     try:
-        return _run(payload)
+        return _run(payload, get_target(target_name))
     except Exception as e:  # pragma: no cover
         print(f"engram post-tool: unexpected error: {e}", file=sys.stderr)
         _emit({})
         return 0
 
 
-def _run(payload: dict[str, Any]) -> int:
+def _run(payload: dict[str, Any], target) -> int:
     # A watcher session's own tool calls must not count turns or fire ticks.
     if is_watcher_child():
         _emit({})
@@ -62,7 +62,7 @@ def _run(payload: dict[str, Any]) -> int:
 
     tool_use_id = payload.get("tool_use_id") or ""
     session_id = payload.get("session_id") or ""
-    is_error = _detect_error(payload)
+    is_error = target.detect_failure(payload)
 
     if not tool_use_id or not session_id:
         _emit({})
@@ -78,7 +78,7 @@ def _run(payload: dict[str, Any]) -> int:
             # tick. Non-whitelisted tools yield empty hint.tokens, so the
             # `if first_token` short-circuits naturally.
             tool_name = payload.get("tool_name") or ""
-            hint = extract_hints(tool_name, payload.get("tool_input") or {})
+            hint = target.extract_hints(tool_name, payload.get("tool_input") or {})
             first_token = hint.tokens[0] if hint.tokens else None
             if first_token and get_prior_failure_surfaces(conn, session_id, first_token):
                 recovered = True
@@ -94,30 +94,12 @@ def _run(payload: dict[str, Any]) -> int:
     if recovered and not is_watcher_child():
         cwd = payload.get("cwd") or ""
         if cwd and not is_internal_cwd(cwd):
-            tpath = payload.get("transcript_path") or derive_transcript_path(session_id, cwd)
-            tick.trigger(session_id, tpath, cwd, reason="recovery")
-            tick.trigger_eval(session_id, tpath, cwd, reason="recovery")
+            tpath = target.transcript_path(payload)
+            tick.trigger(session_id, tpath, cwd, reason="recovery", target=target.NAME)
+            tick.trigger_eval(session_id, tpath, cwd, reason="recovery", target=target.NAME)
 
     _emit({})
     return 0
-
-
-def _detect_error(payload: dict[str, Any]) -> bool:
-    """Determine if the tool call failed.
-
-    Claude Code provides is_error directly in some cases. For Bash, we also
-    check for non-zero exit codes or stderr markers in the response.
-    """
-    if payload.get("is_error"):
-        return True
-
-    response = payload.get("tool_response") or ""
-    if isinstance(response, str):
-        # Claude Code wraps Bash errors in an <error> tag or prefixes with "Exit code"
-        if response.startswith("<error>") or "Exit code" in response[:50]:
-            return True
-
-    return False
 
 
 def _emit(obj: dict) -> None:

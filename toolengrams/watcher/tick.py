@@ -55,7 +55,9 @@ from .agent import (
 )
 from .log import _log, log_path
 from .state import ensure_row
-from .transcript_format import _format_delta, _read_lines_from
+from ..engine import get_engine
+from ..target import TARGETS, get_target
+from .transcript_io import _read_lines_from
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 PYTHON_BIN = sys.executable
@@ -121,12 +123,13 @@ def _idle_sweep_sec() -> int:
 # ---------- hook-side helpers (cheap; run inside the hook process) ----------
 
 
-def arm(session_id: str, transcript_path: str = "", cwd: str = "") -> None:
+def arm(session_id: str, transcript_path: str = "", cwd: str = "",
+        target: str = "claude-code") -> None:
     """Mark the formation role 'armed' (a tool failure happened). The next turn-
     boundary formation tick runs the model even if that turn had no tool_use
     lines, so an error→fix episode is never gated out."""
     if transcript_path:
-        ensure_row(session_id, transcript_path, cwd, role="formation")
+        ensure_row(session_id, transcript_path, cwd, role="formation", target=target)
     state.arm(session_id, role="formation")
 
 
@@ -139,16 +142,19 @@ def should_spawn(session_id: str, flush: bool, role: str = "formation") -> bool:
 
 
 def spawn_tick(session_id: str, transcript_path: str, cwd: str,
-               flush: bool = False, role: str = "formation") -> None:
+               flush: bool = False, role: str = "formation",
+               target: str = "claude-code") -> None:
     """Fire-and-forget a detached `engram watcher-tick`. Returns immediately so
     the hook never blocks the user. ENGRAM_IN_WATCHER guards against the tick's
-    own `claude` recursively triggering more ticks."""
+    own engine session recursively triggering more ticks. `target` rides the
+    argv so the detached process knows which transcript format to parse."""
     try:
         env = os.environ.copy()
         env["PYTHONPATH"] = str(REPO_ROOT)
         env[WATCHER_CHILD_ENV] = "1"
         argv = [PYTHON_BIN, "-m", "toolengrams", "watcher-tick",
-                session_id, transcript_path, cwd, "--role", role]
+                session_id, transcript_path, cwd, "--role", role,
+                "--target", target]
         if flush:
             argv.append("--flush")
         subprocess.Popen(
@@ -161,18 +167,20 @@ def spawn_tick(session_id: str, transcript_path: str, cwd: str,
 
 
 def trigger(session_id: str, transcript_path: str, cwd: str,
-            reason: str, flush: bool = False) -> None:
+            reason: str, flush: bool = False, target: str = "claude-code") -> None:
     """Hook convenience: coalesce-gate then spawn a detached FORMATION tick."""
     if not session_id or not transcript_path:
         return
     if should_spawn(session_id, flush, role="formation"):
-        spawn_tick(session_id, transcript_path, cwd, flush=flush, role="formation")
+        spawn_tick(session_id, transcript_path, cwd, flush=flush, role="formation",
+                   target=target)
     else:
         _log(f"TICK-COALESCED session={session_id} role=formation reason={reason}")
 
 
 def trigger_eval(session_id: str, transcript_path: str, cwd: str,
-                 reason: str, flush: bool = False) -> None:
+                 reason: str, flush: bool = False,
+                 target: str = "claude-code") -> None:
     """Hook convenience: spawn an EVAL tick, but only when the session has
     pending (unjudged) surfaces — most turns surface nothing, so this bounds eval
     cost to the turns that need it. Then coalesce-gate (eval role) and spawn."""
@@ -185,7 +193,8 @@ def trigger_eval(session_id: str, transcript_path: str, cwd: str,
     except Exception:
         return
     if should_spawn(session_id, flush, role="eval"):
-        spawn_tick(session_id, transcript_path, cwd, flush=flush, role="eval")
+        spawn_tick(session_id, transcript_path, cwd, flush=flush, role="eval",
+                   target=target)
     else:
         _log(f"TICK-COALESCED session={session_id} role=eval reason={reason}")
 
@@ -199,8 +208,10 @@ def sweep_idle_sessions(current_session_id: str) -> int:
     idle = state.sweep_idle(_idle_sweep_sec(), exclude_session_id=current_session_id,
                             limit=MAX_SWEEP_SPAWN)
     for s in idle:
-        spawn_tick(s.session_id, s.transcript_path, s.cwd, flush=True, role="formation")
-        trigger_eval(s.session_id, s.transcript_path, s.cwd, reason="idle-sweep", flush=True)
+        spawn_tick(s.session_id, s.transcript_path, s.cwd, flush=True,
+                   role="formation", target=s.target)
+        trigger_eval(s.session_id, s.transcript_path, s.cwd, reason="idle-sweep",
+                     flush=True, target=s.target)
     if idle:
         capped = " (capped — more recover at the next SessionStart)" \
             if len(idle) >= MAX_SWEEP_SPAWN else ""
@@ -263,7 +274,7 @@ PRIOR_TAIL_MAX_CHARS = 4000
 
 def _formation_decision(session_id: str, cwd: str, delta: str, n_lines: int,
                         flush: bool, armed: bool, transcript_path: str = "",
-                        cursor: int = 0) -> _Decision:
+                        cursor: int = 0, target: str = "claude-code") -> _Decision:
     """Gate a formation window: a pure-chat turn with nothing armed isn't worth a
     model call (advance past it). Otherwise build the fresh-tick formation
     message: full prompt + this session's prior saves + prior-delta tail."""
@@ -275,7 +286,7 @@ def _formation_decision(session_id: str, cwd: str, delta: str, n_lines: int,
         return _Decision(skip=True, advance=True, log=log)
     message = (build_watcher_prompt(cwd)
                + _session_saves_section(session_id)
-               + _prior_tail_section(session_id, transcript_path, cursor)
+               + _prior_tail_section(session_id, transcript_path, cursor, target)
                + _ACTIVITY_POINTER)
     return _Decision(skip=False, message=message, delta=delta)
 
@@ -299,7 +310,8 @@ def _session_saves_section(session_id: str) -> str:
     return "\n".join(lines)
 
 
-def _prior_tail_section(session_id: str, transcript_path: str, cursor: int) -> str:
+def _prior_tail_section(session_id: str, transcript_path: str, cursor: int,
+                        target: str = "claude-code") -> str:
     """Tail of the previous 1-2 delta windows, re-read from the work transcript
     via the run log's cursor spans — bounded cross-delta context so an episode
     spanning two windows (failure last tick, fix this tick) still assembles."""
@@ -311,7 +323,7 @@ def _prior_tail_section(session_id: str, transcript_path: str, cursor: int) -> s
         if start is None or start >= cursor:
             return ""
         lines = _read_lines_from(transcript_path, start)[: cursor - start]
-        tail = _format_delta(lines)
+        tail = get_target(target).format_delta(lines)
     except Exception:
         return ""
     if not tail.strip():
@@ -328,7 +340,9 @@ def _prior_tail_section(session_id: str, transcript_path: str, cursor: int) -> s
 
 def _eval_decision(session_id: str, cwd: str, delta: str, n_lines: int,
                    flush: bool, armed: bool, transcript_path: str = "",
-                   cursor: int = 0) -> _Decision:
+                   cursor: int = 0, target: str = "claude-code") -> _Decision:
+    # `target` is unused here (eval reads the already-formatted delta) but kept
+    # for the uniform _DECIDERS signature.
     """Decide an eval window. Run only when surfaces are pending; with pending
     surfaces but no new evidence (and not a flush), DEFER (hold the cursor)."""
     with db.session() as conn:
@@ -383,7 +397,7 @@ def _open_run(session_id: str, role: str, cwd: str, flush: bool,
             return runs_store.start_run(
                 conn, work_session_id=session_id, role=role, pid=os.getpid(),
                 started_ts=int(time.time()), model=_watcher_model(role), flush=flush,
-                cursor_from=cursor_from, cwd=cwd,
+                cursor_from=cursor_from, cwd=cwd, engine=get_engine().NAME,
             )
     except Exception:
         return None
@@ -413,11 +427,17 @@ def _close_run(run_id: int | None, result: SessionResult, *, ok: bool,
 
 
 def run_tick(session_id: str, transcript_path: str, cwd: str,
-             role: str = "formation", flush: bool = False) -> int:
+             role: str = "formation", flush: bool = False,
+             target: str = "claude-code") -> int:
     """One event-driven tick for (session, role). See module docstring."""
     if not engine_available() or not session_id or role not in _DECIDERS:
         return 0
-    ensure_row(session_id, transcript_path, cwd, role)
+    if target not in TARGETS:
+        # get_target degrades to claude-code below; spawn_tick sends stderr to
+        # DEVNULL, so the watcher log is the only place this is diagnosable.
+        _log(f"TICK-UNKNOWN-TARGET session={session_id} target={target!r} "
+             "— parsing as claude-code")
+    ensure_row(session_id, transcript_path, cwd, role, target)
 
     with _tick_lock(session_id, role) as got:
         if not got:
@@ -437,11 +457,11 @@ def run_tick(session_id: str, transcript_path: str, cwd: str,
         fail_streak = st.fail_streak
 
         new_lines = _read_lines_from(transcript_path, last_line)
-        delta = _format_delta(new_lines) if new_lines else ""
+        delta = get_target(target).format_delta(new_lines) if new_lines else ""
 
         decision = _DECIDERS[role](
             session_id, cwd, delta, len(new_lines), flush, st.armed,
-            transcript_path, last_line,
+            transcript_path, last_line, target,
         )
         if decision.skip:
             advance = len(new_lines) if decision.advance else 0
@@ -498,13 +518,18 @@ def main(argv: list[str] | None = None) -> int:
         i = argv.index("--role")
         if i + 1 < len(argv):
             role = argv[i + 1]
+    target = "claude-code"
+    if "--target" in argv:
+        i = argv.index("--target")
+        if i + 1 < len(argv):
+            target = argv[i + 1]
     pos = []
     skip_next = False
     for j, a in enumerate(argv):
         if skip_next:
             skip_next = False
             continue
-        if a == "--role":
+        if a in ("--role", "--target"):
             skip_next = True
             continue
         if a.startswith("--"):
@@ -512,10 +537,12 @@ def main(argv: list[str] | None = None) -> int:
         pos.append(a)
     if len(pos) < 3:
         print("Usage: engram watcher-tick <session_id> <transcript_path> <cwd> "
-              "[--flush] [--role formation|eval]", file=sys.stderr)
+              "[--flush] [--role formation|eval] [--target <harness>]",
+              file=sys.stderr)
         return 1
     try:
-        return run_tick(pos[0], pos[1], pos[2], role=role, flush=flush)
+        return run_tick(pos[0], pos[1], pos[2], role=role, flush=flush,
+                        target=target)
     except Exception as e:  # pragma: no cover - tick must never crash loudly
-        _log(f"TICK-CRASH session={pos[0]} role={role} error={e}")
+        _log(f"TICK-CRASH session={pos[0]} role={role} target={target} error={e}")
         return 0

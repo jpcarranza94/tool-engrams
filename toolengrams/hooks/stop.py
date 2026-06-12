@@ -16,12 +16,13 @@ import sys
 from typing import Any
 
 from .. import pause
+from ..target import get_target
 from ..utils import is_watcher_child
-from ..watcher import derive_transcript_path, tick
+from ..watcher import tick
 from ._skip import is_internal_cwd
 
 
-def main() -> int:
+def main(target_name: str = "claude-code") -> int:
     if pause.is_disabled():
         _emit({})
         return 0
@@ -31,14 +32,14 @@ def main() -> int:
         _emit({})
         return 0
     try:
-        _maybe_tick(payload)
+        _maybe_tick(payload, get_target(target_name))
     except Exception:
         pass
     _emit({})
     return 0
 
 
-def _maybe_tick(payload: dict[str, Any]) -> None:
+def _maybe_tick(payload: dict[str, Any], target) -> None:
     # A watcher-launched `claude` must never trigger watcher ticks (recursion).
     if is_watcher_child():
         return
@@ -46,12 +47,12 @@ def _maybe_tick(payload: dict[str, Any]) -> None:
     cwd = payload.get("cwd") or ""
     if not session_id or not cwd or is_internal_cwd(cwd):
         return
-    transcript_path = payload.get("transcript_path") or derive_transcript_path(session_id, cwd)
-    tick.ensure_row(session_id, transcript_path, cwd)
-    tick.trigger(session_id, transcript_path, cwd, reason="stop")
+    transcript_path = target.transcript_path(payload)
+    tick.ensure_row(session_id, transcript_path, cwd, target=target.NAME)
+    tick.trigger(session_id, transcript_path, cwd, reason="stop", target=target.NAME)
     # Also judge surfaced memories from earlier in the session, if any are
     # pending (self-gated inside trigger_eval).
-    tick.trigger_eval(session_id, transcript_path, cwd, reason="stop")
+    tick.trigger_eval(session_id, transcript_path, cwd, reason="stop", target=target.NAME)
 
 
 def _emit(obj: dict[str, Any]) -> None:

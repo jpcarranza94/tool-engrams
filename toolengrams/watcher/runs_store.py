@@ -40,16 +40,17 @@ def start_run(
     flush: bool,
     cursor_from: int,
     cwd: str | None,
+    engine: str | None = None,
 ) -> int:
     """Insert a `running` run row, return its id. The caller commits (autocommit
     `db.session`) before spawning claude so the child can reference the id."""
     cur = conn.execute(
         "INSERT INTO watcher_runs "
         "(work_session_id, role, status, pid, started_ts, model, flush, "
-        " cursor_from, cwd) "
-        "VALUES (?, ?, 'running', ?, ?, ?, ?, ?, ?)",
+        " cursor_from, cwd, engine) "
+        "VALUES (?, ?, 'running', ?, ?, ?, ?, ?, ?, ?)",
         (work_session_id, role, pid, started_ts, model, 1 if flush else 0,
-         cursor_from, cwd),
+         cursor_from, cwd, engine),
     )
     return int(cur.lastrowid)
 

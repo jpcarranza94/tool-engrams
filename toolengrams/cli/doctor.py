@@ -24,27 +24,19 @@ from pathlib import Path
 
 from .. import db, memory_store, paths, pause
 from ..engine import selection as engine_selection
+from ..target import claude_code as claude_target
 from ..retrieval.session_state import last_activity_ts
 from ..watcher import state as watcher_state
 
-MIN_CLAUDE = "2.1.117"  # needs the PostToolUseFailure hook event
+MIN_CLAUDE = claude_target.min_version  # needs the PostToolUseFailure hook event
 
 PASS = "PASS"
 WARN = "WARN"
 FAIL = "FAIL"
 
-# Hook event -> the exact command install.sh wires for it. Doctor checks the
-# same markers the uninstaller keys on, so the three stay in lockstep.
-HOOK_MARKERS = {
-    "SessionStart": "engram session-start",
-    "UserPromptSubmit": "engram user-prompt",
-    "PreToolUse": "engram pretool",
-    "PostToolUse": "engram post-tool",
-    "PostToolUseFailure": "engram post-tool-failure",
-    "Stop": "engram stop",
-    "SessionEnd": "engram flush",
-    "PreCompact": "engram flush",
-}
+# Hook event -> the command marker install.sh wires for it — owned by the
+# target adapter so doctor, installer, and uninstaller stay in lockstep.
+HOOK_MARKERS = claude_target.hook_markers()
 
 ENGRAM_PERMISSION = "Bash(engram *)"
 

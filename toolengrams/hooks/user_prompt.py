@@ -19,7 +19,8 @@ from typing import Any
 
 from .. import pause
 from ..utils import is_watcher_child
-from ..watcher import derive_transcript_path, tick
+from ..target import get_target
+from ..watcher import tick
 from ._skip import is_internal_cwd
 
 # Lowercase cues that suggest the user is correcting the prior turn. Kept fairly
@@ -34,7 +35,7 @@ _CORRECTION_CUES = (
 _MAX_CORRECTION_LEN = 280
 
 
-def main() -> int:
+def main(target_name: str = "claude-code") -> int:
     if pause.is_disabled():
         _emit({})
         return 0
@@ -44,7 +45,7 @@ def main() -> int:
         _emit({})
         return 0
     try:
-        _maybe_tick_on_correction(payload)
+        _maybe_tick_on_correction(payload, get_target(target_name))
     except Exception:
         pass
     _emit({})
@@ -58,7 +59,7 @@ def _looks_like_correction(prompt: str) -> bool:
     return any(cue in text for cue in _CORRECTION_CUES)
 
 
-def _maybe_tick_on_correction(payload: dict[str, Any]) -> None:
+def _maybe_tick_on_correction(payload: dict[str, Any], target) -> None:
     # A watcher-launched `claude` must never trigger watcher ticks (recursion).
     if is_watcher_child():
         return
@@ -66,10 +67,11 @@ def _maybe_tick_on_correction(payload: dict[str, Any]) -> None:
     cwd = payload.get("cwd") or ""
     if not session_id or not cwd or is_internal_cwd(cwd):
         return
-    transcript_path = payload.get("transcript_path") or derive_transcript_path(session_id, cwd)
-    tick.ensure_row(session_id, transcript_path, cwd)
+    transcript_path = target.transcript_path(payload)
+    tick.ensure_row(session_id, transcript_path, cwd, target=target.NAME)
     if _looks_like_correction(payload.get("prompt", "")):
-        tick.trigger(session_id, transcript_path, cwd, reason="user-correction")
+        tick.trigger(session_id, transcript_path, cwd, reason="user-correction",
+                     target=target.NAME)
 
 
 def _emit(obj: dict[str, Any]) -> None:

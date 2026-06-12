@@ -64,7 +64,7 @@ ROLE_ALLOWED_VERBS: dict[str, str] = {
 
 # Sandbox-dir prefix per role — must stay in sync with
 # hooks/_skip._INTERNAL_CWD_PREFIXES (recursion guard) and
-# consolidation/collect._INTERNAL_PROJECT_RE (keeps watcher transcripts out of
+# target/claude_code/collect._INTERNAL_PROJECT_RE (keeps watcher transcripts out of
 # the nightly review).
 _WORKDIR_PREFIX = {"formation": "engram-formation-", "eval": "engram-eval-"}
 

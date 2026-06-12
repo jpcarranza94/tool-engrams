@@ -248,7 +248,7 @@ toolengrams/
     ├── tick.py                role-dispatched tick engine + coalesce + idle-sweep
     ├── agent.py               permissioned per-role `claude -p` session runner
     ├── state.py               watcher_state seam, keyed (work_session_id, role)
-    ├── transcript_format.py   JSONL → readable delta
+    ├── transcript_io.py   JSONL → readable delta
     └── log.py                 shared log sink
 ```
 
@@ -457,7 +457,7 @@ e2e stays local.
 ## Uninstall
 
 ```bash
-./install.sh --uninstall              # removes hooks, permission, skill symlinks
+./install.sh --uninstall              # removes hooks, permission, skill symlinks (all targets)
 rm -rf ~/.tool-engrams/               # only if you also want the memories gone
 rm -f ~/.claude/tool-engrams          # ...plus the compatibility symlink migration left
 pip uninstall toolengrams             # venv-fallback installs instead:

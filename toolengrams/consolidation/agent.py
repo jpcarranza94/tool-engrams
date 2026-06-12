@@ -23,7 +23,7 @@ from ..retrieval import session_state
 from ..watcher import runs_store
 from ..reinforcement.scoring import q
 from ..utils import prepend_engram_bin
-from .collect import SessionFile
+from ..target.interface import SessionFile
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 

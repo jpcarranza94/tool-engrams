@@ -10,7 +10,7 @@ from typing import Iterator
 
 from . import paths
 
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 SCHEMA_PATH = Path(__file__).parent / "schema.sql"
 MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 
