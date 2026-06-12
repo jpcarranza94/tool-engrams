@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .. import memory_store
-from ..claude_invoke import invoke_claude_agent, parse_claude_json_output, write_agent_settings
+from ..engine import EngineRequest, SandboxSpec, get_engine
 from ..prompts.consolidation import build_consolidation_prompt
 from ..retrieval import session_state
 from ..watcher import runs_store
@@ -34,15 +34,6 @@ MAX_SINGLE_SESSION_BYTES = 5 * 1024 * 1024  # 5 MB per session — skip giants
 
 # Per-run wall-clock budget for the consolidation agent's `claude -p`.
 CONSOLIDATION_TIMEOUT_SEC = 1800  # 30 minutes
-
-
-def _find_claude() -> str | None:
-    """Resolve claude binary at call time, not import time.
-
-    Module-level shutil.which() fails when the module is imported before
-    PATH is fully set (launchd's minimal environment).
-    """
-    return shutil.which("claude")
 
 
 def _get_memory_summary(db_path: Path) -> str:
@@ -131,11 +122,11 @@ def run_consolidation_agent(
     target_date: str,
 ) -> AgentResult:
     """Spawn an Opus agent to review today's sessions and consolidate memories."""
-    claude_bin = _find_claude()
-    if not claude_bin:
+    engine = get_engine()
+    if not engine.is_available():
         return AgentResult(
             report="", returncode=1,
-            error="claude CLI not found on PATH",
+            error=f"{engine.NAME} CLI not found on PATH",
         )
 
     if not sessions:
@@ -147,15 +138,14 @@ def run_consolidation_agent(
     # Build the agent's working environment.
     work_dir = tempfile.mkdtemp(prefix="engram-consolidate-")
     work_path = Path(work_dir)
-    write_agent_settings(work_path, [
-        "Read", "Grep", "Glob",
-        "Bash(engram *)", "Bash(sqlite3 *)",
-        "Bash(wc *)", "Bash(head *)", "Bash(cat *)", "Bash(ls *)",
-        # Read-only git inspection so the agent can compare memory bodies
-        # against current repo state (Task 5 — git-aware staleness audit).
-        "Bash(git log *)", "Bash(git diff *)", "Bash(git show *)",
-        "Bash(git -C *)", "Bash(git rev-parse *)",
-    ])
+    # `readonly_explore` carries the broad inspection surface (file tools,
+    # sqlite3/wc/head/cat/ls, read-only git for the staleness audit); the one
+    # command prefix is the full engram verb set — consolidation is the only
+    # agent trusted with it.
+    engine.prepare_sandbox(work_path, SandboxSpec(
+        command_prefixes=("engram",),
+        readonly_explore=True,
+    ))
 
     # Build the prompt.
     memory_summary = _get_memory_summary(db_path)
@@ -168,14 +158,14 @@ def run_consolidation_agent(
     env = prepend_engram_bin(os.environ.copy())
     env["ENGRAM_DB"] = str(db_path)
 
-    # invoke_claude_agent never raises — process failures come back on the result.
-    result = invoke_claude_agent(
-        prompt,
+    # engine.invoke never raises — process failures come back on the result.
+    result = engine.invoke(EngineRequest(
+        prompt=prompt,
         timeout=CONSOLIDATION_TIMEOUT_SEC,
+        role="consolidation",
         cwd=work_dir,
         env=env,
-        claude_bin=claude_bin,
-    )
+    ))
     # Clean up temp dir (settings only, no important state).
     shutil.rmtree(work_dir, ignore_errors=True)
 
@@ -188,7 +178,7 @@ def run_consolidation_agent(
         return AgentResult(report="", returncode=1, error=f"Failed to spawn agent: {result.error}")
 
     # Extract the agent's response.
-    report = parse_claude_json_output(result.stdout)
+    report = result.text
     if not report:
         report = result.stdout[:5000] if result.stdout else ""
 

@@ -1,6 +1,7 @@
-"""Per-run cost + token capture: the claude -p JSON envelope's total_cost_usd
-and usage land on the SessionResult, flow through the tick onto the
-watcher_runs row, and aggregate into the monitor's 24h spend counters."""
+"""Per-run cost + token capture: the engine's accounting lands on the
+SessionResult, flows through the tick onto the watcher_runs row, and
+aggregates into the monitor's 24h spend counters. (Envelope→EngineResult
+parsing itself is pinned in test_engine_claude_code.py.)"""
 
 from __future__ import annotations
 
@@ -8,21 +9,15 @@ import json
 import time
 
 from toolengrams import db
-from toolengrams.claude_invoke import ClaudeResult
 from toolengrams.cli import monitor
+from toolengrams.engine import EngineResult
 from toolengrams.watcher import SessionResult, agent, log as wlog, runs_store, tick
 
-ENVELOPE = json.dumps({
-    "session_id": "w1",
-    "result": "ok",
-    "total_cost_usd": 0.0231,
-    "usage": {
-        "input_tokens": 1200,
-        "output_tokens": 350,
-        "cache_read_input_tokens": 9000,
-        "cache_creation_input_tokens": 400,
-    },
-})
+from .conftest import make_fake_engine
+
+COSTED = EngineResult(ok=True, engine="claude-code",
+                      cost_usd=0.0231, input_tokens=1200, output_tokens=350,
+                      cache_read_tokens=9000, cache_creation_tokens=400)
 
 
 def _bash_line(cmd: str) -> str:
@@ -34,12 +29,10 @@ def _bash_line(cmd: str) -> str:
     }) + "\n"
 
 
-def test_session_result_carries_cost_from_envelope(tmp_path, monkeypatch):
+def test_session_result_carries_cost_from_engine(tmp_path, monkeypatch):
     monkeypatch.setattr(agent, "_sandbox_root", lambda: tmp_path)
-    monkeypatch.setattr(agent, "invoke_claude_agent",
-                        lambda message, **kw: ClaudeResult(stdout=ENVELOPE,
-                                                           returncode=0))
-    monkeypatch.setattr(agent, "CLAUDE_BIN", "/usr/bin/claude")
+    monkeypatch.setattr(agent, "get_engine",
+                        lambda: make_fake_engine(lambda req: COSTED))
 
     r = agent.run_watcher_session("formation", "p",
                                   work_session_id="s1", delta="x")
@@ -53,12 +46,11 @@ def test_session_result_carries_cost_from_envelope(tmp_path, monkeypatch):
 
 
 def test_failed_call_has_no_cost(tmp_path, monkeypatch):
-    """No envelope on failure — cost/token fields stay None, never 0."""
+    """No accounting on failure — cost/token fields stay None, never 0."""
     monkeypatch.setattr(agent, "_sandbox_root", lambda: tmp_path)
-    monkeypatch.setattr(agent, "invoke_claude_agent",
-                        lambda message, **kw: ClaudeResult(stdout="", returncode=1,
-                                                           error="exit 1: boom"))
-    monkeypatch.setattr(agent, "CLAUDE_BIN", "/usr/bin/claude")
+    monkeypatch.setattr(agent, "get_engine", lambda: make_fake_engine(
+        lambda req: EngineResult(ok=False, engine="claude-code",
+                                 returncode=1, error="exit 1: boom")))
 
     r = agent.run_watcher_session("formation", "p",
                                   work_session_id="s1", delta="x")
@@ -77,7 +69,7 @@ def test_tick_persists_cost_on_run_row(temp_db, tmp_path, monkeypatch):
                              output_tokens=350, cache_read_tokens=9000,
                              cache_creation_tokens=400)
 
-    monkeypatch.setattr(tick, "CLAUDE_BIN", "claude")
+    monkeypatch.setattr(tick, "engine_available", lambda: True)
     monkeypatch.setattr(tick, "log_path", lambda: tmp_path / "watcher.log")
     monkeypatch.setattr(wlog, "log_path", lambda: tmp_path / "watcher.log")
     monkeypatch.setattr(tick, "run_watcher_session", runner)
