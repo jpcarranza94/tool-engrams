@@ -3,7 +3,7 @@ dispatch (see __main__._verb_guard)."""
 
 from __future__ import annotations
 
-from toolengrams.__main__ import _verb_guard
+from toolengrams.__main__ import _verb_guard, main
 
 
 def test_no_env_means_no_guard(monkeypatch):
@@ -36,6 +36,14 @@ def test_hook_commands_always_pass(monkeypatch):
     for cmd in ("pretool", "session-start", "post-tool", "post-tool-failure",
                 "user-prompt", "stop", "flush"):
         assert _verb_guard([cmd]) is None
+
+
+def test_main_applies_guard_before_dispatch(monkeypatch, capsys):
+    """The guard must run before _SELF_PARSING forwarding — a denied verb
+    exits 2 without its handler (or argparse) ever running."""
+    monkeypatch.setenv("ENGRAM_ALLOWED_VERBS", "remember")
+    assert main(["forget", "anything"]) == 2
+    assert "not permitted" in capsys.readouterr().err
 
 
 def test_help_passes(monkeypatch):

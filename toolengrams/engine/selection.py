@@ -3,13 +3,14 @@
 Precedence (first hit wins):
     1. per-call `override` argument (tests, future `--engine` flags)
     2. $ENGRAM_ENGINE
-    3. the "engine" key in <engram home>/config.json (written by install.sh
-       --engine; durable where launchd/cron's minimal env loses the var)
+    3. the "engine" key in <engram home>/config.json (a durable choice that
+       survives launchd/cron's minimal env; the installer learns to write it
+       when the codex engine lands)
     4. claude-code
 
 Unknown names warn on stderr and fall back to claude-code — background work
-is fail-open like everything else; `engram doctor` reports misconfiguration
-loudly.
+is fail-open like everything else; `engram doctor`'s engine check reports
+the misconfiguration loudly (detached ticks swallow stderr).
 """
 
 from __future__ import annotations
@@ -21,14 +22,21 @@ import sys
 from .. import paths
 from ..harness_names import CLAUDE_CODE
 from . import claude_code
+from .interface import EngineAdapter
 
 ENGINES = {
     claude_code.NAME: claude_code,
 }
 
 
-def get_engine(override: str | None = None):
-    name = override or os.environ.get("ENGRAM_ENGINE") or _config_engine() or CLAUDE_CODE
+def configured_engine_name(override: str | None = None) -> str:
+    """The name selection WANTS (before the unknown-name fallback) — doctor
+    compares it against the registry to surface misconfiguration."""
+    return override or os.environ.get("ENGRAM_ENGINE") or _config_engine() or CLAUDE_CODE
+
+
+def get_engine(override: str | None = None) -> "EngineAdapter":
+    name = configured_engine_name(override)
     engine = ENGINES.get(name)
     if engine is None:
         print(f"engram: unknown engine {name!r}; falling back to {CLAUDE_CODE}",

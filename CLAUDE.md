@@ -51,7 +51,8 @@ pytest tests/e2e/ -m e2e     # E2E tests (spawns claude -p, slow)
 
 Read per tick (each tick is a fresh process), so changes apply to the next event:
 
-- `$ENGRAM_WATCHER_MODEL` — model for the watcher's `claude -p` (default `sonnet`).
+- `$ENGRAM_ENGINE` — which engine adapter runs background work (default `claude-code`; precedence: env → `<home>/config.json` → default).
+- `$ENGRAM_WATCHER_MODEL` — model for the watcher's engine call (default `sonnet`; claude-code engine).
 - `$ENGRAM_FORMATION_MODEL` / `$ENGRAM_EVAL_MODEL` — per-role model overrides; beat `$ENGRAM_WATCHER_MODEL` for their role.
 - `$ENGRAM_WATCHER_TIMEOUT` — per-call `claude -p` timeout in seconds (default `300`).
 - `$ENGRAM_TICK_COALESCE_SEC` — min seconds between ticks for one session; a burst of triggers coalesces into one model call (default `45`; flush triggers ignore it).

@@ -46,7 +46,7 @@ bad arguments, is idempotent, logs its own action).
 - Tool-calling is multi-round-trip → more tokens/latency per tick than one JSON blob.
   Acceptable for background work; bounded by per-session surface counts.
 - A tool-calling session can't be `--bare`; it needs the permissioned temp-cwd pattern
-  (`write_agent_settings` + an internal-cwd recursion guard).
+  (`write_agent_settings` — since the engine seam, `engine.prepare_sandbox` — + an internal-cwd recursion guard).
 - Observability lives in the CLI commands (the parent doesn't see a parsed result).
 - Formation gains a duplicate-memory risk under held-window retry → mitigated by
   `engram remember` deduping on name.

@@ -17,8 +17,8 @@ Module layout:
 """
 
 from . import cleanup, tick
+from ..engine.claude_code import DEFAULT_WATCHER_MODEL
 from .agent import (
-    DEFAULT_WATCHER_MODEL,
     DEFAULT_WATCHER_TIMEOUT,
     ROLE_ALLOWED_VERBS,
     ROLE_COMMAND_PREFIXES,

@@ -23,6 +23,7 @@ import time
 from pathlib import Path
 
 from .. import db, memory_store, paths, pause
+from ..engine import selection as engine_selection
 from ..retrieval.session_state import last_activity_ts
 from ..watcher import state as watcher_state
 
@@ -79,6 +80,7 @@ def run_checks() -> list[dict]:
         _check_permission(),
         _check_engram_on_path(),
         _check_claude_version(),
+        _check_engine(),
         _check_home(),
         _check_db(),
         _check_kill_switch(),
@@ -181,6 +183,24 @@ def _claude_version() -> str | None:
 
 def _version_tuple(version: str) -> tuple[int, ...]:
     return tuple(int(x) for x in version.split(".")[:3])
+
+
+def _check_engine() -> dict:
+    """The configured engine must exist in the registry and have its binary on
+    PATH. Detached ticks swallow selection's stderr fallback warning, so this
+    is where an `ENGRAM_ENGINE` typo actually surfaces."""
+    name = engine_selection.configured_engine_name()
+    engine = engine_selection.ENGINES.get(name)
+    if engine is None:
+        return _check("engine", FAIL,
+                      f"configured engine {name!r} is unknown "
+                      f"(known: {', '.join(sorted(engine_selection.ENGINES))}) — "
+                      "background work silently falls back to claude-code")
+    if not engine.is_available():
+        return _check("engine", FAIL,
+                      f"engine {name}: binary not found on PATH — "
+                      "watcher ticks and consolidation cannot run")
+    return _check("engine", PASS, f"engine: {name} (binary on PATH)")
 
 
 def _check_home() -> dict:
