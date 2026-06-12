@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from toolengrams import paths
 from toolengrams.cli import doctor
 from toolengrams.retrieval.session_state import increment_session_turn
 from toolengrams.watcher import state as watcher_state
@@ -113,6 +114,41 @@ def test_claude_unparseable_version_warns(monkeypatch):
 
 
 # ---------- liveness ----------
+
+
+@pytest.fixture
+def fake_paths(tmp_path, monkeypatch):
+    monkeypatch.delenv("ENGRAM_HOME", raising=False)
+    monkeypatch.setattr(paths, "DEFAULT_HOME", tmp_path / "default")
+    monkeypatch.setattr(paths, "LEGACY_HOME", tmp_path / "legacy")
+    return tmp_path
+
+
+def test_home_passes_fresh(fake_paths):
+    c = doctor._check_home()
+    assert c["status"] == doctor.PASS
+
+
+def test_home_warns_on_legacy_location(fake_paths):
+    (fake_paths / "legacy").mkdir()
+    c = doctor._check_home()
+    assert c["status"] == doctor.WARN
+    assert "legacy" in c["detail"]
+
+
+def test_home_warns_on_split_brain(fake_paths):
+    (fake_paths / "default").mkdir()
+    (fake_paths / "legacy").mkdir()
+    c = doctor._check_home()
+    assert c["status"] == doctor.WARN
+    assert "also exists" in c["detail"]
+
+
+def test_home_passes_after_migration_symlink(fake_paths):
+    (fake_paths / "default").mkdir()
+    (fake_paths / "legacy").symlink_to(fake_paths / "default")
+    c = doctor._check_home()
+    assert c["status"] == doctor.PASS
 
 
 def test_hook_liveness_warns_on_fresh_db(temp_db):

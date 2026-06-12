@@ -186,9 +186,16 @@ def _version_tuple(version: str) -> tuple[int, ...]:
 def _check_home() -> dict:
     home = paths.engram_home()
     if home == paths.LEGACY_HOME:
-        return _check("home", PASS,
+        return _check("home", WARN,
                       f"data home: {home} (legacy location — re-run "
-                      "./install.sh to migrate to ~/.tool-engrams)")
+                      f"./install.sh to migrate to {paths.DEFAULT_HOME})")
+    # Split-brain: resolution picked `home`, but a real (non-symlink) legacy
+    # dir still exists — old package versions write there, new ones here.
+    if paths.LEGACY_HOME.is_dir() and not paths.LEGACY_HOME.is_symlink():
+        return _check("home", WARN,
+                      f"data home: {home}, but {paths.LEGACY_HOME} also exists "
+                      "— old engram versions still write there; merge or "
+                      "remove it (or re-run ./install.sh)")
     return _check("home", PASS, f"data home: {home}")
 
 

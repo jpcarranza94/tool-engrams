@@ -43,8 +43,8 @@ def _ok(sid="w1"):
 
 def _wire(monkeypatch, tmp_path, runner):
     monkeypatch.setattr(tick, "CLAUDE_BIN", "claude")
-    monkeypatch.setattr(tick, "LOG_PATH", tmp_path / "watcher.log")   # lock dir parent
-    monkeypatch.setattr(wlog, "LOG_PATH", tmp_path / "watcher.log")   # _log sink
+    monkeypatch.setattr(tick, "log_path", lambda: tmp_path / "watcher.log")   # lock dir parent
+    monkeypatch.setattr(wlog, "log_path", lambda: tmp_path / "watcher.log")   # _log sink
     monkeypatch.setattr(tick, "run_watcher_session", runner)
 
 

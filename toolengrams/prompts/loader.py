@@ -20,7 +20,12 @@ from pathlib import Path
 from ..paths import engram_home
 
 _DEFAULTS_DIR = Path(__file__).parent / "defaults"
-_USER_OVERRIDE_DIR = engram_home() / "prompts"
+
+
+def _user_override_dir() -> Path:
+    """Resolved at call time so the whole seam shares one contract with
+    db.db_path() — no import-order surprises around $ENGRAM_HOME."""
+    return engram_home() / "prompts"
 
 
 class PromptNotFound(RuntimeError):
@@ -40,7 +45,7 @@ def resolve_prompt_path(prompt_name: str) -> Path:
         if p.is_file():
             return p
 
-    user = _USER_OVERRIDE_DIR / f"{prompt_name}.md"
+    user = _user_override_dir() / f"{prompt_name}.md"
     if user.is_file():
         return user
 

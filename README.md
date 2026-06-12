@@ -57,7 +57,7 @@ Hooks talk to Claude Code on the hot path; two background LLM roles (formation +
         │              │     └──────┬────────┘ └──────┬────────┘
         ▼              ▼            ▼                 ▼
    ┌────────────────────────────────────────────────────┐
-   │               SQLite  (~/.tool-engrams/)          │
+   │               SQLite  (~/.tool-engrams/)           │
    │  memories │ triggers │ session_surfaces │ ...      │
    └────────────────────────────────────────────────────┘
                            ▲
@@ -406,7 +406,7 @@ engram rebuild-triggers           Re-extract triggers from bodies (post-migratio
 
 | Env var | Default | Effect |
 |---|---|---|
-| `ENGRAM_HOME` | `~/.tool-engrams` | Data home (DB, watcher log, sandboxes, prompt overrides). Legacy `~/.claude/tool-engrams` still resolves until migrated |
+| `ENGRAM_HOME` | `~/.tool-engrams` | Data home (DB, watcher log, sandboxes, prompt overrides). Legacy `~/.claude/tool-engrams` still resolves until migrated. Machine-wide contract: set it everywhere (shell + launchd) or nowhere — see `docs/adr/0008` |
 | `ENGRAM_DB` | `<home>/db.sqlite` | SQLite DB path (beats `ENGRAM_HOME` for the DB file) |
 | `ENGRAM_DISABLED` | unset | `1`/`true` disables the whole system (beats the `engram pause` flag file; `0`/`false` force-enables) |
 | `ENGRAM_SURFACE_NOTICE` | unset | `1`/`true` adds a visible `ToolEngrams surfaced: …` line to the transcript whenever a memory is injected — for the post-install smoke test and surfacing debugging |
@@ -457,6 +457,7 @@ e2e stays local.
 ```bash
 ./install.sh --uninstall              # removes hooks, permission, skill symlinks
 rm -rf ~/.tool-engrams/               # only if you also want the memories gone
+rm -f ~/.claude/tool-engrams          # ...plus the compatibility symlink migration left
 pip uninstall toolengrams             # venv-fallback installs instead:
                                       #   rm -rf ~/.local/share/toolengrams/venv ~/.local/bin/engram
 ```

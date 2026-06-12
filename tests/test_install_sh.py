@@ -8,6 +8,7 @@ break silently: the set of wired hook events, and the marker-based
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -26,12 +27,95 @@ def test_install_sh_wires_all_eight_events():
         assert f'"{event}"' in text, f"install.sh no longer wires {event}"
 
 
-def test_install_sh_migrates_legacy_home():
+# ---------- home migration (behavioral: runs the real function bytes) ----------
+
+
+def _run_migration(home: Path, engram_home: str | None = None):
+    """Extract migrate_legacy_home + the real LEGACY_DIR/DB_DIR definitions
+    from install.sh and run them under a fake $HOME — the actual script
+    lines, not a copy that could drift."""
     text = INSTALL_SH.read_text()
-    assert 'LEGACY_DIR="$HOME/.claude/tool-engrams"' in text
-    assert 'DB_DIR="${ENGRAM_HOME:-$HOME/.tool-engrams}"' in text
-    assert 'mv "$LEGACY_DIR" "$DB_DIR"' in text
-    assert 'ln -s "$DB_DIR" "$LEGACY_DIR"' in text
+    fn = re.search(r"^migrate_legacy_home\(\) \{.*?^\}", text, re.S | re.M)
+    legacy_def = re.search(r'^LEGACY_DIR=.*$', text, re.M)
+    db_def = re.search(r'^DB_DIR=.*$', text, re.M)
+    assert fn and legacy_def and db_def, "install.sh migration block went missing"
+    script = "\n".join([
+        "set -euo pipefail",
+        legacy_def.group(0),
+        db_def.group(0),
+        fn.group(0),
+        "migrate_legacy_home",
+    ])
+    env = {"HOME": str(home), "PATH": "/usr/bin:/bin"}
+    if engram_home is not None:
+        env["ENGRAM_HOME"] = engram_home
+    return subprocess.run(["bash", "-c", script],
+                          capture_output=True, text=True, env=env)
+
+
+def test_migration_moves_legacy_and_symlinks_back(tmp_path):
+    legacy = tmp_path / ".claude" / "tool-engrams"
+    legacy.mkdir(parents=True)
+    (legacy / "db.sqlite").write_text("sentinel")
+
+    proc = _run_migration(tmp_path)
+
+    assert proc.returncode == 0, proc.stderr
+    new_home = tmp_path / ".tool-engrams"
+    assert (new_home / "db.sqlite").read_text() == "sentinel"
+    assert legacy.is_symlink()
+    # Both paths resolve to the same data.
+    assert (legacy / "db.sqlite").read_text() == "sentinel"
+
+
+def test_migration_is_idempotent(tmp_path):
+    legacy = tmp_path / ".claude" / "tool-engrams"
+    legacy.mkdir(parents=True)
+    (legacy / "db.sqlite").write_text("sentinel")
+
+    assert _run_migration(tmp_path).returncode == 0
+    proc = _run_migration(tmp_path)  # second run: legacy is now a symlink
+
+    assert proc.returncode == 0, proc.stderr
+    assert "Migrating" not in proc.stdout
+    assert (tmp_path / ".tool-engrams" / "db.sqlite").read_text() == "sentinel"
+
+
+def test_migration_warns_and_keeps_both_when_both_exist(tmp_path):
+    legacy = tmp_path / ".claude" / "tool-engrams"
+    legacy.mkdir(parents=True)
+    (legacy / "db.sqlite").write_text("old")
+    new_home = tmp_path / ".tool-engrams"
+    new_home.mkdir()
+    (new_home / "db.sqlite").write_text("new")
+
+    proc = _run_migration(tmp_path)
+
+    assert proc.returncode == 0, proc.stderr
+    assert "WARNING" in proc.stdout
+    assert (legacy / "db.sqlite").read_text() == "old"      # untouched
+    assert (new_home / "db.sqlite").read_text() == "new"    # untouched
+    assert not legacy.is_symlink()
+
+
+def test_migration_skipped_but_warned_when_engram_home_set(tmp_path):
+    legacy = tmp_path / ".claude" / "tool-engrams"
+    legacy.mkdir(parents=True)
+    (legacy / "db.sqlite").write_text("sentinel")
+
+    proc = _run_migration(tmp_path, engram_home=str(tmp_path / "custom"))
+
+    assert proc.returncode == 0, proc.stderr
+    assert "WARNING" in proc.stdout
+    assert "NOT be migrated" in proc.stdout
+    assert legacy.is_dir() and not legacy.is_symlink()       # data untouched
+
+
+def test_migration_noop_on_fresh_machine(tmp_path):
+    proc = _run_migration(tmp_path)
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == ""
+    assert not (tmp_path / ".tool-engrams").exists()
 
 
 def test_install_sh_rejects_unknown_flags(tmp_path):

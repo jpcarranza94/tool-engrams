@@ -18,9 +18,10 @@ PLIST_DIR = Path.home() / "Library" / "LaunchAgents"
 PLIST_PATH = PLIST_DIR / f"{PLIST_NAME}.plist"
 CRON_MARKER = "# toolengrams-consolidate"
 
-# Resolved at schedule-install time and baked into the launchd plist / cron
-# line — the scheduled job runs with a minimal env where $ENGRAM_HOME may be
-# absent, so the resolved path (not the env var) is what must persist.
+# Resolved at import time of the installing process and baked into the
+# launchd plist / cron line — the scheduled job runs with a minimal env where
+# $ENGRAM_HOME may be absent, so the resolved path (not the env var) is what
+# must persist.
 LOG_DIR = engram_home()
 
 
