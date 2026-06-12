@@ -69,6 +69,9 @@ def prepare_sandbox(work_dir: Path, spec: SandboxSpec) -> None:
     """Write .claude/settings.local.json translating the neutral spec into
     claude's allowlist grammar: command prefixes become `Bash(<prefix> *)`,
     readable paths become `Read(<path>)`."""
+    # readonly_explore is checked twice ON PURPOSE: the split preserves the
+    # historic allowlist byte order (file tools, role commands, then the
+    # explore bash surface) that the consolidation grant test pins.
     allow: list[str] = []
     if spec.readonly_explore:
         allow += _EXPLORE_ALLOW

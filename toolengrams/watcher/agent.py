@@ -1,13 +1,13 @@
-"""Watcher permissioned `claude -p` sessions: formation + evaluation.
+"""Watcher permissioned engine sessions: formation + evaluation.
 
 A watcher session does its job by CALLING the engram CLI, not by returning a
 constrained JSON schema the harness parses (see ADR-0001).
 
-Mechanics mirror the consolidation agent: a sandbox work dir with a
-`settings.local.json` that grants exactly the role's command surface, ENGRAM_DB
-in the env, and ENGRAM_IN_WATCHER set so the session's own tool calls don't
-recursively trigger engram hooks (the recursion guard). Every tick is a FRESH
-`claude -p` call (ADR-0005) — the sandbox dir stays stable per (work session,
+Mechanics mirror the consolidation agent: a sandbox work dir whose native
+engine grants cover exactly the role's command surface, ENGRAM_DB in the env,
+and ENGRAM_IN_WATCHER set so the session's own tool calls don't recursively
+trigger engram hooks (the recursion guard). Every tick is a FRESH engine
+call (ADR-0005) — the sandbox dir stays stable per (work session,
 role) only so its transcripts stay out of work projects, the recursion guard
 recognizes it, and `engram cleanup` can reap it cold. The user's real cwd is
 handed to the model in the prompt so it can pass `--project-cwd` to
@@ -31,7 +31,6 @@ from pathlib import Path
 
 from .. import db
 from ..engine import EngineRequest, SandboxSpec, get_engine
-from ..engine.claude_code import DEFAULT_WATCHER_MODEL
 from ..utils import WATCHER_CHILD_ENV, prepend_engram_bin, safe_filename_id
 
 # Per-call wall-clock budget for the watcher's `claude -p`. Tool-calling is
@@ -55,11 +54,12 @@ ROLE_COMMAND_PREFIXES: dict[str, tuple[str, ...]] = {
     "eval": ("engram judge", "engram quarantine"),
 }
 
-# The defense-in-depth twin of the prefixes above: the engram CLI itself
-# refuses any other subcommand when this env var is set (see __main__.py).
+# The defense-in-depth twin of the prefixes above, DERIVED so the two can
+# never drift: the engram CLI itself refuses any other subcommand when this
+# env var is set (see __main__.py).
 ROLE_ALLOWED_VERBS: dict[str, str] = {
-    "formation": "remember",
-    "eval": "judge,quarantine",
+    role: ",".join(p.removeprefix("engram ") for p in prefixes)
+    for role, prefixes in ROLE_COMMAND_PREFIXES.items()
 }
 
 # Sandbox-dir prefix per role — must stay in sync with

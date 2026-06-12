@@ -116,6 +116,33 @@ def test_claude_unparseable_version_warns(monkeypatch):
 # ---------- liveness ----------
 
 
+def test_engine_check_passes_when_available(monkeypatch):
+    monkeypatch.delenv("ENGRAM_ENGINE", raising=False)
+    monkeypatch.setenv("ENGRAM_HOME", "/nonexistent-engram-home")
+    monkeypatch.setattr(doctor.engine_selection.claude_code.shutil, "which",
+                        lambda name: "/bin/claude")
+    c = doctor._check_engine()
+    assert c["status"] == doctor.PASS
+    assert "claude-code" in c["detail"]
+
+
+def test_engine_check_fails_on_unknown_engine(monkeypatch):
+    monkeypatch.setenv("ENGRAM_ENGINE", "gpt-fax-machine")
+    c = doctor._check_engine()
+    assert c["status"] == doctor.FAIL
+    assert "unknown" in c["detail"]
+
+
+def test_engine_check_fails_when_binary_missing(monkeypatch):
+    monkeypatch.delenv("ENGRAM_ENGINE", raising=False)
+    monkeypatch.setenv("ENGRAM_HOME", "/nonexistent-engram-home")
+    monkeypatch.setattr(doctor.engine_selection.claude_code.shutil, "which",
+                        lambda name: None)
+    c = doctor._check_engine()
+    assert c["status"] == doctor.FAIL
+    assert "not found" in c["detail"]
+
+
 @pytest.fixture
 def fake_paths(tmp_path, monkeypatch):
     monkeypatch.delenv("ENGRAM_HOME", raising=False)

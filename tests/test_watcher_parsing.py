@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from toolengrams.watcher import (
     DEFAULT_WATCHER_MODEL,
     DEFAULT_WATCHER_TIMEOUT,
@@ -24,6 +26,14 @@ from toolengrams.watcher import (
     _watcher_model,
     _watcher_timeout,
 )
+
+
+@pytest.fixture(autouse=True)
+def _isolated_engine_home(tmp_path, monkeypatch):
+    """_watcher_model resolves through engine selection, which reads
+    <engram home>/config.json — keep unit tests off the real home."""
+    monkeypatch.setenv("ENGRAM_HOME", str(tmp_path))
+    monkeypatch.delenv("ENGRAM_ENGINE", raising=False)
 
 
 # ---------- _watcher_model ----------
