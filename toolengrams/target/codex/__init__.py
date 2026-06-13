@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from ...harness_names import CODEX
 from ...models import ExtractedTriggerHint
 from ...retrieval.extract import extract_hints as _extract_hints
 from . import collect
@@ -12,7 +13,7 @@ from .collect import collect_sessions as _collect_sessions
 from .patch_parse import paths_from_patch
 from .transcript import format_delta as _format_delta
 
-NAME = "codex"
+NAME = CODEX
 min_version = "0.137.0"
 has_failure_event = False
 
@@ -26,6 +27,21 @@ _HOOK_MARKERS = {
     "Stop": "engram stop",
     "PreCompact": "engram flush",
 }
+
+_STRING_FAILURE_MARKERS = (
+    "command not found",
+    "no such file or directory",
+    "permission denied",
+    "operation not permitted",
+    "not a git repository",
+    "fatal:",
+    "traceback (most recent call last):",
+    "apply_patch verification failed",
+    "verification failed:",
+    "failed to read file",
+    "failed to apply patch",
+    "os error ",
+)
 
 
 def extract_hints(tool_name: str, tool_input: dict) -> ExtractedTriggerHint:
@@ -62,16 +78,10 @@ def detect_failure(payload: dict) -> bool:
                 return True
         return False
     if isinstance(response, str):
-        head = response[:200]
-        return (
-            "Process exited with code 0" not in head
-            and "Exit code: 0" not in head
-            and (
-                "Process exited with code " in head
-                or "Exit code: " in head
-                or "exited with code " in head
-            )
-        )
+        # Codex Bash PostToolUse currently gives hooks only aggregated output,
+        # not status. Nonzero exits with no clear diagnostic are undetectable.
+        text = response.lower()
+        return any(marker in text for marker in _STRING_FAILURE_MARKERS)
     return False
 
 
@@ -91,17 +101,32 @@ def hook_markers() -> dict[str, str]:
     return dict(_HOOK_MARKERS)
 
 
-def is_wired() -> bool:
+def _load_hooks() -> dict | None:
     path = Path.home() / ".codex" / "hooks.json"
     try:
-        hooks = json.loads(path.read_text()).get("hooks", {})
+        return json.loads(path.read_text()).get("hooks", {})
     except (OSError, json.JSONDecodeError):
-        return False
-    for event, marker in _HOOK_MARKERS.items():
-        if not any(
-            h.get("command", "") == marker or h.get("command", "").startswith(marker + " ")
-            for entry in hooks.get(event, [])
-            for h in entry.get("hooks", [])
-        ):
-            return False
-    return True
+        return None
+
+
+def hook_status() -> dict[str, object]:
+    hooks = _load_hooks()
+    markers = hook_markers()
+    if hooks is None:
+        return {"seen": False, "missing": list(markers), "total": len(markers)}
+    missing = [event for event, marker in markers.items()
+               if not _event_has_marker(hooks, event, marker)]
+    return {"seen": bool(hooks), "missing": missing, "total": len(markers)}
+
+
+def is_wired() -> bool:
+    status = hook_status()
+    return bool(status["seen"]) and not status["missing"]
+
+
+def _event_has_marker(hooks: dict, event: str, marker: str) -> bool:
+    return any(
+        h.get("command", "") == marker or h.get("command", "").startswith(marker + " ")
+        for entry in hooks.get(event, [])
+        for h in entry.get("hooks", [])
+    )

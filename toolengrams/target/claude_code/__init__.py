@@ -101,17 +101,32 @@ def hook_markers() -> dict[str, str]:
     return dict(_HOOK_MARKERS)
 
 
-def is_wired() -> bool:
+def _load_hooks() -> dict | None:
     settings_path = Path.home() / ".claude" / "settings.json"
     try:
-        hooks = json.loads(settings_path.read_text()).get("hooks", {})
+        return json.loads(settings_path.read_text()).get("hooks", {})
     except (OSError, json.JSONDecodeError):
-        return False
-    for event, marker in _HOOK_MARKERS.items():
-        if not any(
-            h.get("command", "") == marker or h.get("command", "").startswith(marker + " ")
-            for entry in hooks.get(event, [])
-            for h in entry.get("hooks", [])
-        ):
-            return False
-    return True
+        return None
+
+
+def hook_status() -> dict[str, object]:
+    hooks = _load_hooks()
+    markers = hook_markers()
+    if hooks is None:
+        return {"seen": False, "missing": list(markers), "total": len(markers)}
+    missing = [event for event, marker in markers.items()
+               if not _event_has_marker(hooks, event, marker)]
+    return {"seen": bool(hooks), "missing": missing, "total": len(markers)}
+
+
+def is_wired() -> bool:
+    status = hook_status()
+    return bool(status["seen"]) and not status["missing"]
+
+
+def _event_has_marker(hooks: dict, event: str, marker: str) -> bool:
+    return any(
+        h.get("command", "") == marker or h.get("command", "").startswith(marker + " ")
+        for entry in hooks.get(event, [])
+        for h in entry.get("hooks", [])
+    )

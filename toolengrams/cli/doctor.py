@@ -133,34 +133,9 @@ def _check_hooks() -> dict:
 
 
 def _target_hook_status(target) -> dict:
-    if target.NAME == "codex":
-        hooks = _load_codex_hooks()
-    else:
-        settings = _load_settings()
-        hooks = None if settings is None else settings.get("hooks", {})
-    markers = target.hook_markers()
-    if hooks is None:
-        return {"name": target.NAME, "seen": False,
-                "missing": list(markers), "total": len(markers)}
-    missing = [event for event, marker in markers.items()
-               if not _event_has_marker(hooks, event, marker)]
-    seen = bool(hooks)
-    return {"name": target.NAME, "seen": seen,
-            "missing": missing, "total": len(markers)}
-
-
-def _codex_hooks_path() -> Path:
-    return Path.home() / ".codex" / "hooks.json"
-
-
-def _load_codex_hooks() -> dict | None:
-    path = _codex_hooks_path()
-    if not path.is_file():
-        return None
-    try:
-        return json.loads(path.read_text()).get("hooks", {})
-    except (OSError, json.JSONDecodeError):
-        return None
+    status = dict(target.hook_status())
+    status["name"] = target.NAME
+    return status
 
 
 def _check_permission() -> dict:

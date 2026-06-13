@@ -5,4 +5,6 @@
 {"type":"response_item","payload":{"type":"function_call_output","call_id":"call_1","output":"Chunk ID: x\nProcess exited with code 1\nOutput:\nls: /no-such-dir-xyz: No such file or directory\n"}}
 {"type":"response_item","payload":{"type":"custom_tool_call","name":"apply_patch","input":"*** Begin Patch\n*** Update File: sample.txt\n@@\n-hello\n+goodbye\n*** End Patch\n","call_id":"call_2"}}
 {"type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"call_2","output":"Exit code: 0\nOutput:\nSuccess. Updated the following files:\nM sample.txt\n"}}
+{"type":"response_item","payload":{"type":"custom_tool_call","name":"apply_patch","input":"*** Begin Patch\n*** Update File: missing-for-toolengrams-capture-2.txt\n@@\n-old\n+new\n*** End Patch\n","call_id":"call_3"}}
+{"type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"call_3","output":"apply_patch verification failed: Failed to read file to update /tmp/codex-hook-capture-repo/missing-for-toolengrams-capture-2.txt: No such file or directory (os error 2)"}}
 {"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"finished"}]}}

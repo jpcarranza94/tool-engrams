@@ -48,9 +48,17 @@ def test_detect_failure_is_conservative():
     assert codex.detect_failure({"tool_response": {"ok": False}})
     assert codex.detect_failure({"tool_response": {"exit_code": 2}})
     assert codex.detect_failure({"tool_response": {"success": False}})
-    assert codex.detect_failure({"tool_response": "Process exited with code 1"})
-    assert codex.detect_failure({"tool_response": "Exit code: 1\nOutput:\nboom"})
+    assert codex.detect_failure({
+        "tool_response": "ls: /no-such-dir: No such file or directory\n",
+    })
+    assert codex.detect_failure({
+        "tool_response": "bash: mycli: command not found\n",
+    })
+    assert codex.detect_failure({
+        "tool_response": "apply_patch verification failed: Failed to read file\n",
+    })
     assert not codex.detect_failure({"tool_response": {"ok": True}})
+    assert not codex.detect_failure({"tool_response": "Process exited with code 1"})
     assert not codex.detect_failure({"tool_response": "Exit code: 0\nOutput:\nok"})
     assert not codex.detect_failure({"tool_response": "plain output"})
 
@@ -69,6 +77,8 @@ def test_format_delta_emits_canonical_vocabulary_from_rollout_fixture():
     assert "Process exited with code 1" in out
     assert "TOOL (apply_patch): sample.txt" in out
     assert "RESULT: Exit code: 0" in out
+    assert "TOOL (apply_patch): missing-for-toolengrams-capture-2.txt" in out
+    assert "RESULT: apply_patch verification failed" in out
     assert 'AGENT: "finished"' in out
     assert "<environment_context>" not in out
 

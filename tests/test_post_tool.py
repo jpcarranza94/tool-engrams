@@ -164,7 +164,7 @@ def test_stderr_exit_code_detected_as_error(temp_db, monkeypatch, capsys):
 
 def test_codex_inline_failure_surface_on_post_tool(temp_db, monkeypatch):
     mid = _seed_token_memory(
-        temp_db, "mycli recovery", "Use --region us-west-2 before retrying.", ["mycli"]
+        temp_db, "missing path recovery", "Check the path before retrying.", ["ls"]
     )
     payload = json.loads((FIXTURE_DIR / "post_tool_use_failure.json").read_text())
     monkeypatch.setattr(post_tool.tick, "arm", lambda *a, **k: None)
@@ -178,7 +178,7 @@ def test_codex_inline_failure_surface_on_post_tool(temp_db, monkeypatch):
     result = json.loads(buf.getvalue())
     hso = result["hookSpecificOutput"]
     assert hso["hookEventName"] == "PostToolUse"
-    assert "us-west-2" in hso["additionalContext"]
+    assert "Check the path" in hso["additionalContext"]
     row = temp_db.execute(
         "SELECT hook FROM session_surfaces WHERE session_id='codex-sess-fail' "
         "AND memory_id=?",
