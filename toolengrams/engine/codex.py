@@ -62,12 +62,16 @@ def prepare_sandbox(work_dir: Path, spec: SandboxSpec) -> None:
 
 def invoke(req: EngineRequest) -> EngineResult:
     """Run `codex exec --json ... -- <prompt>`. Never raises."""
-    binary = shutil.which("codex")
-    if not binary:
+    if not is_available():
         return EngineResult(ok=False, engine=NAME, returncode=1,
                             error="codex CLI not found on PATH")
+    binary = shutil.which("codex") or "codex"
 
-    work_dir = Path(req.cwd or os.getcwd())
+    if not req.cwd:
+        return EngineResult(ok=False, engine=NAME, returncode=1,
+                            error="codex engine requires an explicit cwd")
+
+    work_dir = Path(req.cwd)
     db_dir = db.db_path().parent
     schema_path: Path | None = None
     last_message_path: Path | None = None

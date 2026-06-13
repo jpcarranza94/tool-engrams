@@ -44,11 +44,14 @@ are parent-process files created under the engram home; they are not written by
 the sandboxed child shell.
 
 `prepare_sandbox()` intentionally writes no `.codex` files. The neutral
-`SandboxSpec.command_prefixes` are enforced for watcher roles by the existing
-engine-agnostic `$ENGRAM_ALLOWED_VERBS` guard in `toolengrams/__main__.py`.
-That guard rejects every `engram` subcommand except the role's allowed verbs
-inside watcher children. Consolidation remains the trusted broad-review agent,
-as it already is for Claude Code.
+`SandboxSpec.readable_paths` is not a Codex control: Codex workspace-write does
+not restrict reads to an allowlist, so the adapter treats read paths as prompt
+context rather than a security boundary. The `SandboxSpec.command_prefixes` are
+enforced for watcher roles by the existing engine-agnostic
+`$ENGRAM_ALLOWED_VERBS` guard in `toolengrams/__main__.py`. That guard rejects
+every `engram` subcommand except the role's allowed verbs inside watcher
+children. Consolidation remains the trusted broad-review agent, as it already
+is for Claude Code.
 
 Codex reports token usage in the JSONL `turn.completed.usage` event but not
 USD cost. `EngineResult.cost_usd` is therefore `None`; the watcher run schema
@@ -68,12 +71,17 @@ already accepts null cost.
 ## Consequences
 
 - Codex engine containment is visible in the argv and is covered by unit tests;
-  there are no hidden project files whose loading depends on trust state.
+  there are no hidden project files whose loading depends on trust state, and
+  `prepare_sandbox()` is pinned by test to avoid writing `.codex/`.
 - The model can still write `db.sqlite` directly because the DB directory must
   be writable for legitimate `engram remember` / `judge` calls. This is the
   same asset the child is allowed to mutate through the CLI. The accepted
   backstops are quarantine/consolidation audit, the kill switch, and keeping
   the command surface narrow for watcher roles.
+- The engine does not grant additional persistent writable roots for
+  consolidation beyond the DB directory and the fresh work dir. ToolEngrams
+  subcommands route persistent memory changes through `ENGRAM_DB`; temporary
+  working files belong in the sandbox work dir.
 - Codex engine auth remains user-managed through Codex (`codex login`,
   `CODEX_API_KEY`, or `OPENAI_API_KEY`). The adapter does not override
   `CODEX_HOME`.

@@ -10,6 +10,7 @@ from toolengrams.engine import codex
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "codex" / "engine"
 EVENTS = (FIXTURE_DIR / "success-events.jsonl").read_text()
+FAILURE_EVENTS = (FIXTURE_DIR / "failure-events.jsonl").read_text()
 
 
 class _Proc:
@@ -154,6 +155,13 @@ def test_invoke_missing_binary(monkeypatch):
     assert codex.is_available() is False
 
 
+def test_invoke_requires_explicit_cwd(monkeypatch):
+    _which_ok(monkeypatch)
+    result = codex.invoke(EngineRequest(prompt="p", timeout=5))
+    assert result.ok is False
+    assert result.error == "codex engine requires an explicit cwd"
+
+
 def test_nonzero_exit_surfaces_stderr_tail(tmp_path, monkeypatch):
     _isolate_home(monkeypatch, tmp_path)
     work_dir = tmp_path / "work"
@@ -166,6 +174,24 @@ def test_nonzero_exit_surfaces_stderr_tail(tmp_path, monkeypatch):
     assert result.ok is False and result.returncode == 1
     assert "exit 1" in result.error and "turn failed" in result.error
     assert "\n" not in result.error
+
+
+def test_nonzero_exit_uses_event_error_when_stderr_empty(tmp_path, monkeypatch):
+    _isolate_home(monkeypatch, tmp_path)
+    work_dir = tmp_path / "work"
+    work_dir.mkdir()
+    _which_ok(monkeypatch)
+    monkeypatch.setattr(codex.subprocess, "run",
+                        lambda argv, **kw: _Proc(stdout=FAILURE_EVENTS,
+                                                 returncode=1, stderr=""))
+
+    result = codex.invoke(EngineRequest(prompt="p", timeout=5, cwd=str(work_dir)))
+
+    assert result.ok is False and result.returncode == 1
+    assert "sandbox denied write outside writable_roots" in result.error
+    assert codex._event_error(FAILURE_EVENTS) == (
+        "sandbox denied write outside writable_roots"
+    )
 
 
 # ---------- result parsing ----------
