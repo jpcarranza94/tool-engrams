@@ -55,14 +55,15 @@ def test_build_snapshot_shape(temp_db):
 def test_active_view_active_when_pid_alive_and_fresh():
     now = int(time.time())
     row = {"work_session_id": "s", "role": "formation", "started_ts": now - 3,
-           "pid": os.getpid(), "cwd": "/r"}
+           "pid": os.getpid(), "cwd": "/r", "engine": "claude-code"}
     assert monitor._active_view(row, now)["state"] == "active"
 
 
 def test_active_view_stale_when_pid_dead():
     now = int(time.time())
     row = {"work_session_id": "s", "role": "formation", "started_ts": now - 3,
-           "pid": 2_147_483_000, "cwd": "/r"}   # almost certainly not a live pid
+           "pid": 2_147_483_000, "cwd": "/r",  # almost certainly not live
+           "engine": "claude-code"}
     assert monitor._active_view(row, now)["state"] == "stale"
 
 
@@ -70,7 +71,7 @@ def test_active_view_stale_when_old_even_if_pid_alive():
     now = int(time.time())
     row = {"work_session_id": "s", "role": "formation",
            "started_ts": now - (monitor._stale_after_sec() + 10),
-           "pid": os.getpid(), "cwd": "/r"}
+           "pid": os.getpid(), "cwd": "/r", "engine": "claude-code"}
     assert monitor._active_view(row, now)["state"] == "stale"
 
 

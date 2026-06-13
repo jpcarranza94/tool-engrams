@@ -36,10 +36,16 @@ def collect_sessions(target_date: date) -> list[SessionFile]:
     for target in TARGETS.values():
         if not target.is_wired():
             continue
-        sessions.extend(
-            replace(session, target=target.NAME)
-            for session in target.collect_sessions(target_date)
-        )
+        try:
+            target_sessions = target.collect_sessions(target_date)
+        except Exception as e:
+            print(
+                f"engram consolidate: target {target.NAME} collection failed: {e}",
+                file=sys.stderr,
+            )
+            continue
+        sessions.extend(replace(session, target=target.NAME)
+                        for session in target_sessions)
     sessions.sort(key=lambda s: s.modified_ts)
     return sessions
 

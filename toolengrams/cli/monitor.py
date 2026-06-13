@@ -68,13 +68,6 @@ def _short(sid: str | None) -> str:
     return (sid or "")[:8]
 
 
-def _row_get(row, key: str, default=None):
-    try:
-        return row[key]
-    except (IndexError, KeyError):
-        return default
-
-
 def _money(cost: float | None) -> str:
     """$0.0123-style, or — for runs with no envelope (errors, pre-v14 rows).
     `is not None`, not truthiness: a genuine $0 (subscription auth) is data."""
@@ -98,7 +91,7 @@ def _active_view(row, now_ts: int) -> dict:
     return {
         "session": _short(row["work_session_id"]),
         "role": row["role"],
-        "engine": _row_get(row, "engine"),
+        "engine": row["engine"],
         "state": state,
         "age_sec": age,
         "pid": row["pid"],

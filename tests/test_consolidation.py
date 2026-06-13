@@ -90,6 +90,41 @@ def test_consolidation_collects_wired_targets_in_timestamp_order(monkeypatch):
     ]
 
 
+def test_consolidation_collects_other_targets_when_one_target_fails(
+    monkeypatch, capsys,
+):
+    target = date.today()
+    good_session = SessionFile(
+        path=Path("/sessions/claude.jsonl"),
+        session_id="claude-session",
+        project_slug="proj",
+        modified_ts=20,
+        size_bytes=200,
+    )
+    targets = {
+        "claude-code": SimpleNamespace(
+            NAME="claude-code",
+            is_wired=lambda: True,
+            collect_sessions=lambda target_date: [good_session],
+        ),
+        "codex": SimpleNamespace(
+            NAME="codex",
+            is_wired=lambda: True,
+            collect_sessions=lambda target_date: (_ for _ in ()).throw(
+                RuntimeError("bad rollout")
+            ),
+        ),
+    }
+    monkeypatch.setattr(consolidate, "TARGETS", targets)
+
+    sessions = consolidate.collect_sessions(target)
+
+    assert [(s.target, s.session_id) for s in sessions] == [
+        ("claude-code", "claude-session"),
+    ]
+    assert "codex collection failed: bad rollout" in capsys.readouterr().err
+
+
 def test_consolidation_prompt_session_list_includes_target(monkeypatch, tmp_path):
     captured = {}
 
