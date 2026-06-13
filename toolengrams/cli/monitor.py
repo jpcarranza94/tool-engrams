@@ -68,6 +68,13 @@ def _short(sid: str | None) -> str:
     return (sid or "")[:8]
 
 
+def _row_get(row, key: str, default=None):
+    try:
+        return row[key]
+    except (IndexError, KeyError):
+        return default
+
+
 def _money(cost: float | None) -> str:
     """$0.0123-style, or — for runs with no envelope (errors, pre-v14 rows).
     `is not None`, not truthiness: a genuine $0 (subscription auth) is data."""
@@ -91,6 +98,7 @@ def _active_view(row, now_ts: int) -> dict:
     return {
         "session": _short(row["work_session_id"]),
         "role": row["role"],
+        "engine": _row_get(row, "engine"),
         "state": state,
         "age_sec": age,
         "pid": row["pid"],
@@ -103,6 +111,7 @@ def _run_view(row, now_ts: int) -> dict:
     return {
         "session": _short(row["work_session_id"]),
         "role": row["role"],
+        "engine": row["engine"],
         "status": row["status"],
         "started_ts": row["started_ts"],
         "duration_sec": max(0, end - row["started_ts"]),
@@ -191,24 +200,26 @@ def _render(snap: dict):
 
     # Active now.
     active = Table(expand=True, box=None)
-    for col in ("session", "role", "state", "age", "pid"):
+    for col in ("session", "role", "engine", "state", "age", "pid"):
         active.add_column(col)
     for r in snap["active"]:
         color = "bold green" if r["state"] == "active" else "yellow"
-        active.add_row(r["session"], r["role"], Text(r["state"], style=color),
-                       _human(r["age_sec"]), str(r["pid"] or "—"))
+        active.add_row(r["session"], r["role"], r["engine"] or "—",
+                       Text(r["state"], style=color), _human(r["age_sec"]),
+                       str(r["pid"] or "—"))
     if not snap["active"]:
-        active.add_row("—", "no watcher running", "", "", "")
+        active.add_row("—", "no watcher running", "", "", "", "")
 
     # Last 24h.
     hist = Table(expand=True, box=None)
-    for col in ("when", "session", "role", "status", "dur", "Δchars",
+    for col in ("when", "session", "role", "engine", "status", "dur", "Δchars",
                 "+mem", "judged", "cost"):
         hist.add_column(col)
     _status_color = {"ok": "green", "error": "red", "crashed": "red", "running": "cyan"}
     for r in snap["recent_24h"]:
         hist.add_row(
             _ago(r["started_ts"]), r["session"], r["role"],
+            r["engine"] or "—",
             Text(r["status"], style=_status_color.get(r["status"], "white")),
             f'{r["duration_sec"]}s', str(r["delta_chars"] or "—"),
             str(r["created"] or ""), str(r["judged"] or ""),

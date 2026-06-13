@@ -33,6 +33,7 @@ class SessionFile:
     project_slug: str
     modified_ts: float
     size_bytes: int
+    target: str = ""
 
 
 @runtime_checkable
