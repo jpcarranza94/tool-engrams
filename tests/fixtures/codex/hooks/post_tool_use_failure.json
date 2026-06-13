@@ -1,0 +1,13 @@
+{
+  "session_id": "codex-sess-fail",
+  "turn_id": "turn-1",
+  "transcript_path": "/tmp/codex-rollout.jsonl",
+  "cwd": "/tmp/any",
+  "hook_event_name": "PostToolUse",
+  "model": "gpt-test",
+  "permission_mode": "default",
+  "tool_name": "Bash",
+  "tool_input": {"command": "mycli do"},
+  "tool_use_id": "tu-codex-fail",
+  "tool_response": "Exit code: 1\nWall time: 0.1 seconds\nOutput:\nmycli: failed\n"
+}

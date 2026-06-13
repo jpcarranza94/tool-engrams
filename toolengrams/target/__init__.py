@@ -12,10 +12,11 @@ import sys
 
 from ..harness_names import CLAUDE_CODE
 from .interface import SessionFile, TargetAdapter
-from . import claude_code
+from . import claude_code, codex
 
 TARGETS = {
     claude_code.NAME: claude_code,
+    codex.NAME: codex,
 }
 
 

@@ -9,9 +9,12 @@ from __future__ import annotations
 
 import io
 import json
+from pathlib import Path
 import time
 
 from toolengrams.hooks import post_tool
+
+FIXTURE_DIR = Path(__file__).parent / "fixtures" / "codex" / "hooks"
 
 
 def _seed_memory(conn, name: str = "test memory") -> int:
@@ -24,6 +27,22 @@ def _seed_memory(conn, name: str = "test memory") -> int:
     return cur.lastrowid
 
 
+def _seed_token_memory(conn, name: str, body: str, tokens: list[str]) -> int:
+    now_ts = int(time.time())
+    cur = conn.execute(
+        "INSERT INTO memories (name, description, body, kind, scope, project_slug, created_ts) "
+        "VALUES (?, '', ?, 'hint', 'global', NULL, ?)",
+        (name, body, now_ts),
+    )
+    mid = cur.lastrowid
+    conn.execute(
+        "INSERT INTO triggers (memory_id, kind, first_token, tokens_json) "
+        "VALUES (?, 'token_subseq', ?, ?)",
+        (mid, tokens[0], json.dumps(tokens)),
+    )
+    return mid
+
+
 def _log_surface(conn, session_id: str, memory_id: int, tool_use_id: str):
     conn.execute(
         "INSERT INTO session_surfaces (session_id, memory_id, surfaced_ts, hook, tool_use_id) "
@@ -34,8 +53,12 @@ def _log_surface(conn, session_id: str, memory_id: int, tool_use_id: str):
 
 def _run(payload: dict, monkeypatch) -> dict:
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(payload)))
-    post_tool.main()
-    return {}
+    buf = io.StringIO()
+    monkeypatch.setattr("sys.stdout", buf)
+    rc = post_tool.main()
+    assert rc == 0
+    out = buf.getvalue().strip()
+    return json.loads(out) if out else {}
 
 
 # ---------- success reinforcement ----------
@@ -137,6 +160,31 @@ def test_stderr_exit_code_detected_as_error(temp_db, monkeypatch, capsys):
 
     row = temp_db.execute("SELECT useful_count FROM memories WHERE id = ?", (mid,)).fetchone()
     assert row["useful_count"] == 0
+
+
+def test_codex_inline_failure_surface_on_post_tool(temp_db, monkeypatch):
+    mid = _seed_token_memory(
+        temp_db, "mycli recovery", "Use --region us-west-2 before retrying.", ["mycli"]
+    )
+    payload = json.loads((FIXTURE_DIR / "post_tool_use_failure.json").read_text())
+    monkeypatch.setattr(post_tool.tick, "arm", lambda *a, **k: None)
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(payload)))
+    buf = io.StringIO()
+    monkeypatch.setattr("sys.stdout", buf)
+
+    rc = post_tool.main("codex")
+
+    assert rc == 0
+    result = json.loads(buf.getvalue())
+    hso = result["hookSpecificOutput"]
+    assert hso["hookEventName"] == "PostToolUse"
+    assert "us-west-2" in hso["additionalContext"]
+    row = temp_db.execute(
+        "SELECT hook FROM session_surfaces WHERE session_id='codex-sess-fail' "
+        "AND memory_id=?",
+        (mid,),
+    ).fetchone()
+    assert row["hook"] == "post_tool_use_failure"
 
 
 # ---------- session turn counter ----------

@@ -1,0 +1,8 @@
+{"type":"session_meta","payload":{"id":"019eb99f-8a3c-7173-99d3-d0b94dfeb710","cwd":"/tmp/engram-rollout-cap"}}
+{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>\nnoise\n</environment_context>"}]}}
+{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Please build it."}]}}
+{"type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"ls /no-such-dir-xyz\",\"workdir\":\"/tmp/engram-rollout-cap\"}","call_id":"call_1"}}
+{"type":"response_item","payload":{"type":"function_call_output","call_id":"call_1","output":"Chunk ID: x\nProcess exited with code 1\nOutput:\nls: /no-such-dir-xyz: No such file or directory\n"}}
+{"type":"response_item","payload":{"type":"custom_tool_call","name":"apply_patch","input":"*** Begin Patch\n*** Update File: sample.txt\n@@\n-hello\n+goodbye\n*** End Patch\n","call_id":"call_2"}}
+{"type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"call_2","output":"Exit code: 0\nOutput:\nSuccess. Updated the following files:\nM sample.txt\n"}}
+{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"finished"}]}}

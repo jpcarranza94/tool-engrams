@@ -24,7 +24,9 @@ from pathlib import Path
 
 from .. import db, memory_store, paths, pause
 from ..engine import selection as engine_selection
+from ..target import TARGETS
 from ..target import claude_code as claude_target
+from ..target import codex as codex_target
 from ..retrieval.session_state import last_activity_ts
 from ..watcher import state as watcher_state
 
@@ -72,6 +74,7 @@ def run_checks() -> list[dict]:
         _check_permission(),
         _check_engram_on_path(),
         _check_claude_version(),
+        _check_codex_version(),
         _check_engine(),
         _check_home(),
         _check_db(),
@@ -108,22 +111,56 @@ def _event_has_marker(hooks: dict, event: str, marker: str) -> bool:
 
 
 def _check_hooks() -> dict:
-    settings = _load_settings()
-    if settings is None:
-        return _check("hooks", FAIL,
-                      f"no readable settings at {_settings_path()} — run ./install.sh")
-    hooks = settings.get("hooks", {})
-    missing = [event for event, marker in HOOK_MARKERS.items()
+    statuses = [_target_hook_status(target) for target in TARGETS.values()]
+    partial = [s for s in statuses if s["seen"] and s["missing"]]
+    if partial:
+        detail = "; ".join(
+            f"{s['name']} missing {', '.join(sorted(s['missing']))}"
+            for s in partial
+        )
+        return _check("hooks", FAIL, f"partial target wiring: {detail}")
+
+    wired = [s for s in statuses if s["seen"] and not s["missing"]]
+    if wired:
+        detail = ", ".join(
+            f"{s['name']} ({s['total']}/{s['total']} events)"
+            for s in wired
+        )
+        return _check("hooks", PASS, f"target hooks wired: {detail}")
+
+    return _check("hooks", FAIL,
+                  "no target hooks wired — run ./install.sh")
+
+
+def _target_hook_status(target) -> dict:
+    if target.NAME == "codex":
+        hooks = _load_codex_hooks()
+    else:
+        settings = _load_settings()
+        hooks = None if settings is None else settings.get("hooks", {})
+    markers = target.hook_markers()
+    if hooks is None:
+        return {"name": target.NAME, "seen": False,
+                "missing": list(markers), "total": len(markers)}
+    missing = [event for event, marker in markers.items()
                if not _event_has_marker(hooks, event, marker)]
-    if missing:
-        return _check("hooks", FAIL,
-                      f"hooks missing for {', '.join(sorted(missing))} — re-run "
-                      "./install.sh (doctor checks the user-level settings "
-                      "install.sh writes; project-level .claude/settings.json "
-                      "wiring is not checked)")
-    total = len(HOOK_MARKERS)
-    return _check("hooks", PASS,
-                  f"hooks wired ({total}/{total} events in {_settings_path()})")
+    seen = bool(hooks)
+    return {"name": target.NAME, "seen": seen,
+            "missing": missing, "total": len(markers)}
+
+
+def _codex_hooks_path() -> Path:
+    return Path.home() / ".codex" / "hooks.json"
+
+
+def _load_codex_hooks() -> dict | None:
+    path = _codex_hooks_path()
+    if not path.is_file():
+        return None
+    try:
+        return json.loads(path.read_text()).get("hooks", {})
+    except (OSError, json.JSONDecodeError):
+        return None
 
 
 def _check_permission() -> dict:
@@ -148,6 +185,12 @@ def _check_engram_on_path() -> dict:
 
 def _check_claude_version() -> dict:
     if not shutil.which("claude"):
+        claude_status = _target_hook_status(claude_target)
+        codex_status = _target_hook_status(codex_target)
+        if (not claude_status["seen"] or claude_status["missing"]) and codex_status["seen"]:
+            return _check("claude", WARN,
+                          "Claude Code CLI not found, but claude-code target "
+                          "hooks are not wired")
         return _check("claude", FAIL,
                       "Claude Code CLI ('claude') not found on PATH")
     version = _claude_version()
@@ -160,6 +203,39 @@ def _check_claude_version() -> dict:
                       f"claude {version} < {MIN_CLAUDE} — the PostToolUseFailure "
                       "hook never fires on this version; update Claude Code")
     return _check("claude", PASS, f"claude {version} (>= {MIN_CLAUDE})")
+
+
+def _check_codex_version() -> dict:
+    status = _target_hook_status(codex_target)
+    if not status["seen"]:
+        return _check("codex", WARN, "codex target hooks not wired")
+    if status["missing"]:
+        return _check("codex", FAIL,
+                      f"codex target hooks incomplete: missing "
+                      f"{', '.join(sorted(status['missing']))}")
+    if not shutil.which("codex"):
+        return _check("codex", FAIL,
+                      "Codex CLI ('codex') not found on PATH")
+    version = _codex_version()
+    if version is None:
+        return _check("codex", WARN,
+                      "could not parse 'codex --version' output — "
+                      f"verify it is >= {codex_target.min_version} yourself")
+    if _version_tuple(version) < _version_tuple(codex_target.min_version):
+        return _check("codex", FAIL,
+                      f"codex {version} < {codex_target.min_version} — update Codex")
+    return _check("codex", PASS,
+                  f"codex {version} (>= {codex_target.min_version})")
+
+
+def _codex_version() -> str | None:
+    try:
+        out = subprocess.run(["codex", "--version"], capture_output=True,
+                             text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    match = re.search(r"\d+\.\d+\.\d+", out or "")
+    return match.group(0) if match else None
 
 
 def _claude_version() -> str | None:

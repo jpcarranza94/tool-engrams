@@ -34,6 +34,19 @@ def _write_settings(home: Path, *, drop_event: str | None = None,
     (claude_dir / "settings.json").write_text(json.dumps(settings))
 
 
+def _write_codex_hooks(home: Path, *, drop_event: str | None = None) -> None:
+    from toolengrams.target import codex
+
+    hooks = {}
+    for event, marker in codex.hook_markers().items():
+        if event == drop_event:
+            continue
+        hooks[event] = [{"hooks": [{"type": "command", "command": marker}]}]
+    codex_dir = home / ".codex"
+    codex_dir.mkdir(parents=True, exist_ok=True)
+    (codex_dir / "hooks.json").write_text(json.dumps({"hooks": hooks}))
+
+
 @pytest.fixture
 def fake_home(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
@@ -47,6 +60,20 @@ def test_hooks_pass_when_all_events_wired(fake_home):
     _write_settings(fake_home)
     result = doctor._check_hooks()
     assert result["status"] == doctor.PASS
+
+
+def test_hooks_pass_with_codex_only_wiring(fake_home):
+    _write_codex_hooks(fake_home)
+    result = doctor._check_hooks()
+    assert result["status"] == doctor.PASS
+    assert "codex" in result["detail"]
+
+
+def test_hooks_fail_when_codex_wiring_partial(fake_home):
+    _write_codex_hooks(fake_home, drop_event="Stop")
+    result = doctor._check_hooks()
+    assert result["status"] == doctor.FAIL
+    assert "codex" in result["detail"] and "Stop" in result["detail"]
 
 
 def test_hooks_fail_when_event_missing(fake_home):

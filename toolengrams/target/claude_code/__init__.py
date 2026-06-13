@@ -25,6 +25,7 @@ NAME = "claude-code"
 # minimum version buys; detect_failure below is only used by the PostToolUse
 # recovery path.
 min_version = "2.1.117"
+has_failure_event = True
 
 # Tools whose pre/post-failure events trigger memory surfacing. New tools
 # added to Claude Code that should bind memories go here, not in two places.
@@ -98,3 +99,19 @@ def collect_sessions(target_date: date, projects_dir: Path | None = None):
 
 def hook_markers() -> dict[str, str]:
     return dict(_HOOK_MARKERS)
+
+
+def is_wired() -> bool:
+    settings_path = Path.home() / ".claude" / "settings.json"
+    try:
+        hooks = json.loads(settings_path.read_text()).get("hooks", {})
+    except (OSError, json.JSONDecodeError):
+        return False
+    for event, marker in _HOOK_MARKERS.items():
+        if not any(
+            h.get("command", "") == marker or h.get("command", "").startswith(marker + " ")
+            for entry in hooks.get(event, [])
+            for h in entry.get("hooks", [])
+        ):
+            return False
+    return True

@@ -16,6 +16,7 @@ def test_registry_adapters_satisfy_protocol():
     for name, target in TARGETS.items():
         assert isinstance(target, TargetAdapter), f"{name} missing adapter attrs"
         assert target.NAME == name
+        assert isinstance(target.has_failure_event, bool)
 
 
 def test_get_target_defaults_and_falls_back(capsys):

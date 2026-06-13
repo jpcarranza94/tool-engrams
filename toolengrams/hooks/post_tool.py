@@ -32,6 +32,7 @@ from ..retrieval.session_state import (
 from ..target import get_target
 from ..utils import is_watcher_child
 from ..watcher import tick
+from ._failure_surface import surface_failure_hints
 from ._skip import is_internal_cwd
 
 
@@ -70,6 +71,10 @@ def _run(payload: dict[str, Any], target) -> int:
 
     now_ts = int(time.time())
     recovered = False  # a prior failure with this first_token just succeeded
+    inline_failure_output = {}
+    if is_error and not target.has_failure_event:
+        inline_failure_output = surface_failure_hints(
+            payload, target, output_event_name="PostToolUse")
     with db.session() as conn:
         if not is_error:
             # Detect — but do NOT credit — a prior failure surface whose
@@ -98,7 +103,7 @@ def _run(payload: dict[str, Any], target) -> int:
             tick.trigger(session_id, tpath, cwd, reason="recovery", target=target.NAME)
             tick.trigger_eval(session_id, tpath, cwd, reason="recovery", target=target.NAME)
 
-    _emit({})
+    _emit(inline_failure_output)
     return 0
 
 

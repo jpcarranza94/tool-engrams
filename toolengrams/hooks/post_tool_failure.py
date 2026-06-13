@@ -37,20 +37,9 @@ import json
 import sys
 from typing import Any
 
-from .. import db, memory_store, pause
-from ..prompts.pretool import format_injection
-from ..reinforcement.scoring import is_gated
-from ..retrieval.rank import now, retrieve_candidates
-from ..retrieval.session_state import (
-    HOOK_POST_TOOL_USE_FAILURE,
-    get_already_surfaced,
-    get_session_turn,
-    log_surfaces,
-)
+from .. import pause
 from ..target import get_target
-from ..utils import is_watcher_child, slugify_cwd
-from ..watcher import tick
-from ._skip import max_memories_per_call, surface_notice
+from ._failure_surface import surface_failure_hints
 
 
 def main(target_name: str = "claude-code") -> int:
@@ -73,91 +62,8 @@ def main(target_name: str = "claude-code") -> int:
 
 
 def _run(payload: dict[str, Any], target) -> int:
-    # A watcher session's own tool calls must not surface hints or arm anything.
-    if is_watcher_child():
-        _emit({})
-        return 0
-
-    # User interrupted — not a real tool failure. No hints.
-    if payload.get("is_interrupt"):
-        _emit({})
-        return 0
-
-    # Arm the event-driven watcher: a real tool failure means an error→fix
-    # episode may be forming, so the next turn-boundary tick should run even if
-    # that turn shows no tool_use lines. Independent of whether a hint surfaces.
-    if not is_watcher_child():
-        sid = payload.get("session_id") or ""
-        if sid:
-            tick.arm(sid, payload.get("transcript_path") or "",
-                     payload.get("cwd") or "", target=target.NAME)
-
-    tool_name = payload.get("tool_name") or ""
-    if tool_name not in target.tool_whitelist:
-        _emit({})
-        return 0
-
-    tool_input = payload.get("tool_input") or {}
-    session_id = payload.get("session_id") or ""
-    tool_use_id = payload.get("tool_use_id")
-    cwd = payload.get("cwd") or ""
-    project_slug = slugify_cwd(cwd) if cwd else None
-
-    hint = target.extract_hints(tool_name, tool_input)
-    if not hint.tokens and not hint.paths:
-        _emit({})
-        return 0
-
-    with db.session() as conn:
-        now_ts = now()
-
-        candidates = retrieve_candidates(conn, hint, project_slug, kind="hint")
-        if not candidates:
-            _emit({})
-            return 0
-
-        # Surfacing gate: a hint proven more noise than signal stays suppressed
-        # even on a matching failure (see scoring.is_gated; pinned exempt).
-        candidates = [c for c in candidates if not is_gated(c)]
-
-        # Same-session suppression (ADR-0006) — all candidates here are hints.
-        candidates = [c for c in candidates
-                      if not c.origin_session_id
-                      or c.origin_session_id != session_id]
-        if not candidates:
-            _emit({})
-            return 0
-
-        surfaced_ids = get_already_surfaced(conn, session_id)
-        fresh = [c for c in candidates if c.memory_id not in surfaced_ids]
-        if not fresh:
-            _emit({})
-            return 0
-
-        fresh.sort(key=lambda c: (-len(c.matched_tokens), -c.final_score))
-
-        # All candidates here are hints (kind="hint" filter at retrieve time);
-        # take the top N by sort order.
-        fresh = fresh[: max_memories_per_call()]
-
-        memory_ids = [c.memory_id for c in fresh]
-        current_turn = get_session_turn(conn, session_id)
-        first_token = hint.tokens[0] if hint.tokens else None
-        log_surfaces(conn, session_id, memory_ids, tool_use_id,
-                     HOOK_POST_TOOL_USE_FAILURE, current_turn, now_ts,
-                     first_token=first_token)
-        memory_store.bump_surface(conn, memory_ids, now_ts)
-
-    out: dict[str, Any] = {
-        "hookSpecificOutput": {
-            "hookEventName": "PostToolUseFailure",
-            "additionalContext": format_injection(fresh),
-        }
-    }
-    notice = surface_notice([c.name for c in fresh])
-    if notice:
-        out["systemMessage"] = notice
-    _emit(out)
+    _emit(surface_failure_hints(payload, target,
+                                output_event_name="PostToolUseFailure"))
     return 0
 
 

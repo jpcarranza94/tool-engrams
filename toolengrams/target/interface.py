@@ -42,6 +42,8 @@ class TargetAdapter(Protocol):
     tool_whitelist: frozenset[str]
     # Minimum harness version the install supports (doctor enforces).
     min_version: str
+    # Whether the target has a dedicated PostToolUseFailure hook event.
+    has_failure_event: bool
 
     def extract_hints(self, tool_name: str, tool_input: dict) -> ExtractedTriggerHint: ...
 
@@ -55,3 +57,5 @@ class TargetAdapter(Protocol):
                          projects_dir: Path | None = None) -> list[SessionFile]: ...
 
     def hook_markers(self) -> dict[str, str]: ...
+
+    def is_wired(self) -> bool: ...
