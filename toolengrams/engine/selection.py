@@ -21,11 +21,12 @@ import sys
 
 from .. import paths
 from ..harness_names import CLAUDE_CODE
-from . import claude_code
+from . import claude_code, codex
 from .interface import EngineAdapter
 
 ENGINES = {
     claude_code.NAME: claude_code,
+    codex.NAME: codex,
 }
 
 

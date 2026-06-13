@@ -15,6 +15,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 INSTALL_SH = REPO_ROOT / "install.sh"
 CLAUDE_TARGET_SH = REPO_ROOT / "install" / "targets" / "claude-code.sh"
+CODEX_ENGINE_SH = REPO_ROOT / "install" / "engines" / "codex.sh"
 
 HOOK_EVENTS = {
     "SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse",
@@ -78,6 +79,43 @@ def test_install_sh_rejects_unknown_target(tmp_path):
     )
     assert proc.returncode == 2
     assert "unknown target" in proc.stdout
+
+
+def test_codex_engine_script_preflight_reports_missing_binary(tmp_path):
+    proc = subprocess.run(
+        ["bash", str(CODEX_ENGINE_SH), "preflight"],
+        capture_output=True, text=True,
+        env={"HOME": str(tmp_path), "PATH": "/usr/bin:/bin"},
+    )
+    assert proc.returncode == 1
+    assert "codex" in proc.stdout
+    assert "codex login" in proc.stdout
+
+
+def test_codex_engine_script_preflight_passes_with_binary(tmp_path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    codex_bin = bin_dir / "codex"
+    codex_bin.write_text("#!/usr/bin/env bash\nexit 0\n")
+    codex_bin.chmod(0o755)
+
+    proc = subprocess.run(
+        ["bash", str(CODEX_ENGINE_SH), "preflight"],
+        capture_output=True, text=True,
+        env={"HOME": str(tmp_path), "PATH": f"{bin_dir}:/usr/bin:/bin"},
+    )
+    assert proc.returncode == 0
+    assert "engine codex" in proc.stdout
+
+
+def test_codex_engine_script_install_is_noop(tmp_path):
+    proc = subprocess.run(
+        ["bash", str(CODEX_ENGINE_SH), "install"],
+        capture_output=True, text=True,
+        env={"HOME": str(tmp_path), "PATH": "/usr/bin:/bin"},
+    )
+    assert proc.returncode == 0
+    assert proc.stdout == ""
 
 
 # ---------- home migration (behavioral: runs the real function bytes) ----------

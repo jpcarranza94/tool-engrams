@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 from toolengrams.engine import ENGINES, EngineAdapter, get_engine
-from toolengrams.engine import claude_code, selection
+from toolengrams.engine import claude_code, codex, selection
 
 
 def _isolate(monkeypatch, tmp_path):
@@ -36,6 +36,11 @@ def test_config_json_supplies_engine(tmp_path, monkeypatch):
     (tmp_path / "config.json").write_text(json.dumps({"engine": "claude-code"}))
     assert selection._config_engine() == "claude-code"
     assert get_engine() is claude_code
+
+
+def test_codex_registered_and_selectable(tmp_path, monkeypatch):
+    _isolate(monkeypatch, tmp_path)
+    assert get_engine("codex") is codex
 
 
 def test_unknown_engine_warns_and_falls_back(tmp_path, monkeypatch, capsys):
