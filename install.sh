@@ -323,12 +323,28 @@ if [ "$PATH_WARN" -eq 1 ]; then
     echo "Without it, 'engram' (and the hooks that invoke it) won't be found."
     echo ""
 fi
-echo "IMPORTANT: hooks load at session start — open a NEW Claude Code session."
+echo "IMPORTANT: hooks load at target session start."
+for t in "${TARGETS[@]}"; do
+    case "$t" in
+        claude-code)
+            echo "  - Claude Code: open a NEW Claude Code session." ;;
+        codex)
+            echo "  - Codex: open a NEW Codex session and trust the ToolEngrams hooks if prompted." ;;
+        *)
+            echo "  - $t: open a NEW target-agent session." ;;
+    esac
+done
 echo "Sessions already running will not pick them up."
 echo ""
 echo "Verify it's working (see README, 'Verify it's working'):"
 echo "  1. engram seed                       — plant demo memories"
-echo "  2. In a NEW session, ask Claude to run: ssh deploy@production"
+if [[ " ${TARGETS[*]} " == *" claude-code "* ]]; then
+    echo "  2. In a NEW Claude Code session, ask Claude to run: ssh deploy@production"
+elif [[ " ${TARGETS[*]} " == *" codex "* ]]; then
+    echo "  2. In a NEW Codex session, ask Codex to run: ssh deploy@production"
+else
+    echo "  2. In a NEW target-agent session, ask it to run: ssh deploy@production"
+fi
 echo "  3. engram status                     — total_surfaces incremented"
 echo "  4. engram seed --remove              — clean up the demos"
 echo ""
@@ -340,6 +356,6 @@ echo "  engram monitor         — watcher activity + per-run cost"
 echo "  engram status          — health summary"
 echo "  engram consolidate     — run nightly consolidation now"
 echo ""
-echo "Memories form automatically as you use Claude Code. The first day can be"
+echo "Memories form automatically as you use the wired target agent. The first day can be"
 echo "quiet — organic memories need real failure→recovery episodes. Watch the"
 echo "watcher's decisions live with 'engram monitor'."

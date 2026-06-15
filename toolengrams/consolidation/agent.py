@@ -150,7 +150,8 @@ def run_consolidation_agent(
     # Build the prompt.
     memory_summary = _get_memory_summary(db_path)
     session_list = "\n".join(
-        f"  {s.path} ({s.size_bytes / 1024:.0f} KB) — session {s.session_id[:12]}..."
+        f"  [{s.target or 'unknown'}] {s.path} "
+        f"({s.size_bytes / 1024:.0f} KB) — session {s.session_id[:12]}..."
         for s in sessions
     )
     prompt = build_consolidation_prompt(session_list, memory_summary, target_date)
@@ -187,6 +188,5 @@ def run_consolidation_agent(
         returncode=result.returncode,
         error=None if result.returncode == 0 else f"Agent exited with code {result.returncode}",
     )
-
 
 

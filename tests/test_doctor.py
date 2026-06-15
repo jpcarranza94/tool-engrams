@@ -296,7 +296,7 @@ def test_home_passes_after_migration_symlink(fake_paths):
 def test_hook_liveness_warns_on_fresh_db(temp_db):
     result = doctor._check_hook_liveness()
     assert result["status"] == doctor.WARN
-    assert "NEW Claude Code session" in result["detail"]
+    assert "NEW target-agent session" in result["detail"]
 
 
 def test_hook_liveness_passes_after_activity(temp_db):

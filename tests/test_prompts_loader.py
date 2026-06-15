@@ -100,3 +100,22 @@ def test_watcher_prompt_builds():
     result = build_watcher_prompt()
     assert "kind" in result  # block/hint vocabulary
     assert "Without this memory" in result
+
+
+def test_watcher_and_eval_prompts_are_target_neutral(tmp_path, monkeypatch):
+    _set_home(monkeypatch, tmp_path)
+
+    watcher = loader.load_prompt("watcher")
+    evaluator = loader.load_prompt("eval")
+
+    forbidden = [
+        "Claude Code work session",
+        "SURFACED to Claude",
+        "Claude would",
+        "Claude's actions",
+        "Claude's FORWARD actions",
+        "Claude visibly",
+    ]
+    for phrase in forbidden:
+        assert phrase not in watcher
+        assert phrase not in evaluator

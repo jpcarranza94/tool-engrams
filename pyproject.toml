@@ -31,6 +31,7 @@ include = ["toolengrams*"]
 testpaths = ["tests"]
 markers = [
     "e2e: end-to-end tests that invoke `claude -p` (slow, cost money, skipped by default)",
+    "e2e_codex: end-to-end tests that invoke the codex CLI (skipped by default)",
 ]
 # Default to not running e2e tests unless explicitly requested.
-addopts = "-m 'not e2e'"
+addopts = "-m 'not e2e and not e2e_codex'"

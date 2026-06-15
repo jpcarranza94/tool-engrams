@@ -1,6 +1,8 @@
 """Fixtures for end-to-end tests that invoke `claude -p`.
 
 These tests are skipped by default. Opt-in with `pytest -m e2e`.
+Codex CLI checks use `pytest -m e2e_codex` and auto-skip when `codex` is
+not on PATH.
 
 Each test gets:
   - an isolated SQLite DB (set via ENGRAM_DB in the spawned claude process)
@@ -35,17 +37,19 @@ from toolengrams import db, memory_store
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 CLAUDE_BIN = shutil.which("claude")
+CODEX_BIN = shutil.which("codex")
 PYTHON_BIN = sys.executable
 
 
 def pytest_collection_modifyitems(config, items):
-    """Skip e2e tests if the claude CLI isn't installed."""
-    if CLAUDE_BIN is not None:
-        return
-    skip_marker = pytest.mark.skip(reason="claude CLI not found on PATH")
+    """Skip e2e tests if their harness CLI isn't installed."""
+    claude_skip = pytest.mark.skip(reason="claude CLI not found on PATH")
+    codex_skip = pytest.mark.skip(reason="codex CLI not found on PATH")
     for item in items:
-        if "e2e" in item.keywords:
-            item.add_marker(skip_marker)
+        if "e2e" in item.keywords and CLAUDE_BIN is None:
+            item.add_marker(claude_skip)
+        if "e2e_codex" in item.keywords and CODEX_BIN is None:
+            item.add_marker(codex_skip)
 
 
 @dataclass

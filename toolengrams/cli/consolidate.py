@@ -12,14 +12,15 @@ import argparse
 import json
 import sys
 import time
+from dataclasses import replace
 from datetime import date, timedelta
 
 from .. import db, pause
 from ..consolidation import runs
 from ..consolidation.agent import run_consolidation_agent
-from ..target.claude_code.collect import collect_sessions
 from ..consolidation.schedule import install_schedule, uninstall_schedule
 from ..retrieval import session_state
+from ..target import TARGETS, SessionFile
 from ..watcher import runs_store
 
 
@@ -27,6 +28,26 @@ from ..watcher import runs_store
 SURFACES_TTL_DAYS = 30
 # Watcher run-log rows (monitor history) older than this are cleaned up.
 WATCHER_RUNS_TTL_DAYS = 14
+
+
+def collect_sessions(target_date: date) -> list[SessionFile]:
+    """Collect sessions from every wired target, tagged by adapter name."""
+    sessions: list[SessionFile] = []
+    for target in TARGETS.values():
+        if not target.is_wired():
+            continue
+        try:
+            target_sessions = target.collect_sessions(target_date)
+        except Exception as e:
+            print(
+                f"engram consolidate: target {target.NAME} collection failed: {e}",
+                file=sys.stderr,
+            )
+            continue
+        sessions.extend(replace(session, target=target.NAME)
+                        for session in target_sessions)
+    sessions.sort(key=lambda s: s.modified_ts)
+    return sessions
 
 
 def main(argv: list[str] | None = None) -> int:

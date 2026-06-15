@@ -18,6 +18,7 @@ def _seed(conn, now):
     rid = runs_store.start_run(
         conn, work_session_id="sess-abcdef12", role="formation", pid=os.getpid(),
         started_ts=now - 5, model="opus", flush=False, cursor_from=0, cwd="/repo",
+        engine="claude-code",
     )
     runs_store.finish_run(conn, rid, status="ok", ended_ts=now - 2,
                           cursor_to=10, delta_chars=400)
@@ -26,6 +27,7 @@ def _seed(conn, now):
     erid = runs_store.start_run(
         conn, work_session_id="sess-abcdef12", role="eval", pid=os.getpid(),
         started_ts=now - 1, model="opus", flush=False, cursor_from=0, cwd="/repo",
+        engine="codex",
     )
     runs_store.record_event(conn, run_id=erid, ts=now, kind="judged",
                             memory_id=2, memory_name="dock", outcome="noise")
@@ -42,6 +44,7 @@ def test_build_snapshot_shape(temp_db):
     assert any(a["role"] == "eval" for a in snap["active"])
     # History has both runs; counts reflect them.
     assert len(snap["recent_24h"]) == 2
+    assert {r["engine"] for r in snap["recent_24h"]} == {"claude-code", "codex"}
     assert snap["counts_24h"]["created"] == 1
     assert snap["counts_24h"]["judged"] == 1
     # Stream newest first: the judged event leads.
@@ -52,14 +55,15 @@ def test_build_snapshot_shape(temp_db):
 def test_active_view_active_when_pid_alive_and_fresh():
     now = int(time.time())
     row = {"work_session_id": "s", "role": "formation", "started_ts": now - 3,
-           "pid": os.getpid(), "cwd": "/r"}
+           "pid": os.getpid(), "cwd": "/r", "engine": "claude-code"}
     assert monitor._active_view(row, now)["state"] == "active"
 
 
 def test_active_view_stale_when_pid_dead():
     now = int(time.time())
     row = {"work_session_id": "s", "role": "formation", "started_ts": now - 3,
-           "pid": 2_147_483_000, "cwd": "/r"}   # almost certainly not a live pid
+           "pid": 2_147_483_000, "cwd": "/r",  # almost certainly not live
+           "engine": "claude-code"}
     assert monitor._active_view(row, now)["state"] == "stale"
 
 
@@ -67,7 +71,7 @@ def test_active_view_stale_when_old_even_if_pid_alive():
     now = int(time.time())
     row = {"work_session_id": "s", "role": "formation",
            "started_ts": now - (monitor._stale_after_sec() + 10),
-           "pid": os.getpid(), "cwd": "/r"}
+           "pid": os.getpid(), "cwd": "/r", "engine": "claude-code"}
     assert monitor._active_view(row, now)["state"] == "stale"
 
 
@@ -91,3 +95,4 @@ def test_main_json_snapshot(temp_db, capsys):
     out = json.loads(capsys.readouterr().out)
     assert set(out) == {"now", "active", "recent_24h", "stream", "counts_24h"}
     assert len(out["recent_24h"]) == 2
+    assert "engine" in out["recent_24h"][0]
