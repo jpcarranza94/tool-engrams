@@ -96,7 +96,7 @@ def test_codex_engine_script_preflight_passes_with_binary(tmp_path):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     codex_bin = bin_dir / "codex"
-    codex_bin.write_text("#!/usr/bin/env bash\nexit 0\n")
+    codex_bin.write_text("#!/usr/bin/env bash\necho 'codex 0.137.0'\n")
     codex_bin.chmod(0o755)
 
     proc = subprocess.run(
@@ -105,7 +105,24 @@ def test_codex_engine_script_preflight_passes_with_binary(tmp_path):
         env={"HOME": str(tmp_path), "PATH": f"{bin_dir}:/usr/bin:/bin"},
     )
     assert proc.returncode == 0
-    assert "engine codex" in proc.stdout
+    assert "engine codex: codex 0.137.0 OK" in proc.stdout
+
+
+def test_codex_engine_script_preflight_rejects_old_binary(tmp_path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    codex_bin = bin_dir / "codex"
+    codex_bin.write_text("#!/usr/bin/env bash\necho 'codex 0.136.9'\n")
+    codex_bin.chmod(0o755)
+
+    proc = subprocess.run(
+        ["bash", str(CODEX_ENGINE_SH), "preflight"],
+        capture_output=True, text=True,
+        env={"HOME": str(tmp_path), "PATH": f"{bin_dir}:/usr/bin:/bin"},
+    )
+    assert proc.returncode == 1
+    assert "too old" in proc.stdout
+    assert "0.137.0" in proc.stdout
 
 
 def test_codex_engine_script_install_is_noop(tmp_path):

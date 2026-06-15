@@ -194,6 +194,23 @@ def test_nonzero_exit_uses_event_error_when_stderr_empty(tmp_path, monkeypatch):
     )
 
 
+def test_nonzero_exit_prefers_event_error_over_stderr_warning(tmp_path, monkeypatch):
+    _isolate_home(monkeypatch, tmp_path)
+    work_dir = tmp_path / "work"
+    work_dir.mkdir()
+    _which_ok(monkeypatch)
+    monkeypatch.setattr(codex.subprocess, "run",
+                        lambda argv, **kw: _Proc(stdout=FAILURE_EVENTS,
+                                                 returncode=1,
+                                                 stderr="warning: ignored alias\n"))
+
+    result = codex.invoke(EngineRequest(prompt="p", timeout=5, cwd=str(work_dir)))
+
+    assert result.ok is False and result.returncode == 1
+    assert "sandbox denied write outside writable_roots" in result.error
+    assert "stderr: warning: ignored alias" in result.error
+
+
 # ---------- result parsing ----------
 
 
@@ -233,6 +250,13 @@ def test_resolve_model_per_role_beats_codex_global(monkeypatch):
 def test_resolve_model_consolidation_is_none(monkeypatch):
     monkeypatch.setenv("ENGRAM_CODEX_WATCHER_MODEL", "gpt-5")
     assert codex.resolve_model("consolidation") is None
+
+
+def test_installed_version_parses_stdout_and_stderr(monkeypatch):
+    monkeypatch.setattr(codex.subprocess, "run",
+                        lambda *a, **k: _Proc(stdout="", stderr="codex 0.137.0"))
+
+    assert codex.installed_version() == "0.137.0"
 
 
 # ---------- prepare_sandbox ----------

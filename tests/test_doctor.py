@@ -121,6 +121,8 @@ def test_engine_check_passes_when_available(monkeypatch):
     monkeypatch.setenv("ENGRAM_HOME", "/nonexistent-engram-home")
     monkeypatch.setattr(doctor.engine_selection.claude_code.shutil, "which",
                         lambda name: "/bin/claude")
+    monkeypatch.setattr(doctor.engine_selection.claude_code, "installed_version",
+                        lambda: "2.2.0")
     c = doctor._check_engine()
     assert c["status"] == doctor.PASS
     assert "claude-code" in c["detail"]
@@ -141,6 +143,32 @@ def test_engine_check_fails_when_binary_missing(monkeypatch):
     c = doctor._check_engine()
     assert c["status"] == doctor.FAIL
     assert "not found" in c["detail"]
+
+
+def test_engine_check_fails_when_selected_engine_too_old(monkeypatch):
+    monkeypatch.setenv("ENGRAM_ENGINE", "codex")
+    monkeypatch.setattr(doctor.engine_selection.codex.shutil, "which",
+                        lambda name: "/bin/codex")
+    monkeypatch.setattr(doctor.engine_selection.codex, "installed_version",
+                        lambda: "0.136.9")
+
+    c = doctor._check_engine()
+
+    assert c["status"] == doctor.FAIL
+    assert "0.136.9 < 0.137.0" in c["detail"]
+
+
+def test_engine_check_warns_when_selected_engine_version_unparseable(monkeypatch):
+    monkeypatch.setenv("ENGRAM_ENGINE", "codex")
+    monkeypatch.setattr(doctor.engine_selection.codex.shutil, "which",
+                        lambda name: "/bin/codex")
+    monkeypatch.setattr(doctor.engine_selection.codex, "installed_version",
+                        lambda: None)
+
+    c = doctor._check_engine()
+
+    assert c["status"] == doctor.WARN
+    assert "could not parse version" in c["detail"]
 
 
 @pytest.fixture

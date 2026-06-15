@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -21,6 +22,7 @@ from .interface import EngineRequest, SandboxSpec
 from .result import EngineResult
 
 NAME = "codex"
+min_version = "0.137.0"
 
 _ROLE_MODEL_ENV = {
     "formation": "ENGRAM_CODEX_FORMATION_MODEL",
@@ -31,6 +33,16 @@ _ROLE_MODEL_ENV = {
 def is_available() -> bool:
     """Resolved at call time because PATH may be minimal under launchd/cron."""
     return shutil.which("codex") is not None
+
+
+def installed_version() -> str | None:
+    """Parsed x.y.z from `codex --version`, or None."""
+    try:
+        out = subprocess.run(["codex", "--version"], capture_output=True,
+                             text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return _version_from_text((out.stdout or "") + "\n" + (out.stderr or ""))
 
 
 def resolve_model(role: str | None = None) -> str | None:
@@ -54,8 +66,11 @@ def prepare_sandbox(work_dir: Path, spec: SandboxSpec) -> None:
 
     Fresh watcher/consolidation work dirs are untrusted by Codex, which means
     `.codex/config.toml` and `.codex/rules/` would be silently ignored. The
-    neutral spec is enforced at invoke time with `-c` sandbox overrides plus
-    the caller-set `$ENGRAM_ALLOWED_VERBS` guard.
+    enforceable part of the neutral spec is applied at invoke time with `-c`
+    sandbox overrides. Codex cannot express `command_prefixes` or
+    `readable_paths` as trusted project-local policy here; watcher-role
+    `engram` verb containment comes from the caller-set `$ENGRAM_ALLOWED_VERBS`
+    guard.
     """
     work_dir.mkdir(parents=True, exist_ok=True)
 
@@ -204,10 +219,20 @@ def _error(returncode: int, stderr: str | None, stdout: str) -> str | None:
     if returncode == 0:
         return None
     error = f"exit {returncode}"
-    detail = (stderr or "").strip().replace("\n", " ") or _event_error(stdout)
-    if detail:
-        error += f": {detail[-300:]}"
+    event_detail = _event_error(stdout)
+    stderr_detail = (stderr or "").strip().replace("\n", " ")
+    if event_detail and stderr_detail:
+        error += f": {event_detail[-300:]} (stderr: {stderr_detail[-180:]})"
+    elif event_detail:
+        error += f": {event_detail[-300:]}"
+    elif stderr_detail:
+        error += f": {stderr_detail[-300:]}"
     return error
+
+
+def _version_from_text(text: str) -> str | None:
+    match = re.search(r"\d+\.\d+\.\d+", text or "")
+    return match.group(0) if match else None
 
 
 def _unlink(path: Path | None) -> None:

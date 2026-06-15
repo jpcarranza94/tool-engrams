@@ -44,10 +44,12 @@ are parent-process files created under the engram home; they are not written by
 the sandboxed child shell.
 
 `prepare_sandbox()` intentionally writes no `.codex` files. The neutral
-`SandboxSpec.readable_paths` is not a Codex control: Codex workspace-write does
-not restrict reads to an allowlist, so the adapter treats read paths as prompt
-context rather than a security boundary. The `SandboxSpec.command_prefixes` are
-enforced for watcher roles by the existing engine-agnostic
+`SandboxSpec` is a cross-engine request, not a guarantee that every field maps
+to a native Codex control. `SandboxSpec.readable_paths` is not a Codex control:
+Codex workspace-write does not restrict reads to an allowlist, so the adapter
+treats read paths as prompt context rather than a security boundary.
+`SandboxSpec.command_prefixes` are not represented as Codex command rules
+either; watcher-role protection comes from the existing engine-agnostic
 `$ENGRAM_ALLOWED_VERBS` guard in `toolengrams/__main__.py`. That guard rejects
 every `engram` subcommand except the role's allowed verbs inside watcher
 children. Consolidation remains the trusted broad-review agent, as it already
@@ -78,6 +80,10 @@ already accepts null cost.
   same asset the child is allowed to mutate through the CLI. The accepted
   backstops are quarantine/consolidation audit, the kill switch, and keeping
   the command surface narrow for watcher roles.
+- Codex can run arbitrary shell commands inside its sandboxed child. The
+  accepted security boundary is the Codex workspace-write filesystem sandbox
+  (DB dir + fresh work dir writable, no network, no `/tmp`) plus the
+  ToolEngrams CLI verb guard; it is not a Claude-style command allowlist.
 - The engine does not grant additional persistent writable roots for
   consolidation beyond the DB directory and the fresh work dir. ToolEngrams
   subcommands route persistent memory changes through `ENGRAM_DB`; temporary

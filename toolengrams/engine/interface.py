@@ -6,11 +6,13 @@ are plain modules (not class instances) registered in `selection.ENGINES`;
 this Protocol exists for typing and the conformance test — module objects
 satisfy it structurally.
 
-Containment is part of the contract: `prepare_sandbox` translates the
-neutral `SandboxSpec` into the engine's native permission mechanism
-(claude-code: a `.claude/settings.local.json` allowlist). The engine-
-agnostic backstop — the `$ENGRAM_ALLOWED_VERBS` dispatch guard in
-`__main__.py` — is set by the caller, not the adapter.
+Containment is part of the contract, but engines do not expose identical
+native controls. `prepare_sandbox` translates the neutral `SandboxSpec` into
+the enforceable controls the adapter has (claude-code: a
+`.claude/settings.local.json` allowlist; codex: no trust-gated project files,
+with sandbox flags applied at invoke time). The engine-agnostic backstop —
+the `$ENGRAM_ALLOWED_VERBS` dispatch guard in `__main__.py` — is set by the
+caller, not the adapter.
 """
 
 from __future__ import annotations
@@ -55,8 +57,11 @@ class EngineRequest:
 @runtime_checkable
 class EngineAdapter(Protocol):
     NAME: str
+    min_version: str | None
 
     def is_available(self) -> bool: ...
+
+    def installed_version(self) -> str | None: ...
 
     def resolve_model(self, role: str | None = None) -> str | None: ...
 
