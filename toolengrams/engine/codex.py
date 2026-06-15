@@ -106,6 +106,12 @@ def invoke(req: EngineRequest) -> EngineResult:
 
         proc = subprocess.run(
             argv, cwd=str(work_dir), env=req.env,
+            # The prompt is passed as an argv positional, but `codex exec` still
+            # reads stdin when it is not a TTY (to support `… | codex exec`).
+            # A detached watcher tick inherits an open pipe as stdin, so codex
+            # blocks on "Reading additional input from stdin..." until the call
+            # times out. Hand it EOF so it runs the positional prompt and exits.
+            stdin=subprocess.DEVNULL,
             capture_output=True, text=True, timeout=req.timeout,
         )
         text = _read_last_message(last_message_path)
