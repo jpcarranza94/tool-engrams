@@ -117,6 +117,11 @@ def invoke(req: EngineRequest) -> EngineResult:
     try:
         proc = subprocess.run(
             argv, cwd=req.cwd, env=req.env,
+            # Headless runners take their prompt as an argv positional but may
+            # still read a non-TTY stdin; a detached watcher tick inherits an
+            # open pipe and would block. Hand EOF so the prompt is authoritative.
+            # (See the codex adapter for the concrete hang this prevents.)
+            stdin=subprocess.DEVNULL,
             capture_output=True, text=True, timeout=req.timeout,
         )
     except subprocess.TimeoutExpired:

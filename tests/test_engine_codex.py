@@ -79,6 +79,7 @@ def test_invoke_builds_argv_with_containment_flags_and_files(tmp_path, monkeypat
     assert captured["kw"]["cwd"] == str(work_dir)
     assert captured["kw"]["env"] == {"X": "1"}
     assert captured["kw"]["timeout"] == 30
+    assert captured["kw"]["stdin"] is subprocess.DEVNULL
 
     assert result.ok is True
     assert result.engine == "codex"
@@ -160,6 +161,27 @@ def test_invoke_requires_explicit_cwd(monkeypatch):
     result = codex.invoke(EngineRequest(prompt="p", timeout=5))
     assert result.ok is False
     assert result.error == "codex engine requires an explicit cwd"
+
+
+def test_invoke_hands_codex_devnull_stdin(tmp_path, monkeypatch):
+    """Regression: `codex exec` reads stdin when it is not a TTY, so a detached
+    watcher tick that inherits an open pipe blocks until timeout. The adapter
+    must close the child's stdin so codex runs the positional prompt instead."""
+    _isolate_home(monkeypatch, tmp_path)
+    work_dir = tmp_path / "work"
+    work_dir.mkdir()
+    captured = {}
+
+    def fake_run(argv, **kw):
+        captured["stdin"] = kw.get("stdin", "MISSING")
+        Path(argv[argv.index("-o") + 1]).write_text("ok\n")
+        return _Proc(stdout=EVENTS, returncode=0)
+
+    _which_ok(monkeypatch)
+    monkeypatch.setattr(codex.subprocess, "run", fake_run)
+
+    codex.invoke(EngineRequest(prompt="p", timeout=5, cwd=str(work_dir)))
+    assert captured["stdin"] is subprocess.DEVNULL
 
 
 def test_nonzero_exit_surfaces_stderr_tail(tmp_path, monkeypatch):

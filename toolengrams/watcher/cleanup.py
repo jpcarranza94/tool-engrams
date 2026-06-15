@@ -102,6 +102,8 @@ def maybe_spawn_cleanup() -> bool:
         env[WATCHER_CHILD_ENV] = "1"
         subprocess.Popen(
             [PYTHON_BIN, "-m", "toolengrams", "cleanup"], env=env,
+            # Detached background reaper: don't inherit the caller's stdin pipe.
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             start_new_session=True,
         )

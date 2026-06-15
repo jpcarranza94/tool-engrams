@@ -59,6 +59,8 @@ def test_invoke_builds_argv_with_all_flags(monkeypatch):
     assert captured["kw"]["cwd"] == "/tmp"
     assert captured["kw"]["env"] == {"X": "1"}
     assert captured["kw"]["timeout"] == 30
+    # Headless runner must never inherit a non-TTY stdin pipe (detached tick).
+    assert captured["kw"]["stdin"] is subprocess.DEVNULL
     assert r.ok and r.stdout == '{"result":"ok"}' and r.returncode == 0
     assert r.error is None and r.timed_out is False
     assert r.engine == "claude-code"

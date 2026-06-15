@@ -159,6 +159,10 @@ def spawn_tick(session_id: str, transcript_path: str, cwd: str,
             argv.append("--flush")
         subprocess.Popen(
             argv, env=env,
+            # Detached: never inherit the hook's stdin pipe. The engine child
+            # this spawns runs `codex exec`/`claude -p`, which read a non-TTY
+            # stdin and would block on the inherited pipe until timeout.
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
