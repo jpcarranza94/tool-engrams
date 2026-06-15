@@ -14,3 +14,4 @@ import each other for a name.
 from __future__ import annotations
 
 CLAUDE_CODE = "claude-code"
+CODEX = "codex"

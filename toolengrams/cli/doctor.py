@@ -192,6 +192,19 @@ def _check_engine() -> dict:
         return _check("engine", FAIL,
                       f"engine {name}: binary not found on PATH — "
                       "watcher ticks and consolidation cannot run")
+    minimum = getattr(engine, "min_version", None)
+    if minimum:
+        version = engine.installed_version()
+        if version is None:
+            return _check("engine", WARN,
+                          f"engine {name}: could not parse version — verify it "
+                          f"is >= {minimum} yourself")
+        if _version_tuple(version) < _version_tuple(minimum):
+            return _check("engine", FAIL,
+                          f"engine {name}: {version} < {minimum} — update the "
+                          "CLI before watcher ticks or consolidation run")
+        return _check("engine", PASS,
+                      f"engine: {name} {version} (>= {minimum})")
     return _check("engine", PASS, f"engine: {name} (binary on PATH)")
 
 

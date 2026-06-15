@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -19,6 +20,7 @@ from .interface import EngineRequest, SandboxSpec
 from .result import EngineResult
 
 NAME = "claude-code"
+min_version = None
 
 # Sonnet, not opus: judging surfaced memories and extracting tool lessons from
 # a transcript delta is not opus-grade work, and the watcher makes ~dozens of
@@ -49,6 +51,16 @@ def is_available() -> bool:
     fails when the module is imported before PATH is fully set (launchd's
     minimal environment)."""
     return shutil.which("claude") is not None
+
+
+def installed_version() -> str | None:
+    """Parsed x.y.z from `claude --version`, or None."""
+    try:
+        out = subprocess.run(["claude", "--version"], capture_output=True,
+                             text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return _version_from_text(out)
 
 
 def resolve_model(role: str | None = None) -> str | None:
@@ -173,3 +185,8 @@ def _envelope(stdout: str) -> dict | None:
             if payload.get("session_id"):
                 return payload
     return None
+
+
+def _version_from_text(text: str) -> str | None:
+    match = re.search(r"\d+\.\d+\.\d+", text or "")
+    return match.group(0) if match else None
