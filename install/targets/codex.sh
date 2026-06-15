@@ -6,8 +6,9 @@ set -euo pipefail
 
 MIN_CODEX="0.137.0"
 ACTION="${1:?usage: codex.sh preflight|install|uninstall}"
-CODEX_CONFIG="${CODEX_CONFIG:-$HOME/.codex/config.toml}"
-CODEX_HOOKS="${CODEX_HOOKS:-$HOME/.codex/hooks.json}"
+CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
+CODEX_CONFIG="${CODEX_CONFIG:-$CODEX_HOME/config.toml}"
+CODEX_HOOKS="${CODEX_HOOKS:-$CODEX_HOME/hooks.json}"
 
 preflight() {
     if ! command -v codex &>/dev/null; then
@@ -41,6 +42,22 @@ from pathlib import Path
 config_path = Path(sys.argv[1])
 hooks_path = Path(sys.argv[2])
 
+try:
+    data = json.loads(hooks_path.read_text()) if hooks_path.exists() else {}
+except json.JSONDecodeError as exc:
+    print(f"ERROR: refusing to overwrite invalid Codex hooks JSON at {hooks_path}: {exc}")
+    sys.exit(1)
+except OSError as exc:
+    print(f"ERROR: could not read Codex hooks JSON at {hooks_path}: {exc}")
+    sys.exit(1)
+if not isinstance(data, dict):
+    print(f"ERROR: refusing to overwrite Codex hooks JSON at {hooks_path}: root must be an object")
+    sys.exit(1)
+existing_hooks = data.get("hooks", {})
+if not isinstance(existing_hooks, dict):
+    print(f"ERROR: refusing to overwrite Codex hooks JSON at {hooks_path}: hooks must be an object")
+    sys.exit(1)
+
 text = config_path.read_text() if config_path.exists() else ""
 lines = text.splitlines()
 out = []
@@ -71,11 +88,11 @@ if not features_seen:
 config_path.write_text("\n".join(out).rstrip() + "\n")
 print("  Enabled [features] hooks = true")
 
-try:
-    data = json.loads(hooks_path.read_text())
-except (OSError, ValueError):
-    data = {}
 hooks = data.setdefault("hooks", {})
+if hooks_path.exists():
+    backup = hooks_path.with_suffix(hooks_path.suffix + ".install.bak")
+    backup.write_text(hooks_path.read_text())
+    print(f"  Backed up hooks.json to {backup}")
 
 tool_matcher = "Bash|apply_patch"
 wiring = [

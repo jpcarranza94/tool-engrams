@@ -62,6 +62,56 @@ def test_codex_target_script_wires_supported_events_and_features(tmp_path):
     assert "engram flush --target codex" in cmds
 
 
+def test_codex_target_script_defaults_to_codex_home(tmp_path):
+    codex_home = tmp_path / "custom-codex"
+    env = {"HOME": str(tmp_path), "PATH": "/usr/bin:/bin",
+           "CODEX_HOME": str(codex_home)}
+
+    proc = subprocess.run(["bash", str(CODEX_TARGET_SH), "install"],
+                          capture_output=True, text=True, env=env)
+
+    assert proc.returncode == 0, proc.stderr
+    assert (codex_home / "config.toml").is_file()
+    assert (codex_home / "hooks.json").is_file()
+
+
+def test_codex_target_script_refuses_invalid_hooks_json(tmp_path):
+    codex_dir = tmp_path / ".codex"
+    codex_dir.mkdir()
+    hooks_path = codex_dir / "hooks.json"
+    hooks_path.write_text("{not valid json")
+    config_path = codex_dir / "config.toml"
+    env = {"HOME": str(tmp_path), "PATH": "/usr/bin:/bin",
+           "CODEX_CONFIG": str(config_path),
+           "CODEX_HOOKS": str(hooks_path)}
+
+    proc = subprocess.run(["bash", str(CODEX_TARGET_SH), "install"],
+                          capture_output=True, text=True, env=env)
+
+    assert proc.returncode == 1
+    assert "refusing to overwrite invalid Codex hooks JSON" in proc.stdout
+    assert hooks_path.read_text() == "{not valid json"
+    assert not config_path.exists()
+
+
+def test_codex_target_script_refuses_nonobject_hooks_json(tmp_path):
+    codex_dir = tmp_path / ".codex"
+    codex_dir.mkdir()
+    hooks_path = codex_dir / "hooks.json"
+    hooks_path.write_text(json.dumps({"hooks": []}))
+    config_path = codex_dir / "config.toml"
+    env = {"HOME": str(tmp_path), "PATH": "/usr/bin:/bin",
+           "CODEX_CONFIG": str(config_path),
+           "CODEX_HOOKS": str(hooks_path)}
+
+    proc = subprocess.run(["bash", str(CODEX_TARGET_SH), "install"],
+                          capture_output=True, text=True, env=env)
+
+    assert proc.returncode == 1
+    assert "hooks must be an object" in proc.stdout
+    assert not config_path.exists()
+
+
 def test_codex_target_script_does_not_treat_bare_engram_as_wired(tmp_path):
     codex_dir = tmp_path / ".codex"
     codex_dir.mkdir()
@@ -83,6 +133,7 @@ def test_codex_target_script_does_not_treat_bare_engram_as_wired(tmp_path):
     pretool_cmds = [h["command"] for e in hooks["PreToolUse"] for h in e["hooks"]]
     assert "engram pretool" in pretool_cmds
     assert "engram pretool --target codex" in pretool_cmds
+    assert (codex_dir / "hooks.json.install.bak").is_file()
 
 
 def test_codex_target_uninstall_strips_only_engram_hooks(tmp_path):

@@ -12,6 +12,7 @@ from ...models import ExtractedTriggerHint
 from ...retrieval.extract import extract_hints as _extract_hints
 from . import collect
 from .collect import collect_sessions as _collect_sessions
+from .paths import config_path, hooks_path
 from .patch_parse import paths_from_patch
 from .transcript import format_delta as _format_delta
 
@@ -44,6 +45,7 @@ _DIAGNOSTIC_RE = re.compile(
     r"(command not found|no such file or directory|permission denied|"
     r"operation not permitted|not a git repository|os error \d+)"
 )
+_PROCESS_EXIT_RE = re.compile(r"\bprocess exited with code\s+(-?\d+)\b", re.I)
 
 
 def extract_hints(tool_name: str, tool_input: dict) -> ExtractedTriggerHint:
@@ -87,6 +89,12 @@ def detect_failure(payload: dict) -> bool:
 
 
 def _string_response_failed(response: str) -> bool:
+    for match in _PROCESS_EXIT_RE.finditer(response):
+        try:
+            if int(match.group(1)) != 0:
+                return True
+        except ValueError:
+            pass
     for line in response.splitlines():
         text = line.strip().lower()
         if not text:
@@ -115,17 +123,15 @@ def hook_markers() -> dict[str, str]:
 
 
 def _load_hooks() -> dict | None:
-    path = Path.home() / ".codex" / "hooks.json"
     try:
-        return json.loads(path.read_text()).get("hooks", {})
+        return json.loads(hooks_path().read_text()).get("hooks", {})
     except (OSError, json.JSONDecodeError):
         return None
 
 
 def _hooks_feature_enabled() -> bool:
-    path = Path.home() / ".codex" / "config.toml"
     try:
-        lines = path.read_text().splitlines()
+        lines = config_path().read_text().splitlines()
     except OSError:
         return False
     in_features = False
@@ -163,10 +169,11 @@ def hook_status() -> dict[str, object]:
 def installed_version() -> str | None:
     try:
         out = subprocess.run([cli_binary, "--version"], capture_output=True,
-                             text=True, timeout=10).stdout
+                             text=True, timeout=10)
     except (OSError, subprocess.SubprocessError):
         return None
-    match = re.search(r"\d+\.\d+\.\d+", out or "")
+    match = re.search(r"\d+\.\d+\.\d+",
+                      ((out.stdout or "") + "\n" + (out.stderr or "")))
     return match.group(0) if match else None
 
 

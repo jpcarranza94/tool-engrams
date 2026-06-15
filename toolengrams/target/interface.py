@@ -55,6 +55,9 @@ class TargetAdapter(Protocol):
 
     def format_delta(self, lines: list[str]) -> str: ...
 
+    # Return sessions the target considers part of target_date. Some harnesses
+    # store sessions by modified time; Codex stores rollout files under
+    # YYYY/MM/DD directories, so its collector follows that storage day.
     def collect_sessions(self, target_date: date,
                          projects_dir: Path | None = None) -> list[SessionFile]: ...
 

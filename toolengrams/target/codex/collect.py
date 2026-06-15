@@ -8,15 +8,14 @@ from pathlib import Path
 
 from ...utils import slugify_cwd
 from ..interface import SessionFile
-
-CODEX_SESSIONS_DIR = Path.home() / ".codex" / "sessions"
+from .paths import sessions_dir as default_sessions_dir
 
 
 def collect_sessions(
     target_date: date,
     sessions_dir: Path | None = None,
 ) -> list[SessionFile]:
-    base = sessions_dir or CODEX_SESSIONS_DIR
+    base = sessions_dir or default_sessions_dir()
     day_dir = base / f"{target_date:%Y}" / f"{target_date:%m}" / f"{target_date:%d}"
     if not day_dir.is_dir():
         return []

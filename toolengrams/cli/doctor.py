@@ -143,7 +143,11 @@ def _check_engram_on_path() -> dict:
 
 
 def _check_target_versions() -> list[dict]:
-    return [_check_target_version(target) for target in TARGETS.values()]
+    checks = []
+    for target in TARGETS.values():
+        if _target_hook_status(target)["seen"]:
+            checks.append(_check_target_version(target))
+    return checks
 
 
 def _check_target_version(target) -> dict:

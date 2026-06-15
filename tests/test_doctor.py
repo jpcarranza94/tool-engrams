@@ -190,6 +190,16 @@ def test_unwired_target_version_warns(fake_home):
     assert "not wired" in result["detail"]
 
 
+def test_target_versions_only_reports_wired_targets(fake_home, monkeypatch):
+    _write_settings(fake_home)
+    monkeypatch.setattr(doctor.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(claude_code, "installed_version", lambda: "2.2.0")
+
+    checks = doctor._check_target_versions()
+
+    assert [c["name"] for c in checks] == ["claude-code"]
+
+
 # ---------- liveness ----------
 
 

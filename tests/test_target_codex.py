@@ -57,8 +57,9 @@ def test_detect_failure_is_conservative():
     assert codex.detect_failure({
         "tool_response": "apply_patch verification failed: Failed to read file\n",
     })
+    assert codex.detect_failure({"tool_response": "Process exited with code 1"})
     assert not codex.detect_failure({"tool_response": {"ok": True}})
-    assert not codex.detect_failure({"tool_response": "Process exited with code 1"})
+    assert not codex.detect_failure({"tool_response": "Process exited with code 0"})
     assert not codex.detect_failure({"tool_response": "Exit code: 0\nOutput:\nok"})
     assert not codex.detect_failure({"tool_response": "plain output"})
     assert not codex.detect_failure({
@@ -97,7 +98,7 @@ def test_collect_sessions_scans_codex_day_directory(tmp_path, monkeypatch):
     }) + "\n")
     ts = datetime(2026, 6, 11, 12, 0).timestamp()
     os.utime(rollout, (ts, ts))
-    monkeypatch.setattr(codex.collect, "CODEX_SESSIONS_DIR", root)
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / ".codex"))
 
     sessions = codex.collect_sessions(date(2026, 6, 11))
 
@@ -105,3 +106,27 @@ def test_collect_sessions_scans_codex_day_directory(tmp_path, monkeypatch):
     assert sessions[0].path == rollout
     assert sessions[0].session_id == "sess-1"
     assert sessions[0].project_slug == "-tmp-my-project"
+
+
+def test_hook_status_uses_codex_home(tmp_path, monkeypatch):
+    custom = tmp_path / "custom-codex"
+    monkeypatch.setenv("CODEX_HOME", str(custom))
+    (custom).mkdir(parents=True)
+    (custom / "config.toml").write_text("[features]\nhooks = true\n")
+    hooks = {
+        event: [{"hooks": [{"type": "command", "command": marker}]}]
+        for event, marker in codex.hook_markers().items()
+    }
+    (custom / "hooks.json").write_text(json.dumps({"hooks": hooks}))
+
+    assert codex.is_wired()
+
+
+def test_installed_version_parses_stderr(monkeypatch):
+    class Proc:
+        stdout = ""
+        stderr = "codex 0.137.0"
+
+    monkeypatch.setattr(codex.subprocess, "run", lambda *a, **k: Proc())
+
+    assert codex.installed_version() == "0.137.0"
