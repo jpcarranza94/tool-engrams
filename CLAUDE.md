@@ -38,7 +38,7 @@ ToolEngrams is a tool-bound memory system for coding agents. Memories bind to co
 ```bash
 pytest                        # unit tests (fast)
 pytest tests/e2e/ -m e2e        # E2E tests (spawns claude -p, slow)
-pytest tests/e2e/ -m e2e_codex  # Codex E2E tests (spawns codex, slow)
+pytest tests/e2e/ -m e2e_codex  # Codex CLI E2E checks (opt-in)
 ```
 
 ## Code style

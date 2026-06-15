@@ -144,7 +144,7 @@ def _insert(with_block: bool) -> int:
     for m in skipped:
         print(f"  exists  [{m['kind']}] {m['name']}")
     print(f"\n{len(inserted)} seeded, {len(skipped) + len(fixed)} already present.")
-    print("Smoke test: in a NEW Claude Code session, ask Claude to run "
+    print("Smoke test: in a NEW target-agent session, ask it to run "
           "`ssh deploy@production` — the VPN hint should arrive with the call.")
     print("Clean up afterwards with: engram seed --remove")
     return 0

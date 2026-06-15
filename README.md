@@ -479,7 +479,7 @@ Variable interpolation uses `str.format` — the formation prompt expects `{cwd}
 ```bash
 pytest                          # Unit tests (fast — no network, no LLM)
 pytest tests/e2e/ -m e2e        # E2E tests (spawns real `claude -p` sessions, opt-in)
-pytest tests/e2e/ -m e2e_codex  # Codex E2E tests (spawns real `codex` sessions, opt-in)
+pytest tests/e2e/ -m e2e_codex  # Codex CLI E2E checks (opt-in)
 ```
 
 CI (`.github/workflows/tests.yml`) runs the unit suite on Python 3.10 and

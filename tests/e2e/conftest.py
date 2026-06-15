@@ -1,6 +1,8 @@
 """Fixtures for end-to-end tests that invoke `claude -p`.
 
 These tests are skipped by default. Opt-in with `pytest -m e2e`.
+Codex CLI checks use `pytest -m e2e_codex` and auto-skip when `codex` is
+not on PATH.
 
 Each test gets:
   - an isolated SQLite DB (set via ENGRAM_DB in the spawned claude process)

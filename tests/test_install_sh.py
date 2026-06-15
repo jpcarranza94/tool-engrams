@@ -36,6 +36,14 @@ def test_wired_commands_carry_target_flag():
     assert "engram flush --target claude-code" in text
 
 
+def test_install_footer_is_target_aware():
+    text = INSTALL_SH.read_text()
+    assert "open a NEW Claude Code session." in text
+    assert "open a NEW Codex session" in text
+    assert "open a NEW session, ask Claude" not in text
+    assert "Memories form automatically as you use the wired target agent" in text
+
+
 def test_codex_target_script_wires_supported_events_and_features(tmp_path):
     codex_dir = tmp_path / ".codex"
     env = {"HOME": str(tmp_path), "PATH": "/usr/bin:/bin",

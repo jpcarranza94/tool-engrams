@@ -258,9 +258,9 @@ def _check_hook_liveness() -> dict:
         return _check("hook_liveness", WARN, f"could not read activity: {e}")
     if last_ts <= 0:
         return _check("hook_liveness", WARN,
-                      "no hook activity recorded yet — hooks load at session "
-                      "start, so open a NEW Claude Code session and run any "
-                      "tool call, then re-check")
+                      "no hook activity recorded yet — hooks load at target "
+                      "session start, so open a NEW target-agent session and "
+                      "run any tool call, then re-check")
     return _check("hook_liveness", PASS,
                   f"hooks alive — last tool-call hook fired {_ago(last_ts)}")
 
