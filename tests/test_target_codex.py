@@ -61,6 +61,9 @@ def test_detect_failure_is_conservative():
     assert not codex.detect_failure({"tool_response": "Process exited with code 1"})
     assert not codex.detect_failure({"tool_response": "Exit code: 0\nOutput:\nok"})
     assert not codex.detect_failure({"tool_response": "plain output"})
+    assert not codex.detect_failure({
+        "tool_response": "scan complete: no such file or directory errors found\n",
+    })
 
 
 def test_transcript_path_payload_first_no_fallback():

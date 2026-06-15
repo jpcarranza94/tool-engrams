@@ -16,6 +16,7 @@ def test_registry_adapters_satisfy_protocol():
     for name, target in TARGETS.items():
         assert isinstance(target, TargetAdapter), f"{name} missing adapter attrs"
         assert target.NAME == name
+        assert isinstance(target.cli_binary, str) and target.cli_binary
         assert isinstance(target.has_failure_event, bool)
 
 

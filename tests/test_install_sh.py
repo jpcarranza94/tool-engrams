@@ -62,6 +62,29 @@ def test_codex_target_script_wires_supported_events_and_features(tmp_path):
     assert "engram flush --target codex" in cmds
 
 
+def test_codex_target_script_does_not_treat_bare_engram_as_wired(tmp_path):
+    codex_dir = tmp_path / ".codex"
+    codex_dir.mkdir()
+    hooks_path = codex_dir / "hooks.json"
+    hooks_path.write_text(json.dumps({"hooks": {
+        "PreToolUse": [{"hooks": [
+            {"type": "command", "command": "engram pretool"},
+        ]}],
+    }}))
+    env = {"HOME": str(tmp_path), "PATH": "/usr/bin:/bin",
+           "CODEX_CONFIG": str(codex_dir / "config.toml"),
+           "CODEX_HOOKS": str(hooks_path)}
+
+    proc = subprocess.run(["bash", str(CODEX_TARGET_SH), "install"],
+                          capture_output=True, text=True, env=env)
+
+    assert proc.returncode == 0, proc.stderr
+    hooks = json.loads(hooks_path.read_text())["hooks"]
+    pretool_cmds = [h["command"] for e in hooks["PreToolUse"] for h in e["hooks"]]
+    assert "engram pretool" in pretool_cmds
+    assert "engram pretool --target codex" in pretool_cmds
+
+
 def test_codex_target_uninstall_strips_only_engram_hooks(tmp_path):
     codex_dir = tmp_path / ".codex"
     codex_dir.mkdir()
@@ -69,6 +92,7 @@ def test_codex_target_uninstall_strips_only_engram_hooks(tmp_path):
     hooks_path.write_text(json.dumps({"hooks": {
         "Stop": [{"hooks": [
             {"type": "command", "command": "engram stop --target codex"},
+            {"type": "command", "command": "engram something-else"},
             {"type": "command", "command": "other stop"},
         ]}],
         "PreToolUse": [{"hooks": [
@@ -85,7 +109,7 @@ def test_codex_target_uninstall_strips_only_engram_hooks(tmp_path):
     hooks = json.loads(hooks_path.read_text())["hooks"]
     assert "PreToolUse" not in hooks
     stop_cmds = [h["command"] for e in hooks["Stop"] for h in e["hooks"]]
-    assert stop_cmds == ["other stop"]
+    assert stop_cmds == ["engram something-else", "other stop"]
 
 
 def test_migration_runs_before_engine_persistence():

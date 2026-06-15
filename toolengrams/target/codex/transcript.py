@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from ..claude_code.transcript import (
+from ..transcript_utils import (
     MAX_BASH_CMD_CHARS,
     MAX_RESULT_CHARS,
     _cap_delta,

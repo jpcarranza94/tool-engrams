@@ -11,6 +11,8 @@ vocabulary), the transcript formatter lives in `transcript.py` (moved from
 from __future__ import annotations
 
 import json
+import re
+import subprocess
 from datetime import date
 from pathlib import Path
 
@@ -20,6 +22,7 @@ from .collect import collect_sessions as _collect_sessions
 from .transcript import _format_delta
 
 NAME = "claude-code"
+cli_binary = "claude"
 
 # Claude Code emits a dedicated PostToolUseFailure event — that's what the
 # minimum version buys; detect_failure below is only used by the PostToolUse
@@ -117,6 +120,16 @@ def hook_status() -> dict[str, object]:
     missing = [event for event, marker in markers.items()
                if not _event_has_marker(hooks, event, marker)]
     return {"seen": bool(hooks), "missing": missing, "total": len(markers)}
+
+
+def installed_version() -> str | None:
+    try:
+        out = subprocess.run([cli_binary, "--version"], capture_output=True,
+                             text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    match = re.search(r"\d+\.\d+\.\d+", out or "")
+    return match.group(0) if match else None
 
 
 def is_wired() -> bool:

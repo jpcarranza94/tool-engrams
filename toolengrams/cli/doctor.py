@@ -16,21 +16,15 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import shutil
-import subprocess
 import time
 from pathlib import Path
 
 from .. import db, memory_store, paths, pause
 from ..engine import selection as engine_selection
 from ..target import TARGETS
-from ..target import claude_code as claude_target
-from ..target import codex as codex_target
 from ..retrieval.session_state import last_activity_ts
 from ..watcher import state as watcher_state
-
-MIN_CLAUDE = claude_target.min_version  # needs the PostToolUseFailure hook event
 
 PASS = "PASS"
 WARN = "WARN"
@@ -38,7 +32,7 @@ FAIL = "FAIL"
 
 # Hook event -> the command marker install.sh wires for it — owned by the
 # target adapter so doctor, installer, and uninstaller stay in lockstep.
-HOOK_MARKERS = claude_target.hook_markers()
+HOOK_MARKERS = TARGETS["claude-code"].hook_markers()
 
 ENGRAM_PERMISSION = "Bash(engram *)"
 
@@ -73,8 +67,7 @@ def run_checks() -> list[dict]:
         _check_hooks(),
         _check_permission(),
         _check_engram_on_path(),
-        _check_claude_version(),
-        _check_codex_version(),
+        *_check_target_versions(),
         _check_engine(),
         _check_home(),
         _check_db(),
@@ -99,15 +92,6 @@ def _load_settings() -> dict | None:
         return json.loads(path.read_text())
     except (OSError, json.JSONDecodeError):
         return None
-
-
-def _event_has_marker(hooks: dict, event: str, marker: str) -> bool:
-    for entry in hooks.get(event, []):
-        for h in entry.get("hooks", []):
-            cmd = h.get("command", "")
-            if cmd == marker or cmd.startswith(marker + " "):
-                return True
-    return False
 
 
 def _check_hooks() -> dict:
@@ -158,70 +142,35 @@ def _check_engram_on_path() -> dict:
                   "(venv installs: ~/.local/bin)")
 
 
-def _check_claude_version() -> dict:
-    if not shutil.which("claude"):
-        claude_status = _target_hook_status(claude_target)
-        codex_status = _target_hook_status(codex_target)
-        if (not claude_status["seen"] or claude_status["missing"]) and codex_status["seen"]:
-            return _check("claude", WARN,
-                          "Claude Code CLI not found, but claude-code target "
-                          "hooks are not wired")
-        return _check("claude", FAIL,
-                      "Claude Code CLI ('claude') not found on PATH")
-    version = _claude_version()
-    if version is None:
-        return _check("claude", WARN,
-                      "could not parse 'claude --version' output — "
-                      f"verify it is >= {MIN_CLAUDE} yourself")
-    if _version_tuple(version) < _version_tuple(MIN_CLAUDE):
-        return _check("claude", FAIL,
-                      f"claude {version} < {MIN_CLAUDE} — the PostToolUseFailure "
-                      "hook never fires on this version; update Claude Code")
-    return _check("claude", PASS, f"claude {version} (>= {MIN_CLAUDE})")
+def _check_target_versions() -> list[dict]:
+    return [_check_target_version(target) for target in TARGETS.values()]
 
 
-def _check_codex_version() -> dict:
-    status = _target_hook_status(codex_target)
+def _check_target_version(target) -> dict:
+    status = _target_hook_status(target)
     if not status["seen"]:
-        return _check("codex", WARN, "codex target hooks not wired")
+        return _check(target.NAME, WARN, f"{target.NAME} target hooks not wired")
     if status["missing"]:
-        return _check("codex", FAIL,
-                      f"codex target hooks incomplete: missing "
-                      f"{', '.join(sorted(status['missing']))}")
-    if not shutil.which("codex"):
-        return _check("codex", FAIL,
-                      "Codex CLI ('codex') not found on PATH")
-    version = _codex_version()
+        return _check(
+            target.NAME,
+            FAIL,
+            f"{target.NAME} target hooks incomplete: missing "
+            f"{', '.join(sorted(status['missing']))}",
+        )
+    if not shutil.which(target.cli_binary):
+        return _check(target.NAME, FAIL,
+                      f"{target.NAME} CLI ('{target.cli_binary}') not found on PATH")
+    version = target.installed_version()
     if version is None:
-        return _check("codex", WARN,
-                      "could not parse 'codex --version' output — "
-                      f"verify it is >= {codex_target.min_version} yourself")
-    if _version_tuple(version) < _version_tuple(codex_target.min_version):
-        return _check("codex", FAIL,
-                      f"codex {version} < {codex_target.min_version} — update Codex")
-    return _check("codex", PASS,
-                  f"codex {version} (>= {codex_target.min_version})")
-
-
-def _codex_version() -> str | None:
-    try:
-        out = subprocess.run(["codex", "--version"], capture_output=True,
-                             text=True, timeout=10).stdout
-    except (OSError, subprocess.SubprocessError):
-        return None
-    match = re.search(r"\d+\.\d+\.\d+", out or "")
-    return match.group(0) if match else None
-
-
-def _claude_version() -> str | None:
-    """Parsed x.y.z from `claude --version`, or None. Isolated for tests."""
-    try:
-        out = subprocess.run(["claude", "--version"], capture_output=True,
-                             text=True, timeout=10).stdout
-    except (OSError, subprocess.SubprocessError):
-        return None
-    match = re.search(r"\d+\.\d+\.\d+", out or "")
-    return match.group(0) if match else None
+        return _check(target.NAME, WARN,
+                      f"could not parse '{target.cli_binary} --version' output — "
+                      f"verify it is >= {target.min_version} yourself")
+    if _version_tuple(version) < _version_tuple(target.min_version):
+        return _check(target.NAME, FAIL,
+                      f"{target.cli_binary} {version} < {target.min_version} — "
+                      f"update {target.NAME}")
+    return _check(target.NAME, PASS,
+                  f"{target.cli_binary} {version} (>= {target.min_version})")
 
 
 def _version_tuple(version: str) -> tuple[int, ...]:

@@ -79,16 +79,16 @@ hooks = data.setdefault("hooks", {})
 
 tool_matcher = "Bash|apply_patch"
 wiring = [
-    ("SessionStart", "engram session-start", "engram session-start --target codex", "", 5000),
-    ("PreToolUse", "engram pretool", "engram pretool --target codex", tool_matcher, 3000),
-    ("PostToolUse", "engram post-tool", "engram post-tool --target codex", tool_matcher, 3000),
-    ("UserPromptSubmit", "engram user-prompt", "engram user-prompt --target codex", "", 2000),
-    ("Stop", "engram stop", "engram stop --target codex", "", 5000),
-    ("PreCompact", "engram flush", "engram flush --target codex", "", 5000),
+    ("SessionStart", "engram session-start --target codex", "", 5000),
+    ("PreToolUse", "engram pretool --target codex", tool_matcher, 3000),
+    ("PostToolUse", "engram post-tool --target codex", tool_matcher, 3000),
+    ("UserPromptSubmit", "engram user-prompt --target codex", "", 2000),
+    ("Stop", "engram stop --target codex", "", 5000),
+    ("PreCompact", "engram flush --target codex", "", 5000),
 ]
-for event, marker, command, matcher, timeout in wiring:
+for event, command, matcher, timeout in wiring:
     present = any(
-        h.get("command", "") == marker or h.get("command", "").startswith(marker + " ")
+        h.get("command", "") == command or h.get("command", "").startswith(command + " ")
         for entry in hooks.get(event, [])
         for h in entry.get("hooks", [])
     )
@@ -123,12 +123,24 @@ hooks_path = Path(sys.argv[1])
 data = json.loads(hooks_path.read_text())
 hooks = data.get("hooks", {})
 removed = 0
+commands = {
+    "engram session-start --target codex",
+    "engram pretool --target codex",
+    "engram post-tool --target codex",
+    "engram user-prompt --target codex",
+    "engram stop --target codex",
+    "engram flush --target codex",
+}
 for event in list(hooks):
     kept_entries = []
     for entry in hooks[event]:
         entry_hooks = entry.get("hooks", [])
         kept_hooks = [h for h in entry_hooks
-                      if not h.get("command", "").startswith("engram ")]
+                      if not any(
+                          h.get("command", "") == command
+                          or h.get("command", "").startswith(command + " ")
+                          for command in commands
+                      )]
         removed += len(entry_hooks) - len(kept_hooks)
         if kept_hooks:
             entry["hooks"] = kept_hooks

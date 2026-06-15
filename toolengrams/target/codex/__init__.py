@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import re
+import subprocess
 from pathlib import Path
 
 from ...harness_names import CODEX
@@ -14,33 +16,33 @@ from .patch_parse import paths_from_patch
 from .transcript import format_delta as _format_delta
 
 NAME = CODEX
+cli_binary = "codex"
 min_version = "0.137.0"
 has_failure_event = False
 
 tool_whitelist: frozenset[str] = frozenset({"Bash", "apply_patch"})
 
 _HOOK_MARKERS = {
-    "SessionStart": "engram session-start",
-    "UserPromptSubmit": "engram user-prompt",
-    "PreToolUse": "engram pretool",
-    "PostToolUse": "engram post-tool",
-    "Stop": "engram stop",
-    "PreCompact": "engram flush",
+    "SessionStart": "engram session-start --target codex",
+    "UserPromptSubmit": "engram user-prompt --target codex",
+    "PreToolUse": "engram pretool --target codex",
+    "PostToolUse": "engram post-tool --target codex",
+    "Stop": "engram stop --target codex",
+    "PreCompact": "engram flush --target codex",
 }
 
-_STRING_FAILURE_MARKERS = (
-    "command not found",
-    "no such file or directory",
-    "permission denied",
-    "operation not permitted",
-    "not a git repository",
+_FAILURE_PREFIXES = (
     "fatal:",
     "traceback (most recent call last):",
     "apply_patch verification failed",
     "verification failed:",
     "failed to read file",
     "failed to apply patch",
-    "os error ",
+)
+_DIAGNOSTIC_RE = re.compile(
+    r"^[\w./-]+: .*"
+    r"(command not found|no such file or directory|permission denied|"
+    r"operation not permitted|not a git repository|os error \d+)"
 )
 
 
@@ -80,8 +82,19 @@ def detect_failure(payload: dict) -> bool:
     if isinstance(response, str):
         # Codex Bash PostToolUse currently gives hooks only aggregated output,
         # not status. Nonzero exits with no clear diagnostic are undetectable.
-        text = response.lower()
-        return any(marker in text for marker in _STRING_FAILURE_MARKERS)
+        return _string_response_failed(response)
+    return False
+
+
+def _string_response_failed(response: str) -> bool:
+    for line in response.splitlines():
+        text = line.strip().lower()
+        if not text:
+            continue
+        if text.startswith(_FAILURE_PREFIXES):
+            return True
+        if _DIAGNOSTIC_RE.search(text):
+            return True
     return False
 
 
@@ -109,14 +122,52 @@ def _load_hooks() -> dict | None:
         return None
 
 
+def _hooks_feature_enabled() -> bool:
+    path = Path.home() / ".codex" / "config.toml"
+    try:
+        lines = path.read_text().splitlines()
+    except OSError:
+        return False
+    in_features = False
+    for line in lines:
+        stripped = line.split("#", 1)[0].strip()
+        if not stripped:
+            continue
+        if stripped.startswith("[") and stripped.endswith("]"):
+            in_features = stripped == "[features]"
+            continue
+        if in_features and stripped.startswith("hooks"):
+            key, sep, value = stripped.partition("=")
+            if sep and key.strip() == "hooks":
+                return value.strip().lower() == "true"
+    return False
+
+
 def hook_status() -> dict[str, object]:
     hooks = _load_hooks()
     markers = hook_markers()
     if hooks is None:
         return {"seen": False, "missing": list(markers), "total": len(markers)}
-    missing = [event for event, marker in markers.items()
-               if not _event_has_marker(hooks, event, marker)]
-    return {"seen": bool(hooks), "missing": missing, "total": len(markers)}
+    matched: list[str] = []
+    missing: list[str] = []
+    for event, marker in markers.items():
+        if _event_has_marker(hooks, event, marker):
+            matched.append(event)
+        else:
+            missing.append(event)
+    if matched and not _hooks_feature_enabled():
+        missing.append("features.hooks")
+    return {"seen": bool(matched), "missing": missing, "total": len(markers)}
+
+
+def installed_version() -> str | None:
+    try:
+        out = subprocess.run([cli_binary, "--version"], capture_output=True,
+                             text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    match = re.search(r"\d+\.\d+\.\d+", out or "")
+    return match.group(0) if match else None
 
 
 def is_wired() -> bool:

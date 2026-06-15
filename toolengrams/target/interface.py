@@ -42,6 +42,8 @@ class TargetAdapter(Protocol):
     tool_whitelist: frozenset[str]
     # Minimum harness version the install supports (doctor enforces).
     min_version: str
+    # CLI binary name doctor checks when this target is wired.
+    cli_binary: str
     # Whether the target has a dedicated PostToolUseFailure hook event.
     has_failure_event: bool
 
@@ -59,5 +61,7 @@ class TargetAdapter(Protocol):
     def hook_markers(self) -> dict[str, str]: ...
 
     def hook_status(self) -> dict[str, object]: ...
+
+    def installed_version(self) -> str | None: ...
 
     def is_wired(self) -> bool: ...
