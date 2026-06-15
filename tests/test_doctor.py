@@ -16,6 +16,7 @@ import pytest
 from toolengrams import paths
 from toolengrams.cli import doctor
 from toolengrams.retrieval.session_state import increment_session_turn
+from toolengrams.target import claude_code, codex
 from toolengrams.watcher import state as watcher_state
 
 
@@ -34,6 +35,37 @@ def _write_settings(home: Path, *, drop_event: str | None = None,
     (claude_dir / "settings.json").write_text(json.dumps(settings))
 
 
+def _write_codex_hooks(
+    home: Path,
+    *,
+    drop_event: str | None = None,
+    features_enabled: bool | None = True,
+    bare_commands: bool = False,
+) -> None:
+    hooks = {}
+    for event, marker in codex.hook_markers().items():
+        if event == drop_event:
+            continue
+        command = marker.replace(" --target codex", "") if bare_commands else marker
+        hooks[event] = [{"hooks": [{"type": "command", "command": command}]}]
+    codex_dir = home / ".codex"
+    codex_dir.mkdir(parents=True, exist_ok=True)
+    if features_enabled is not None:
+        value = "true" if features_enabled else "false"
+        (codex_dir / "config.toml").write_text(f"[features]\nhooks = {value}\n")
+    (codex_dir / "hooks.json").write_text(json.dumps({"hooks": hooks}))
+
+
+def _write_unrelated_codex_hooks(home: Path) -> None:
+    codex_dir = home / ".codex"
+    codex_dir.mkdir(parents=True, exist_ok=True)
+    (codex_dir / "hooks.json").write_text(json.dumps({
+        "hooks": {"PreToolUse": [
+            {"hooks": [{"type": "command", "command": "echo unrelated"}]},
+        ]},
+    }))
+
+
 @pytest.fixture
 def fake_home(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
@@ -47,6 +79,41 @@ def test_hooks_pass_when_all_events_wired(fake_home):
     _write_settings(fake_home)
     result = doctor._check_hooks()
     assert result["status"] == doctor.PASS
+
+
+def test_hooks_pass_with_codex_only_wiring(fake_home):
+    _write_codex_hooks(fake_home)
+    result = doctor._check_hooks()
+    assert result["status"] == doctor.PASS
+    assert "codex" in result["detail"]
+
+
+def test_hooks_fail_when_codex_wiring_partial(fake_home):
+    _write_codex_hooks(fake_home, drop_event="Stop")
+    result = doctor._check_hooks()
+    assert result["status"] == doctor.FAIL
+    assert "codex" in result["detail"] and "Stop" in result["detail"]
+
+
+def test_unrelated_codex_hooks_do_not_count_as_partial_wiring(fake_home):
+    _write_unrelated_codex_hooks(fake_home)
+    result = doctor._check_hooks()
+    assert result["status"] == doctor.FAIL
+    assert "partial target wiring" not in result["detail"]
+
+
+def test_codex_hooks_require_features_enabled(fake_home):
+    _write_codex_hooks(fake_home, features_enabled=False)
+    result = doctor._check_hooks()
+    assert result["status"] == doctor.FAIL
+    assert "features.hooks" in result["detail"]
+
+
+def test_codex_bare_commands_do_not_count_as_wired(fake_home):
+    _write_codex_hooks(fake_home, bare_commands=True)
+    result = doctor._check_hooks()
+    assert result["status"] == doctor.FAIL
+    assert "partial target wiring" not in result["detail"]
 
 
 def test_hooks_fail_when_event_missing(fake_home):
@@ -83,34 +150,54 @@ def test_permission_warns_when_missing(fake_home):
     assert result["status"] == doctor.WARN
 
 
-# ---------- claude version check ----------
+# ---------- target version check ----------
 
 
-def test_claude_version_too_old_fails(monkeypatch):
+def test_target_version_too_old_fails(fake_home, monkeypatch):
+    _write_settings(fake_home)
     monkeypatch.setattr(doctor.shutil, "which", lambda name: f"/usr/bin/{name}")
-    monkeypatch.setattr(doctor, "_claude_version", lambda: "2.1.100")
-    result = doctor._check_claude_version()
+    monkeypatch.setattr(claude_code, "installed_version", lambda: "2.1.100")
+    result = doctor._check_target_version(claude_code)
     assert result["status"] == doctor.FAIL
 
 
-def test_claude_version_new_enough_passes(monkeypatch):
+def test_target_version_new_enough_passes(fake_home, monkeypatch):
+    _write_settings(fake_home)
     monkeypatch.setattr(doctor.shutil, "which", lambda name: f"/usr/bin/{name}")
-    monkeypatch.setattr(doctor, "_claude_version", lambda: "2.2.0")
-    result = doctor._check_claude_version()
+    monkeypatch.setattr(claude_code, "installed_version", lambda: "2.2.0")
+    result = doctor._check_target_version(claude_code)
     assert result["status"] == doctor.PASS
 
 
-def test_claude_missing_fails(monkeypatch):
+def test_target_binary_missing_fails(fake_home, monkeypatch):
+    _write_settings(fake_home)
     monkeypatch.setattr(doctor.shutil, "which", lambda name: None)
-    result = doctor._check_claude_version()
+    result = doctor._check_target_version(claude_code)
     assert result["status"] == doctor.FAIL
 
 
-def test_claude_unparseable_version_warns(monkeypatch):
+def test_target_unparseable_version_warns(fake_home, monkeypatch):
+    _write_settings(fake_home)
     monkeypatch.setattr(doctor.shutil, "which", lambda name: f"/usr/bin/{name}")
-    monkeypatch.setattr(doctor, "_claude_version", lambda: None)
-    result = doctor._check_claude_version()
+    monkeypatch.setattr(claude_code, "installed_version", lambda: None)
+    result = doctor._check_target_version(claude_code)
     assert result["status"] == doctor.WARN
+
+
+def test_unwired_target_version_warns(fake_home):
+    result = doctor._check_target_version(codex)
+    assert result["status"] == doctor.WARN
+    assert "not wired" in result["detail"]
+
+
+def test_target_versions_only_reports_wired_targets(fake_home, monkeypatch):
+    _write_settings(fake_home)
+    monkeypatch.setattr(doctor.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(claude_code, "installed_version", lambda: "2.2.0")
+
+    checks = doctor._check_target_versions()
+
+    assert [c["name"] for c in checks] == ["claude-code"]
 
 
 # ---------- liveness ----------
@@ -241,7 +328,7 @@ def test_watcher_liveness_passes_after_tick(temp_db):
 def test_main_json_exit_codes(fake_home, temp_db, monkeypatch, capsys):
     _write_settings(fake_home)
     monkeypatch.setattr(doctor.shutil, "which", lambda name: f"/usr/bin/{name}")
-    monkeypatch.setattr(doctor, "_claude_version", lambda: "2.2.0")
+    monkeypatch.setattr(claude_code, "installed_version", lambda: "2.2.0")
 
     # Fresh-but-quiet install: WARNs only -> healthy exit 0.
     assert doctor.main(["--json"]) == 0

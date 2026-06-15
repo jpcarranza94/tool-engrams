@@ -16,6 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 INSTALL_SH = REPO_ROOT / "install.sh"
 CLAUDE_TARGET_SH = REPO_ROOT / "install" / "targets" / "claude-code.sh"
 CODEX_ENGINE_SH = REPO_ROOT / "install" / "engines" / "codex.sh"
+CODEX_TARGET_SH = REPO_ROOT / "install" / "targets" / "codex.sh"
 
 HOOK_EVENTS = {
     "SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse",
@@ -33,6 +34,133 @@ def test_wired_commands_carry_target_flag():
     text = CLAUDE_TARGET_SH.read_text()
     assert "engram pretool --target claude-code" in text
     assert "engram flush --target claude-code" in text
+
+
+def test_codex_target_script_wires_supported_events_and_features(tmp_path):
+    codex_dir = tmp_path / ".codex"
+    env = {"HOME": str(tmp_path), "PATH": "/usr/bin:/bin",
+           "CODEX_CONFIG": str(codex_dir / "config.toml"),
+           "CODEX_HOOKS": str(codex_dir / "hooks.json")}
+
+    proc = subprocess.run(["bash", str(CODEX_TARGET_SH), "install"],
+                          capture_output=True, text=True, env=env)
+
+    assert proc.returncode == 0, proc.stderr
+    assert "trust" in proc.stdout.lower()
+    assert "[features]" in (codex_dir / "config.toml").read_text()
+    assert "hooks = true" in (codex_dir / "config.toml").read_text()
+    hooks = json.loads((codex_dir / "hooks.json").read_text())["hooks"]
+    assert set(hooks) == {
+        "SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse",
+        "Stop", "PreCompact",
+    }
+    assert "PostToolUseFailure" not in hooks
+    assert "SessionEnd" not in hooks
+    cmds = [h["command"] for entries in hooks.values()
+            for entry in entries for h in entry["hooks"]]
+    assert "engram pretool --target codex" in cmds
+    assert "engram flush --target codex" in cmds
+
+
+def test_codex_target_script_defaults_to_codex_home(tmp_path):
+    codex_home = tmp_path / "custom-codex"
+    env = {"HOME": str(tmp_path), "PATH": "/usr/bin:/bin",
+           "CODEX_HOME": str(codex_home)}
+
+    proc = subprocess.run(["bash", str(CODEX_TARGET_SH), "install"],
+                          capture_output=True, text=True, env=env)
+
+    assert proc.returncode == 0, proc.stderr
+    assert (codex_home / "config.toml").is_file()
+    assert (codex_home / "hooks.json").is_file()
+
+
+def test_codex_target_script_refuses_invalid_hooks_json(tmp_path):
+    codex_dir = tmp_path / ".codex"
+    codex_dir.mkdir()
+    hooks_path = codex_dir / "hooks.json"
+    hooks_path.write_text("{not valid json")
+    config_path = codex_dir / "config.toml"
+    env = {"HOME": str(tmp_path), "PATH": "/usr/bin:/bin",
+           "CODEX_CONFIG": str(config_path),
+           "CODEX_HOOKS": str(hooks_path)}
+
+    proc = subprocess.run(["bash", str(CODEX_TARGET_SH), "install"],
+                          capture_output=True, text=True, env=env)
+
+    assert proc.returncode == 1
+    assert "refusing to overwrite invalid Codex hooks JSON" in proc.stdout
+    assert hooks_path.read_text() == "{not valid json"
+    assert not config_path.exists()
+
+
+def test_codex_target_script_refuses_nonobject_hooks_json(tmp_path):
+    codex_dir = tmp_path / ".codex"
+    codex_dir.mkdir()
+    hooks_path = codex_dir / "hooks.json"
+    hooks_path.write_text(json.dumps({"hooks": []}))
+    config_path = codex_dir / "config.toml"
+    env = {"HOME": str(tmp_path), "PATH": "/usr/bin:/bin",
+           "CODEX_CONFIG": str(config_path),
+           "CODEX_HOOKS": str(hooks_path)}
+
+    proc = subprocess.run(["bash", str(CODEX_TARGET_SH), "install"],
+                          capture_output=True, text=True, env=env)
+
+    assert proc.returncode == 1
+    assert "hooks must be an object" in proc.stdout
+    assert not config_path.exists()
+
+
+def test_codex_target_script_does_not_treat_bare_engram_as_wired(tmp_path):
+    codex_dir = tmp_path / ".codex"
+    codex_dir.mkdir()
+    hooks_path = codex_dir / "hooks.json"
+    hooks_path.write_text(json.dumps({"hooks": {
+        "PreToolUse": [{"hooks": [
+            {"type": "command", "command": "engram pretool"},
+        ]}],
+    }}))
+    env = {"HOME": str(tmp_path), "PATH": "/usr/bin:/bin",
+           "CODEX_CONFIG": str(codex_dir / "config.toml"),
+           "CODEX_HOOKS": str(hooks_path)}
+
+    proc = subprocess.run(["bash", str(CODEX_TARGET_SH), "install"],
+                          capture_output=True, text=True, env=env)
+
+    assert proc.returncode == 0, proc.stderr
+    hooks = json.loads(hooks_path.read_text())["hooks"]
+    pretool_cmds = [h["command"] for e in hooks["PreToolUse"] for h in e["hooks"]]
+    assert "engram pretool" in pretool_cmds
+    assert "engram pretool --target codex" in pretool_cmds
+    assert (codex_dir / "hooks.json.install.bak").is_file()
+
+
+def test_codex_target_uninstall_strips_only_engram_hooks(tmp_path):
+    codex_dir = tmp_path / ".codex"
+    codex_dir.mkdir()
+    hooks_path = codex_dir / "hooks.json"
+    hooks_path.write_text(json.dumps({"hooks": {
+        "Stop": [{"hooks": [
+            {"type": "command", "command": "engram stop --target codex"},
+            {"type": "command", "command": "engram something-else"},
+            {"type": "command", "command": "other stop"},
+        ]}],
+        "PreToolUse": [{"hooks": [
+            {"type": "command", "command": "engram pretool --target codex"},
+        ]}],
+    }}))
+    env = {"HOME": str(tmp_path), "PATH": "/usr/bin:/bin",
+           "CODEX_HOOKS": str(hooks_path)}
+
+    proc = subprocess.run(["bash", str(CODEX_TARGET_SH), "uninstall"],
+                          capture_output=True, text=True, env=env)
+
+    assert proc.returncode == 0, proc.stderr
+    hooks = json.loads(hooks_path.read_text())["hooks"]
+    assert "PreToolUse" not in hooks
+    stop_cmds = [h["command"] for e in hooks["Stop"] for h in e["hooks"]]
+    assert stop_cmds == ["engram something-else", "other stop"]
 
 
 def test_migration_runs_before_engine_persistence():

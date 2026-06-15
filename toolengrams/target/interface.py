@@ -42,6 +42,10 @@ class TargetAdapter(Protocol):
     tool_whitelist: frozenset[str]
     # Minimum harness version the install supports (doctor enforces).
     min_version: str
+    # CLI binary name doctor checks when this target is wired.
+    cli_binary: str
+    # Whether the target has a dedicated PostToolUseFailure hook event.
+    has_failure_event: bool
 
     def extract_hints(self, tool_name: str, tool_input: dict) -> ExtractedTriggerHint: ...
 
@@ -51,7 +55,16 @@ class TargetAdapter(Protocol):
 
     def format_delta(self, lines: list[str]) -> str: ...
 
+    # Return sessions the target considers part of target_date. Some harnesses
+    # store sessions by modified time; Codex stores rollout files under
+    # YYYY/MM/DD directories, so its collector follows that storage day.
     def collect_sessions(self, target_date: date,
                          projects_dir: Path | None = None) -> list[SessionFile]: ...
 
     def hook_markers(self) -> dict[str, str]: ...
+
+    def hook_status(self) -> dict[str, object]: ...
+
+    def installed_version(self) -> str | None: ...
+
+    def is_wired(self) -> bool: ...

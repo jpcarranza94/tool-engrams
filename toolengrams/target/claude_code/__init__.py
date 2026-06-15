@@ -11,6 +11,8 @@ vocabulary), the transcript formatter lives in `transcript.py` (moved from
 from __future__ import annotations
 
 import json
+import re
+import subprocess
 from datetime import date
 from pathlib import Path
 
@@ -20,11 +22,13 @@ from .collect import collect_sessions as _collect_sessions
 from .transcript import _format_delta
 
 NAME = "claude-code"
+cli_binary = "claude"
 
 # Claude Code emits a dedicated PostToolUseFailure event — that's what the
 # minimum version buys; detect_failure below is only used by the PostToolUse
 # recovery path.
 min_version = "2.1.117"
+has_failure_event = True
 
 # Tools whose pre/post-failure events trigger memory surfacing. New tools
 # added to Claude Code that should bind memories go here, not in two places.
@@ -98,3 +102,44 @@ def collect_sessions(target_date: date, projects_dir: Path | None = None):
 
 def hook_markers() -> dict[str, str]:
     return dict(_HOOK_MARKERS)
+
+
+def _load_hooks() -> dict | None:
+    settings_path = Path.home() / ".claude" / "settings.json"
+    try:
+        return json.loads(settings_path.read_text()).get("hooks", {})
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def hook_status() -> dict[str, object]:
+    hooks = _load_hooks()
+    markers = hook_markers()
+    if hooks is None:
+        return {"seen": False, "missing": list(markers), "total": len(markers)}
+    missing = [event for event, marker in markers.items()
+               if not _event_has_marker(hooks, event, marker)]
+    return {"seen": bool(hooks), "missing": missing, "total": len(markers)}
+
+
+def installed_version() -> str | None:
+    try:
+        out = subprocess.run([cli_binary, "--version"], capture_output=True,
+                             text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    match = re.search(r"\d+\.\d+\.\d+", out or "")
+    return match.group(0) if match else None
+
+
+def is_wired() -> bool:
+    status = hook_status()
+    return bool(status["seen"]) and not status["missing"]
+
+
+def _event_has_marker(hooks: dict, event: str, marker: str) -> bool:
+    return any(
+        h.get("command", "") == marker or h.get("command", "").startswith(marker + " ")
+        for entry in hooks.get(event, [])
+        for h in entry.get("hooks", [])
+    )

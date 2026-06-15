@@ -1,0 +1,13 @@
+{
+  "session_id": "codex-sess-fail",
+  "turn_id": "019ec1f2-f46b-7240-9876-77dfce80dedc",
+  "transcript_path": "/Users/jpcar/.codex/sessions/2026/06/13/rollout-2026-06-13T11-06-25-019ec1f2-f339-7a13-8902-9b294d26f841.jsonl",
+  "cwd": "/tmp/codex-hook-capture-repo",
+  "hook_event_name": "PostToolUse",
+  "model": "gpt-5.5",
+  "permission_mode": "bypassPermissions",
+  "tool_name": "Bash",
+  "tool_input": {"command": "ls /no-such-dir-toolengrams-capture"},
+  "tool_response": "ls: /no-such-dir-toolengrams-capture: No such file or directory\n",
+  "tool_use_id": "call_5ArQhjLFuw2RDGjDUvqi8ZXo"
+}

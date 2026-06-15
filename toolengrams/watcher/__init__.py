@@ -19,14 +19,14 @@ Module layout:
 from . import cleanup, tick
 from ..engine.claude_code import DEFAULT_WATCHER_MODEL
 from ..target.claude_code import derive_transcript_path
-from ..target.claude_code.transcript import (
+from ..target.claude_code.transcript import _format_delta
+from ..target.transcript_utils import (
     MAX_BASH_CMD_CHARS,
     MAX_DELTA_CHARS,
     MAX_RESULT_CHARS,
     _cap_delta,
     _clip_ends,
     _clip_head,
-    _format_delta,
 )
 from .agent import (
     DEFAULT_WATCHER_TIMEOUT,
