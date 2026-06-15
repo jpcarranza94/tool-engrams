@@ -16,6 +16,19 @@ from toolengrams import db
 from toolengrams.watcher import SessionResult, log as wlog, state, tick
 
 
+def test_spawn_tick_detaches_stdin(monkeypatch):
+    """The detached tick must not inherit the hook's stdin pipe, or the engine
+    child it spawns (`codex exec`/`claude -p`) blocks reading it until timeout."""
+    captured = {}
+    monkeypatch.setattr(tick.subprocess, "Popen",
+                        lambda *a, **k: captured.update(k))
+    tick.spawn_tick("sess", "/tmp/t.jsonl", "/tmp/proj",
+                    role="formation", target="codex")
+    assert captured["stdin"] is tick.subprocess.DEVNULL
+    assert captured["stdout"] is tick.subprocess.DEVNULL
+    assert captured["start_new_session"] is True
+
+
 # ---------- transcript + runner helpers ----------
 
 

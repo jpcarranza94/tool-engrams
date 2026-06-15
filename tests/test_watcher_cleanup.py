@@ -140,10 +140,12 @@ def test_spawn_fires_once_when_marker_stale_then_regates(tmp_path, monkeypatch):
     monkeypatch.setattr(cleanup, "_marker_path", lambda: marker)
     spawned = []
     monkeypatch.setattr(cleanup.subprocess, "Popen",
-                        lambda *a, **k: spawned.append(a))
+                        lambda *a, **k: spawned.append((a, k)))
 
     assert cleanup.maybe_spawn_cleanup() is True
     assert len(spawned) == 1
+    # Detached reaper must not inherit the caller's stdin pipe.
+    assert spawned[0][1]["stdin"] is cleanup.subprocess.DEVNULL
     # The marker was touched before spawning, so the next call is gated.
     assert cleanup.maybe_spawn_cleanup() is False
     assert len(spawned) == 1
