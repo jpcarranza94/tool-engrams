@@ -9,9 +9,11 @@ brain replaying the day's experiences.
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import sys
 import time
+from contextlib import contextmanager
 from dataclasses import replace
 from datetime import date, timedelta
 
@@ -84,19 +86,57 @@ def main(argv: list[str] | None = None) -> int:
             _print_dry_run(conn, targets)
             return 0
 
-        # Housekeeping once per invocation (not once per backfilled day): prune
-        # old session_surfaces + watcher run-log rows.
-        now_ts = int(time.time())
-        cleaned = session_state.prune_surfaces_before(
-            conn, now_ts - SURFACES_TTL_DAYS * 86400)
-        runs_store.prune_runs_before(conn, now_ts - WATCHER_RUNS_TTL_DAYS * 86400)
+        # Single-sweep lock: RunAtLoad (boot) + the 8 AM StartCalendarInterval
+        # can fire two `engram consolidate` processes that overlap (a multi-day
+        # sweep runs for minutes per day), and a 30-min agent call sits between
+        # was_run() and record_run() — so two sweeps could both spawn an Opus
+        # agent for the same day. Non-blocking: a second concurrent sweep exits
+        # cleanly rather than double-spending.
+        with _consolidate_lock() as acquired:
+            if not acquired:
+                print(json.dumps({"action": "skipped", "reason": "already_running"}))
+                return 0
 
-        # Consolidate each candidate day, oldest first, so a later day's
-        # surfacing evaluation sees the memory state earlier days left behind.
-        results = [_consolidate_date(conn, target, force=args.force)
-                   for target in targets]
+            # Housekeeping once per invocation (not once per backfilled day):
+            # prune old session_surfaces + watcher run-log rows.
+            now_ts = int(time.time())
+            cleaned = session_state.prune_surfaces_before(
+                conn, now_ts - SURFACES_TTL_DAYS * 86400)
+            runs_store.prune_runs_before(conn, now_ts - WATCHER_RUNS_TTL_DAYS * 86400)
 
-        return _print_results(results, cleaned, json_out=args.json)
+            # Consolidate each candidate day, oldest first, so a later day's
+            # surfacing evaluation sees the memory state earlier days left behind.
+            results = [_consolidate_date(conn, target, force=args.force)
+                       for target in targets]
+
+            return _print_results(results, cleaned, json_out=args.json)
+
+
+@contextmanager
+def _consolidate_lock():
+    """Non-blocking process lock so overlapping fires don't double-spend Opus
+    calls on the same day. Yields True if acquired, False if another sweep holds
+    it. The lockfile lives next to the DB (honors $ENGRAM_DB in tests)."""
+    lock_dir = db.db_path().parent / "locks"
+    try:
+        lock_dir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        yield True  # can't create the lock dir → don't block the only sweep
+        return
+    f = open(lock_dir / "consolidate.lock", "w")
+    try:
+        try:
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            yield False
+            return
+        yield True
+    finally:
+        try:
+            fcntl.flock(f, fcntl.LOCK_UN)
+        except Exception:
+            pass
+        f.close()
 
 
 def _consolidate_date(conn, target: date, *, force: bool) -> dict:
@@ -220,7 +260,9 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--dry-run", action="store_true",
                         help="Show what would happen; don't spawn agent.")
     parser.add_argument("--force", action="store_true",
-                        help="Re-run even if already consolidated.")
+                        help="Re-run even if already consolidated. With "
+                             "--yesterday this re-runs the WHOLE catch-up window "
+                             "(up to 7 agent calls) — use --date to re-run one day.")
     parser.add_argument("--json", action="store_true",
                         help="JSON output.")
     parser.add_argument("--install-schedule", action="store_true",

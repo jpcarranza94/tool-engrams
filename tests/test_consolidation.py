@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import time
@@ -266,3 +267,41 @@ def test_catchup_error_day_is_not_recorded_so_it_retries(temp_db, monkeypatch):
     rc = consolidate.main(["--yesterday", "--json"])
     assert rc == 1                                        # surfaced as failure
     assert not consolidate.runs.was_run(temp_db, target)  # left un-run → retried next time
+
+
+def test_date_flag_emits_aggregate_shape(temp_db, monkeypatch, capsys):
+    # --date (manual backfill) goes through the same aggregate output as the
+    # catch-up sweep — pin the {status, surfaces_cleaned, runs:[...]} shape.
+    monkeypatch.setattr(consolidate, "collect_sessions", lambda d: [_one_session()])
+    monkeypatch.setattr(consolidate, "run_consolidation_agent",
+                        lambda **kw: _ok_agent())
+
+    rc = consolidate.main(["--date", "2026-01-02", "--json"])
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out.strip())
+    assert out["status"] == "completed"
+    assert "surfaces_cleaned" in out
+    assert out["runs"] == [{"status": "completed", "run_date": "2026-01-02",
+                            "sessions_scanned": 1, "error": None}]
+
+
+def test_catchup_skips_when_another_sweep_holds_lock(temp_db, monkeypatch, capsys):
+    # A second concurrent sweep must exit cleanly without spawning an agent.
+    monkeypatch.setattr(
+        consolidate, "collect_sessions",
+        lambda d: (_ for _ in ()).throw(AssertionError("ran while lock held")),
+    )
+
+    lock_dir = consolidate.db.db_path().parent / "locks"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    held = open(lock_dir / "consolidate.lock", "w")
+    fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    try:
+        rc = consolidate.main(["--yesterday", "--json"])
+    finally:
+        fcntl.flock(held, fcntl.LOCK_UN)
+        held.close()
+
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out.strip())
+    assert out == {"action": "skipped", "reason": "already_running"}
