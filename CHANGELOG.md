@@ -6,6 +6,22 @@ land on `main` without deprecation cycles; pin a tag if you need stability.
 ## [Unreleased]
 
 ### Changed
+- **Consolidation is a catch-up sweep (ADR-0011).** The scheduled
+  `--yesterday` run now consolidates every un-run day in the last 7 days
+  (oldest-first), not just `today - 1`. A day missed because the laptop was off
+  when the 8 AM job would fire is backfilled on the next run —
+  `consolidation_runs` is the coverage source of truth, so done days are
+  skipped. Empty days are no longer recorded (cheap to rescan, no run-history
+  pollution); errored days are no longer recorded either, so a transient
+  spawn/timeout/PATH failure is retried next run instead of permanently skipping
+  a day. `RunAtLoad` flips to `true` so the idempotent sweep drains backlog on
+  boot; a non-blocking `flock` (`consolidate.lock`) keeps the boot fire from
+  overlapping the 8 AM fire and double-spending an Opus call on the same day, and
+  connections now set `PRAGMA busy_timeout` so a contended writer waits instead
+  of failing fast. `--yesterday --json` output is now a
+  `{status, surfaces_cleaned, runs: [...]}` aggregate. Re-run
+  `engram consolidate --install-schedule` to pick up `RunAtLoad`. (Linux cron
+  has no `@reboot` parity — macOS only for now.)
 - **Stateless watcher ticks (ADR-0005).** Every formation/eval tick is now a
   fresh `claude -p` call — the resumed-conversation design is gone. A
   5-session transcript audit found conversation state changed the outcome in

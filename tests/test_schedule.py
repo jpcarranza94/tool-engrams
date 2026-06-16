@@ -75,3 +75,13 @@ def test_log_paths_in_plist(tmp_path, monkeypatch):
     xml = schedule._generate_plist()
     assert "/consolidate.log" in xml
     assert "/consolidate.err" in xml
+
+
+def test_plist_runs_at_load(monkeypatch):
+    # RunAtLoad must be true: the run is an idempotent catch-up sweep (ADR-0011),
+    # so firing on boot drains backlog the 8 AM StartCalendarInterval missed
+    # while the laptop was off. A silent revert to <false/> reintroduces the bug.
+    xml = schedule._generate_plist()
+    assert "<key>RunAtLoad</key>" in xml
+    assert "<true/>" in xml
+    assert "<false/>" not in xml

@@ -120,4 +120,10 @@ discover missed patterns. It aggregates per-memory `helpful`/`unused`/`noise`
 distributions and prefers **narrowing a trigger** over archiving when a memory is
 noisy (the noise is the trigger's fault, not the content's). Separate from the watcher
 ticks and from reinforcement.
+The scheduled run (`--yesterday`) is a **catch-up sweep**, not a single "yesterday":
+it consolidates every un-run day in the last `CATCHUP_LOOKBACK_DAYS` (7), oldest-first,
+so a day missed while the laptop was off is backfilled on the next run. `consolidation_runs`
+is the coverage source of truth (`was_run` skips done days); empty and errored days are
+deliberately *not* recorded — empty days stay cheap to rescan, errored days get retried.
+See docs/adr/0011.
 _Avoid_: cleanup, compaction, the nightly job.

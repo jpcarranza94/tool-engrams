@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import time
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -167,12 +168,140 @@ def test_consolidate_dry_run(temp_db, monkeypatch, capsys):
 
 def test_consolidate_idempotent(temp_db, monkeypatch, capsys):
     # Simulate a previous run by inserting directly.
+    today = date.today().isoformat()
     temp_db.execute(
         "INSERT INTO consolidation_runs (run_date, started_ts, completed_ts, sessions_scanned, report) "
         "VALUES (?, ?, ?, 0, 'done')",
-        (date.today().isoformat(), int(time.time()), int(time.time())),
+        (today, int(time.time()), int(time.time())),
     )
     rc = consolidate.main(["--json"])
     out = capsys.readouterr().out.strip()
     result = json.loads(out)
-    assert result["status"] == "already_run"
+    assert result["status"] == "completed"
+    assert result["runs"] == [{"status": "already_run", "run_date": today}]
+
+
+# ---------- catch-up backfill ----------
+
+
+def _one_session():
+    return SessionFile(
+        path=Path("/sessions/s.jsonl"),
+        session_id="s",
+        project_slug="proj",
+        modified_ts=1,
+        size_bytes=10,
+    )
+
+
+def _ok_agent(report='{"metrics": {"surfaces_evaluated": 2}}'):
+    return SimpleNamespace(error=None, report=report, returncode=0)
+
+
+def test_resolve_dates_yesterday_is_catchup_window():
+    dates = consolidate._resolve_dates(SimpleNamespace(date=None, yesterday=True))
+    today = date.today()
+    expected = [today - timedelta(days=n)
+                for n in range(consolidate.CATCHUP_LOOKBACK_DAYS, 0, -1)]
+    assert dates == expected
+    assert dates[-1] == today - timedelta(days=1)   # ends on yesterday
+    assert dates[0] < dates[-1]                      # oldest first
+
+
+def test_catchup_backfills_only_days_with_sessions(temp_db, monkeypatch, capsys):
+    today = date.today()
+    gap = (today - timedelta(days=3)).isoformat()
+
+    # Sessions exist only on the 3-days-ago gap day.
+    def fake_collect(target_date):
+        return [_one_session()] if target_date.isoformat() == gap else []
+    monkeypatch.setattr(consolidate, "collect_sessions", fake_collect)
+
+    ran = []
+
+    def fake_agent(*, sessions, db_path, target_date):
+        ran.append(target_date)
+        return _ok_agent()
+    monkeypatch.setattr(consolidate, "run_consolidation_agent", fake_agent)
+
+    rc = consolidate.main(["--yesterday", "--json"])
+    assert rc == 0
+    assert ran == [gap]                                  # only the day with sessions
+    assert consolidate.runs.was_run(temp_db, gap)        # and it was recorded
+
+
+def test_catchup_skips_already_run_days(temp_db, monkeypatch):
+    today = date.today()
+    done = (today - timedelta(days=2)).isoformat()
+    temp_db.execute(
+        "INSERT INTO consolidation_runs (run_date, started_ts, completed_ts, sessions_scanned, report) "
+        "VALUES (?, ?, ?, 1, 'done')",
+        (done, int(time.time()), int(time.time())),
+    )
+
+    monkeypatch.setattr(consolidate, "collect_sessions", lambda d: [_one_session()])
+
+    ran = []
+
+    def fake_agent(*, sessions, db_path, target_date):
+        ran.append(target_date)
+        return _ok_agent()
+    monkeypatch.setattr(consolidate, "run_consolidation_agent", fake_agent)
+
+    consolidate.main(["--yesterday", "--json"])
+    assert done not in ran                                # recorded day never re-run
+
+
+def test_catchup_error_day_is_not_recorded_so_it_retries(temp_db, monkeypatch):
+    today = date.today()
+    target = (today - timedelta(days=1)).isoformat()
+
+    def fake_collect(target_date):
+        return [_one_session()] if target_date.isoformat() == target else []
+    monkeypatch.setattr(consolidate, "collect_sessions", fake_collect)
+
+    def fake_agent(*, sessions, db_path, target_date):
+        return SimpleNamespace(error="spawn failed", report=None, returncode=1)
+    monkeypatch.setattr(consolidate, "run_consolidation_agent", fake_agent)
+
+    rc = consolidate.main(["--yesterday", "--json"])
+    assert rc == 1                                        # surfaced as failure
+    assert not consolidate.runs.was_run(temp_db, target)  # left un-run → retried next time
+
+
+def test_date_flag_emits_aggregate_shape(temp_db, monkeypatch, capsys):
+    # --date (manual backfill) goes through the same aggregate output as the
+    # catch-up sweep — pin the {status, surfaces_cleaned, runs:[...]} shape.
+    monkeypatch.setattr(consolidate, "collect_sessions", lambda d: [_one_session()])
+    monkeypatch.setattr(consolidate, "run_consolidation_agent",
+                        lambda **kw: _ok_agent())
+
+    rc = consolidate.main(["--date", "2026-01-02", "--json"])
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out.strip())
+    assert out["status"] == "completed"
+    assert "surfaces_cleaned" in out
+    assert out["runs"] == [{"status": "completed", "run_date": "2026-01-02",
+                            "sessions_scanned": 1, "error": None}]
+
+
+def test_catchup_skips_when_another_sweep_holds_lock(temp_db, monkeypatch, capsys):
+    # A second concurrent sweep must exit cleanly without spawning an agent.
+    monkeypatch.setattr(
+        consolidate, "collect_sessions",
+        lambda d: (_ for _ in ()).throw(AssertionError("ran while lock held")),
+    )
+
+    lock_dir = consolidate.db.db_path().parent / "locks"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    held = open(lock_dir / "consolidate.lock", "w")
+    fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    try:
+        rc = consolidate.main(["--yesterday", "--json"])
+    finally:
+        fcntl.flock(held, fcntl.LOCK_UN)
+        held.close()
+
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out.strip())
+    assert out == {"action": "skipped", "reason": "already_running"}
