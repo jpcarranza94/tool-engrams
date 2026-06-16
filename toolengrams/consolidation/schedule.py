@@ -135,8 +135,12 @@ def _generate_plist() -> str:
     <string>{LOG_DIR}/consolidate.log</string>
     <key>StandardErrorPath</key>
     <string>{LOG_DIR}/consolidate.err</string>
+    <!-- Run on login/load too, not only at 8 AM. The job is a catch-up sweep
+         guarded by was_run() idempotency, so firing it on every boot is safe
+         (already-done days are skipped) and drains any backlog promptly when
+         the laptop was off at 8 AM. -->
     <key>RunAtLoad</key>
-    <false/>
+    <true/>
 </dict>
 </plist>
 """
