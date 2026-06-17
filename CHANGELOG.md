@@ -5,6 +5,21 @@ land on `main` without deprecation cycles; pin a tag if you need stability.
 
 ## [Unreleased]
 
+### Added
+- **Durable config file + `engram config` / `engram engine` verbs (ADR-0012).**
+  `<engram home>/config.json` grows from a flat `engine` key into an
+  engine-keyed schema covering the active engine, per-engine models, watcher
+  tuning, and prompt overrides. `engram engine set codex` switches the
+  background engine with no reinstall (next tick picks it up); `engram config
+  set engines.codex.eval_model gpt-5` sets a per-engine model;
+  `engram config show` lists every key with its effective value and source.
+  The file is projected into `os.environ` (`config.hydrate_env()`) for any
+  `ENGRAM_*` not already set, so precedence is **explicit env > file > default**
+  and every existing `os.environ.get` call site is untouched. JSON (stdlib) was
+  chosen over YAML/TOML to keep the hot path dependency-free. The *target*
+  harness stays install-time wired (several coexist); only the *engine* is a
+  runtime switch.
+
 ### Changed
 - **Consolidation is a catch-up sweep (ADR-0011).** The scheduled
   `--yesterday` run now consolidates every un-run day in the last 7 days
