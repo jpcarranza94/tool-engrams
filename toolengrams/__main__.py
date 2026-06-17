@@ -11,13 +11,15 @@ import os
 import sys
 from typing import Callable
 
-from . import pause, watcher
+from . import config, pause, watcher
 from .harness_names import CLAUDE_CODE
 from .cli import (
+    config_cmd,
     consolidate,
     dashboard,
     doctor,
     edit,
+    engine_cmd,
     forget,
     judge,
     mark_noise,
@@ -70,7 +72,14 @@ _SELF_PARSING = {
     "monitor": monitor.main,
     "migrate-v1-to-v2": migrate_v1_to_v2.main,
     "rebuild-triggers": rebuild_triggers.main,
+    "config": config_cmd.main,
+    "engine": engine_cmd.main,
 }
+
+
+# The config-management commands must NOT hydrate: `config show` compares the
+# environment against the file, so it has to see an un-hydrated environment.
+_NO_HYDRATE = frozenset({"config", "engine"})
 
 
 # Hook handlers stay reachable under $ENGRAM_ALLOWED_VERBS: they fire inside
@@ -108,6 +117,13 @@ def main(argv: list[str] | None = None) -> int:
     denied = _verb_guard(raw)
     if denied is not None:
         return denied
+
+    # Project the config file into the environment (fail-open) so every
+    # `os.environ.get("ENGRAM_*")` consumer downstream sees file-backed
+    # settings, with an explicit env var still winning. Skipped for the
+    # config-management commands (they must see env vs file unmuddled).
+    if not (raw and raw[0] in _NO_HYDRATE):
+        config.hydrate_env()
 
     # Fast-path: self-parsing subcommands get forwarded directly.
     if raw and raw[0] in _SELF_PARSING:
@@ -164,6 +180,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("monitor", help="Resource usage and watcher activity", add_help=False)
     sub.add_parser("migrate-v1-to-v2", help="One-shot migration from a v1-era DB to the v2 schema", add_help=False)
     sub.add_parser("rebuild-triggers", help="Re-extract triggers from memory bodies (post-migration repair)", add_help=False)
+    sub.add_parser("config", help="Show/get/set/unset durable settings (config.json) — models, tuning, prompts", add_help=False)
+    sub.add_parser("engine", help="Show or switch the active background engine without reinstalling", add_help=False)
 
     args = parser.parse_args(argv)
 
