@@ -119,17 +119,21 @@ def main(argv: list[str] | None = None) -> int:
                     "into": args.into,
                 }))
                 return 1
+            # Keep the target's name unless the caller explicitly renamed it —
+            # a merge must never clobber a good name with the synthesized
+            # "Without this memory…" body-as-name fallback.
+            merge_name = args.name or target.name
             memory_id = update_existing_memory(
                 conn=conn, existing_id=args.into,
-                name=name, description=description, body=body,
+                name=merge_name, description=description, body=body,
                 kind=args.kind, pinned=args.pinned,
                 candidates=candidates, extra_triggers=extra_triggers,
                 origin_session_id=origin_session,
             )
             runs_store.record_cli_event(conn, kind="created",
-                                        memory_id=memory_id, memory_name=name)
+                                        memory_id=memory_id, memory_name=merge_name)
             payload = _build_payload(memory_id=memory_id, action="merged_into",
-                                     existing_match=None, **common)
+                                     existing_match=None, **{**common, "name": merge_name})
             payload["merged_into"] = args.into
             print(json.dumps(payload))
             return 0
@@ -145,14 +149,19 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         similar_advisory: list[dict] | None = None
+        effective_name = name
         if existing:
             # Echo the body being replaced + a merge instruction: a stateless
             # formation tick has no memory of what it saved before, so the
             # replace must be a visible, correctable act (ADR-0005).
             prev = memory_store.get(conn, existing["id"])
+            # Preserve the existing name unless explicitly renamed — a re-save
+            # without --name must not overwrite a good name with the synthesized
+            # "Without this memory…" body-as-name.
+            effective_name = args.name or (prev.name if prev else name)
             memory_id = update_existing_memory(
                 conn=conn, existing_id=existing["id"],
-                name=name, description=description, body=body,
+                name=effective_name, description=description, body=body,
                 kind=args.kind, pinned=args.pinned,
                 candidates=candidates, extra_triggers=extra_triggers,
                 origin_session_id=origin_session,
@@ -196,11 +205,11 @@ def main(argv: list[str] | None = None) -> int:
 
         # If a formation watcher run spawned this call, record it for the monitor.
         runs_store.record_cli_event(conn, kind="created",
-                                    memory_id=memory_id, memory_name=name)
+                                    memory_id=memory_id, memory_name=effective_name)
 
         payload = _build_payload(
             memory_id=memory_id, action=action,
-            existing_match=existing, **common,
+            existing_match=existing, **{**common, "name": effective_name},
         )
         if similar_advisory:
             payload["similar_memories"] = similar_advisory

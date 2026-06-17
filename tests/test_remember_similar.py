@@ -109,6 +109,26 @@ def test_into_triggerless_body_preserves_target_triggers(temp_db, capsys):
     assert after == before                          # triggers preserved, not wiped
 
 
+def test_into_without_name_keeps_target_name(temp_db, capsys):
+    # A merge that omits --name must NOT clobber the target's name with the
+    # synthesized "Without this memory…" body-as-name (the live regression).
+    aid = _seed_a(capsys)  # name: macos-timeout-a
+    rc, out = _remember(
+        [_BODY_DUP + " more", "--scope", "global", "--into", str(aid)], capsys)  # no --name
+    assert rc == 0 and out["action"] == "merged_into"
+    assert memory_store.get(temp_db, aid).name == "macos-timeout-a"
+
+
+def test_overlap_resave_without_name_keeps_existing_name(temp_db, capsys):
+    # The trigger-overlap auto-merge has the same trap: a re-save with the same
+    # trigger but no --name must keep the existing name.
+    aid = _seed_a(capsys)  # name: macos-timeout-a, trigger: "alpha beta"
+    rc, out = _remember(
+        [_BODY_A + " updated", "--scope", "global", "--trigger", "alpha beta"], capsys)
+    assert out["action"] == "updated"
+    assert memory_store.get(temp_db, aid).name == "macos-timeout-a"
+
+
 def test_into_nonexistent_errors(temp_db, capsys):
     rc, out = _remember(
         [_BODY_A, "--name", "x", "--scope", "global",

@@ -36,15 +36,18 @@ engram remember "<body>" --kind <block|hint> --scope <global|project> \
 - If the CLI replies `action: "updated"` with an `existing_match` carrying
   `previous_body`, your body just REPLACED that one. Read `previous_body`: if
   it held still-valid guidance missing from yours, immediately re-run
-  `engram remember` once more with a single body that merges both. If your
-  body already covers it, do nothing.
+  `engram remember` once more with a single body that merges both — and pass the
+  SAME `--name` you used (a re-save without `--name` keeps the existing name, not
+  your body text). If your body already covers it, do nothing.
 - If the CLI replies `action: "review_similar"`, NOTHING was saved yet — a
   near-duplicate may already cover this. Read the `candidates` (each has an
   `id`, `name`, `body_preview`, `similarity`). Then choose ONE:
     - **Already covered / same idea** → fold into it: re-run
       `engram remember --into <id> "<one body merging both>"` (with the same
-      `--trigger`/`--path`/`--kind`/`--scope`/`--project-cwd`). Keeps that
-      memory's id, counters, and surface history.
+      `--name`/`--trigger`/`--path`/`--kind`/`--scope`/`--project-cwd`). Keeps
+      that memory's id, counters, and surface history. ALWAYS pass `--name` so
+      the merge doesn't fall back to a body-derived name (omitting it keeps the
+      target's existing name, never your body text).
     - **Genuinely different** → re-run the exact same command with `--force`.
     - **Not worth saving after seeing the neighbors** → do nothing.
 - Do not run any other command, inspect the DB, or investigate. Save and stop.
