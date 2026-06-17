@@ -28,6 +28,12 @@ import os
 from pathlib import Path
 
 from . import paths
+from .engine import selection
+
+# __main__ already imports the whole CLI graph (incl. engine) on every hook
+# invocation, so importing selection here is free — and it lets `set_value`
+# validate the engine value against the real registry, closing the
+# `config set engine <bogus>` door that bypassed `engram engine set`.
 
 # The single source of truth for what the file can hold, how each key maps to an
 # env var, and how `config set` coerces a value. Per-engine model keys mirror
@@ -54,6 +60,17 @@ SPEC: list[tuple[str, str, type]] = [
 
 _ENV_BY_KEY = {key: env for key, env, _ in SPEC}
 _TYPE_BY_KEY = {key: typ for key, _, typ in SPEC}
+
+
+def _validate_engine(value: str) -> None:
+    if value not in selection.ENGINES:
+        raise ValueError(f"unknown engine {value!r}; known: "
+                         f"{', '.join(selection.ENGINES)}")
+
+
+# Per-key value validators (beyond the SPEC type coercion). Keyed by dotted
+# key; absent means "any value of the declared type is accepted".
+_VALIDATORS = {"engine": _validate_engine}
 
 
 def config_path() -> Path:
@@ -112,6 +129,9 @@ def set_value(dotted: str, raw: str):
     if dotted not in _TYPE_BY_KEY:
         raise KeyError(dotted)
     value = _coerce(raw, _TYPE_BY_KEY[dotted])
+    validator = _VALIDATORS.get(dotted)
+    if validator is not None:
+        validator(value)  # ValueError bubbles to the caller (CLI → exit 2)
     data = load()
     _bury(data, dotted, value)
     _write(data)
@@ -203,6 +223,14 @@ def _remove(data: dict, dotted: str) -> bool:
 
 
 def _write(data: dict) -> None:
+    # Atomic write: a reader (hydrate_env on the hot path, selection's flat-key
+    # read) must never observe a half-written file. Write to a sibling temp,
+    # then os.replace — atomic within the same directory/filesystem.
+    # NOTE: this is not locked, so a concurrent writer (a `config set` racing
+    # install.sh's config write) can still lose an update. That window is tiny
+    # and human-driven; the torn-READ class is the one worth eliminating here.
     path = config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2) + "\n")
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2) + "\n")
+    os.replace(tmp, path)

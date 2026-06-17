@@ -3,11 +3,15 @@
 
 from __future__ import annotations
 
+import io
 import json
+import os
+import sys
 
 import pytest
 
 from toolengrams import config
+from toolengrams.__main__ import main as engram_main
 from toolengrams.cli import config_cmd, engine_cmd
 from toolengrams.engine import claude_code as engine_claude, codex as engine_codex
 
@@ -49,7 +53,6 @@ def test_hydrate_sets_missing_env(cfg_home, monkeypatch):
 
     config.hydrate_env()
 
-    import os
     assert os.environ["ENGRAM_ENGINE"] == "codex"
     assert os.environ["ENGRAM_CODEX_EVAL_MODEL"] == "gpt-5"
 
@@ -61,7 +64,6 @@ def test_hydrate_does_not_override_explicit_env(cfg_home, monkeypatch):
 
     config.hydrate_env()
 
-    import os
     assert os.environ["ENGRAM_ENGINE"] == "claude-code"
 
 
@@ -71,13 +73,19 @@ def test_hydrate_coerces_int_to_str(cfg_home, monkeypatch):
 
     config.hydrate_env()
 
-    import os
     # env vars are strings; downstream code does int(os.environ.get(...)).
     assert os.environ["ENGRAM_TICK_COALESCE_SEC"] == "30"
 
 
 def test_hydrate_noop_on_empty(cfg_home):
     config.hydrate_env()  # no file → must not raise
+
+
+def test_hydrate_noop_on_malformed(cfg_home, monkeypatch):
+    monkeypatch.delenv("ENGRAM_ENGINE", raising=False)
+    cfg_home.write_text("{not json")
+    config.hydrate_env()  # garbage file → must not raise, sets nothing
+    assert "ENGRAM_ENGINE" not in os.environ
 
 
 # ---------- set / unset round-trip ----------
@@ -106,6 +114,15 @@ def test_set_rejects_unknown_key(cfg_home):
 def test_set_rejects_bad_int(cfg_home):
     with pytest.raises(ValueError):
         config.set_value("watcher.timeout", "not-a-number")
+
+
+def test_set_engine_rejects_unknown_value(cfg_home):
+    # `config set engine <bogus>` must be guarded the same as `engram engine set`.
+    with pytest.raises(ValueError):
+        config.set_value("engine", "gpt-9000")
+    # A known engine still writes.
+    config.set_value("engine", "codex")
+    assert config.get("engine") == "codex"
 
 
 def test_unset_rejects_unknown_key(cfg_home):
@@ -172,3 +189,30 @@ def test_engine_cli_set_writes_config(cfg_home, capsys):
 def test_engine_cli_set_unknown_exits_2(cfg_home, capsys):
     assert engine_cmd.main(["set", "gpt-9000"]) == 2
     assert "unknown engine" in capsys.readouterr().err
+
+
+def test_config_cli_set_engine_unknown_value_exits_2(cfg_home, capsys):
+    # The other door to the engine key must reject a bogus value too.
+    assert config_cmd.main(["set", "engine", "gpt-9000"]) == 2
+    assert "invalid value" in capsys.readouterr().err
+    assert config.get("engine") is None  # nothing written
+
+
+# ---------- fail-open through the whole dispatch path ----------
+
+
+def test_malformed_config_does_not_break_a_hook(temp_db, monkeypatch, tmp_path):
+    # The headline safety property: a poisoned config.json must not break a hook.
+    # Exercises the WHOLE path — __main__ dispatch → hydrate_env(garbage) → hook.
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("ENGRAM_HOME", str(home))
+    (home / "config.json").write_text("{not json")
+
+    payload = {"tool_name": "Bash", "tool_input": {"command": "echo hi"},
+               "tool_use_id": "tu-x"}
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
+    monkeypatch.setattr(sys, "stdout", io.StringIO())
+
+    rc = engram_main(["pretool", "--target", "claude-code"])
+    assert rc == 0  # fail-open: degrades to defaults, never raises
