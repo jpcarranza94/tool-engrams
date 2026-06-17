@@ -420,29 +420,63 @@ def bump_surface(conn: sqlite3.Connection, memory_ids: Sequence[int], now_ts: in
     )
 
 
-def bump_useful(conn: sqlite3.Connection, memory_ids: Sequence[int]) -> None:
-    """Increment useful_count for each memory — a 'helpful' verdict."""
-    if not memory_ids:
+def bump_useful(conn: sqlite3.Connection, memory_ids: Sequence[int],
+                delta: int = 1) -> None:
+    """Add `delta` to useful_count for each memory — 'helpful' verdicts. The
+    caller passes the number of surface rows the verdict closed, so the counter
+    tracks helpful *surfaces* (session_surfaces ground truth), not judge calls."""
+    if not memory_ids or delta == 0:
         return
     placeholders = ",".join("?" * len(memory_ids))
     conn.execute(
-        f"UPDATE memories SET useful_count = useful_count + 1 "
+        f"UPDATE memories SET useful_count = useful_count + ? "
         f"WHERE id IN ({placeholders})",
-        list(memory_ids),
+        [delta, *memory_ids],
     )
 
 
-def bump_noise(conn: sqlite3.Connection, memory_ids: Sequence[int]) -> None:
-    """Increment noise_count for each memory — a 'noise' verdict (the trigger
-    over-matched). Paired with bump_useful, this feeds the q quality ratio."""
-    if not memory_ids:
+def bump_noise(conn: sqlite3.Connection, memory_ids: Sequence[int],
+               delta: int = 1) -> None:
+    """Add `delta` to noise_count for each memory — 'noise' verdicts (the
+    trigger over-matched). Paired with bump_useful, this feeds the q quality
+    ratio. `delta` is the number of surface rows the verdict closed."""
+    if not memory_ids or delta == 0:
         return
     placeholders = ",".join("?" * len(memory_ids))
     conn.execute(
-        f"UPDATE memories SET noise_count = noise_count + 1 "
+        f"UPDATE memories SET noise_count = noise_count + ? "
         f"WHERE id IN ({placeholders})",
-        list(memory_ids),
+        [delta, *memory_ids],
     )
+
+
+def recount_from_surfaces(conn: sqlite3.Connection,
+                          memory_ids: Sequence[int] | None = None) -> int:
+    """Recompute useful_count/noise_count from session_surfaces — the durable
+    ground truth — for the given memories, or ALL memories when None.
+
+    session_surfaces outcomes ('helpful'/'noise'/'unused') survive migrations,
+    archive/restore, and forget; the counters historically did not (the v12
+    migration zeroed useful_count; restore zeroed it again). This re-derives the
+    q inputs from what actually happened. Returns the number of rows updated.
+    """
+    where, params = "", []
+    if memory_ids is not None:
+        if not memory_ids:
+            return 0
+        placeholders = ",".join("?" * len(memory_ids))
+        where = f"WHERE id IN ({placeholders})"
+        params = list(memory_ids)
+    cur = conn.execute(
+        "UPDATE memories SET "
+        "  useful_count = (SELECT COUNT(*) FROM session_surfaces s "
+        "                  WHERE s.memory_id = memories.id AND s.outcome = 'helpful'), "
+        "  noise_count  = (SELECT COUNT(*) FROM session_surfaces s "
+        "                  WHERE s.memory_id = memories.id AND s.outcome = 'noise') "
+        f"{where}",
+        params,
+    )
+    return cur.rowcount or 0
 
 
 def soft_demote(conn: sqlite3.Connection, memory_id: int) -> None:
@@ -461,12 +495,20 @@ def archive(conn: sqlite3.Connection, memory_id: int, now_ts: int | None = None)
 
 
 def restore(conn: sqlite3.Connection, memory_id: int) -> None:
-    """Undo a soft-demote or archive: clear archive and reset counters to zero."""
+    """Undo a soft-demote or archive: clear archive, drop the surface_count
+    penalty, and RECOMPUTE useful_count/noise_count from session_surfaces.
+
+    Previously this zeroed useful_count — which silently discarded a memory's
+    earned reputation, since `archive` never touched the counters but `restore`
+    reset them (a proven memory came back at neutral q=0.5). The surface history
+    is the durable record; re-derive from it instead of zeroing.
+    """
     conn.execute(
-        "UPDATE memories SET archived_ts = NULL, "
-        "useful_count = 0, surface_count = 0, last_surfaced_ts = 0 WHERE id = ?",
+        "UPDATE memories SET archived_ts = NULL, surface_count = 0, "
+        "last_surfaced_ts = 0 WHERE id = ?",
         (memory_id,),
     )
+    recount_from_surfaces(conn, [memory_id])
 
 
 # ---------- trigger writes ----------

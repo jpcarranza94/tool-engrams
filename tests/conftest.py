@@ -31,6 +31,17 @@ def make_fake_engine(invoke_fn=None, available: bool = True):
     )
 
 
+@pytest.fixture(autouse=True)
+def _isolate_environ(monkeypatch):
+    """Snapshot os.environ for every test. Code under test (config.hydrate_env)
+    writes ENGRAM_* directly into os.environ; monkeypatch only auto-reverts vars
+    IT set, so without this a hydrate in one test leaks into the next (e.g. a
+    leaked ENGRAM_SIMILARITY_THRESHOLD silently disables the dedup gate). All env
+    access in the codebase is `os.environ.get` at call time, so swapping in a
+    copy fully isolates both reads and writes."""
+    monkeypatch.setattr(os, "environ", os.environ.copy())
+
+
 @pytest.fixture
 def temp_db(tmp_path, monkeypatch):
     """Point ENGRAM_DB at a tmp file and yield a fresh connection."""

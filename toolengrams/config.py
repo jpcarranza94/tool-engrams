@@ -27,7 +27,7 @@ import json
 import os
 from pathlib import Path
 
-from . import paths
+from . import envvars, paths
 from .engine import selection
 
 # __main__ already imports the whole CLI graph (incl. engine) on every hook
@@ -53,6 +53,15 @@ SPEC: list[tuple[str, str, type]] = [
     ("watcher.cleanup_ttl_sec", "ENGRAM_CLEANUP_TTL_SEC", int),
     ("watcher.max_memories_per_call", "ENGRAM_MAX_MEMORIES_PER_CALL", int),
     ("watcher.surface_notice", "ENGRAM_SURFACE_NOTICE", str),
+    ("watcher.max_form_retries", envvars.MAX_FORM_RETRIES, int),
+    ("gate.threshold", envvars.GATE_THRESHOLD, float),
+    ("gate.warmup_n", envvars.GATE_WARMUP_N, int),
+    ("formation.similarity_threshold", envvars.SIMILARITY_THRESHOLD, float),
+    ("consolidation.catchup_lookback_days", envvars.CATCHUP_LOOKBACK_DAYS, int),
+    ("consolidation.surfaces_ttl_days", envvars.SURFACES_TTL_DAYS, int),
+    ("consolidation.watcher_runs_ttl_days", envvars.WATCHER_RUNS_TTL_DAYS, int),
+    ("consolidation.max_sessions", envvars.CONSOLIDATION_MAX_SESSIONS, int),
+    ("consolidation.timeout", envvars.CONSOLIDATION_TIMEOUT, int),
     ("prompts.watcher_path", "ENGRAM_WATCHER_PROMPT_PATH", str),
     ("prompts.eval_path", "ENGRAM_EVAL_PROMPT_PATH", str),
     ("prompts.consolidation_path", "ENGRAM_CONSOLIDATION_PROMPT_PATH", str),
@@ -175,6 +184,8 @@ def effective() -> list[dict]:
 def _coerce(raw: str, typ: type):
     if typ is int:
         return int(raw)  # ValueError bubbles up to the caller
+    if typ is float:
+        return float(raw)
     return raw
 
 

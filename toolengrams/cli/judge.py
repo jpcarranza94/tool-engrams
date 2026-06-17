@@ -76,9 +76,12 @@ def main(argv: list[str] | None = None) -> int:
             updated = session_state.mark_surface_outcome(
                 conn, session_id, [args.memory_id], args.outcome,
             )
-            # One verdict = one counter bump, only when a pending surface closed.
+            # Bump by the number of surface rows this verdict closed, so the
+            # counter tracks helpful/noise *surfaces* (session_surfaces ground
+            # truth) and stays consistent with `rebuild-counters`. A re-judge
+            # closes 0 rows → no double-count (still idempotent).
             if updated and args.outcome in _BUMP:
-                _BUMP[args.outcome](conn, [args.memory_id])
+                _BUMP[args.outcome](conn, [args.memory_id], delta=updated)
 
         # If an eval watcher run spawned this call, record it for the monitor.
         if updated:

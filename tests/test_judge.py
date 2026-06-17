@@ -92,7 +92,7 @@ def test_judge_is_idempotent(temp_db, capsys):
     assert _counts(temp_db, mid) == (1, 0)  # not double-bumped
 
 
-def test_marks_all_pending_surfaces_but_bumps_once(temp_db, capsys):
+def test_marks_all_pending_surfaces_and_bumps_per_row(temp_db, capsys):
     mid = _mem(temp_db)
     _surface(temp_db, "sess-1", mid, ts=1000)
     _surface(temp_db, "sess-1", mid, ts=2000)
@@ -100,7 +100,9 @@ def test_marks_all_pending_surfaces_but_bumps_once(temp_db, capsys):
     rc = judge.main([str(mid), "helpful", "--session-id", "sess-1"])
     assert rc == 0
     assert _outcomes(temp_db, "sess-1", mid) == ["helpful", "helpful"]
-    assert _counts(temp_db, mid) == (1, 0)  # one verdict, one bump
+    # Counter tracks helpful SURFACES (rows closed), so the q inputs stay
+    # consistent with session_surfaces and `rebuild-counters`.
+    assert _counts(temp_db, mid) == (2, 0)
 
 
 def test_unknown_memory_id_rejected(temp_db, capsys):

@@ -12,9 +12,12 @@ is consolidation's job, not the ranker's.
 
 from __future__ import annotations
 
+from .. import envvars
 from ..models import Candidate
+from ..utils import env_float, env_int
 
-# Surfacing-gate knobs.
+# Surfacing-gate knobs (defaults; override via config.json / env — read at call
+# time in is_gated so config.hydrate_env has populated the values).
 GATE_THRESHOLD = 0.5  # q below this ⟺ noise > helpful; the prior's mean, not tuned.
 WARMUP_N = 3          # don't gate until this many verdicts, so one unlucky early
                       # 'noise' can't kill a young memory.
@@ -53,6 +56,7 @@ def is_gated(candidate: Candidate) -> bool:
     if candidate.kind == "block" or candidate.pinned:
         return False
     judged = candidate.useful_count + candidate.noise_count
-    if judged < WARMUP_N:
+    if judged < env_int(envvars.GATE_WARMUP_N, WARMUP_N):
         return False
-    return q(candidate.useful_count, candidate.noise_count) < GATE_THRESHOLD
+    return q(candidate.useful_count, candidate.noise_count) < \
+        env_float(envvars.GATE_THRESHOLD, GATE_THRESHOLD)

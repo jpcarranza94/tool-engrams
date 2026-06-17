@@ -3,7 +3,7 @@
   - `engram forget <name>`            → soft demote (useful_count=0, surface_count+=5, last_surfaced_ts=0)
   - `engram forget --delete <name>`   → set archived_ts, excluded from retrieval
   - `engram forget --topic <keyword>` → soft-demote all matching by FTS
-  - `engram forget --restore <name>`  → undo soft demote (reset surface_count=0, useful_count=0)
+  - `engram forget --restore <name>`  → undo soft demote (clear archive, reset surface_count=0, recompute useful/noise from session_surfaces)
 
 Name lookup is fuzzy: exact match first, then FTS MATCH, then LIKE.
 """

@@ -112,7 +112,11 @@ def update_existing_memory(
             kind=kind, pinned=pinned, created_ts=now_ts,
         )
         memory_store.set_origin_session(conn, existing_id, origin_session_id)
-        memory_store.delete_triggers_for(conn, existing_id)
-        insert_candidate_triggers(conn, existing_id, candidates)
-        insert_candidate_triggers(conn, existing_id, extras_to_candidates(extra_triggers))
+        # Only replace triggers when the caller supplied some. A merge (`remember
+        # --into <id>`) whose body extracts no triggers must KEEP the target's
+        # existing triggers, not wipe them into a never-surfacing memory.
+        if candidates or extra_triggers:
+            memory_store.delete_triggers_for(conn, existing_id)
+            insert_candidate_triggers(conn, existing_id, candidates)
+            insert_candidate_triggers(conn, existing_id, extras_to_candidates(extra_triggers))
     return existing_id

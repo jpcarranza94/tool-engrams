@@ -5,7 +5,37 @@ land on `main` without deprecation cycles; pin a tag if you need stability.
 
 ## [Unreleased]
 
+### Fixed
+- **`q` quality ratio derives from `session_surfaces` ground truth (ADR-0013).**
+  `useful_count`/`noise_count` had drifted below memories' real helpfulness —
+  the v12 migration zeroed `useful_count`, `restore` zeroed it again (while
+  `archive` never touched it), and `judge` bumped +1 per call while closing N
+  surface rows. A consolidation run found 18 active memories gate-suppressed
+  (`q<0.5`) despite being net-helpful by actual surfaces (one: 37 helpful/6
+  noise → `q=0.36`). Counters are now a cached projection of `session_surfaces`:
+  `judge` bumps by rows-closed, `restore` recomputes, and the new
+  **`engram rebuild-counters`** one-shot heals existing drift (`--dry-run` to
+  preview). Run it once to re-surface the suppressed memories.
+
 ### Added
+- **Tuning knobs moved into config.json (ADR-0012).** The behavior constants
+  worth tuning are now config-backed via call-time resolvers (`env_int`/
+  `env_float`, read after `hydrate_env`): the q surfacing gate
+  (`gate.threshold`, `gate.warmup_n`), the formation
+  `formation.similarity_threshold`, consolidation
+  `consolidation.{catchup_lookback_days,surfaces_ttl_days,watcher_runs_ttl_days,max_sessions,timeout}`,
+  and `watcher.max_form_retries`. Each keeps its module constant as the default;
+  set via `engram config set <key> <value>`. Structural invariants (sweep-spawn
+  cap, sentinels, unit constants, schema version) are deliberately left as named
+  constants, not config — they're correctness constraints, not preferences.
+- **Formation near-duplicate gate (ADR-0014).** `engram remember` now surfaces
+  the top-3 textually-similar existing memories (FTS5 shortlist re-scored by
+  token-Jaccard — no new dependency) and, on a strong match, returns
+  `action: "review_similar"` *without inserting* instead of creating a same-idea
+  duplicate that trigger-overlap dedup misses. The (remember-only) formation
+  agent then folds in with `engram remember --into <id>` or insists with
+  `--force`. Catches the different-trigger/same-idea dupes (e.g. the three
+  `macos-no-timeout-command` rows) at the source.
 - **Durable config file + `engram config` / `engram engine` verbs (ADR-0012).**
   `<engram home>/config.json` grows from a flat `engine` key into an
   engine-keyed schema covering the active engine, per-engine models, watcher

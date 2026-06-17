@@ -16,13 +16,13 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from .. import memory_store
+from .. import envvars, memory_store
 from ..engine import EngineRequest, SandboxSpec, get_engine
 from ..prompts.consolidation import build_consolidation_prompt
 from ..retrieval import session_state
 from ..watcher import runs_store
 from ..reinforcement.scoring import q
-from ..utils import prepend_engram_bin
+from ..utils import env_int, prepend_engram_bin
 from ..target.interface import SessionFile
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -95,12 +95,13 @@ def _prioritize_sessions(sessions: list[SessionFile]) -> list[SessionFile]:
     to process in time), take up to MAX_SESSIONS or MAX_TOTAL_BYTES.
     """
     # Filter out giant sessions the agent can't process in 30 min.
+    max_sessions = env_int(envvars.CONSOLIDATION_MAX_SESSIONS, MAX_SESSIONS)
     eligible = [s for s in sessions if s.size_bytes <= MAX_SINGLE_SESSION_BYTES]
     sorted_sessions = sorted(eligible, key=lambda s: -s.size_bytes)
     selected: list[SessionFile] = []
     total = 0
     for s in sorted_sessions:
-        if len(selected) >= MAX_SESSIONS:
+        if len(selected) >= max_sessions:
             break
         if total + s.size_bytes > MAX_TOTAL_BYTES and selected:
             break
@@ -159,10 +160,11 @@ def run_consolidation_agent(
     env = prepend_engram_bin(os.environ.copy())
     env["ENGRAM_DB"] = str(db_path)
 
+    timeout_sec = env_int(envvars.CONSOLIDATION_TIMEOUT, CONSOLIDATION_TIMEOUT_SEC)
     # engine.invoke never raises — process failures come back on the result.
     result = engine.invoke(EngineRequest(
         prompt=prompt,
-        timeout=CONSOLIDATION_TIMEOUT_SEC,
+        timeout=timeout_sec,
         role="consolidation",
         cwd=work_dir,
         env=env,
@@ -173,7 +175,7 @@ def run_consolidation_agent(
     if result.timed_out:
         return AgentResult(
             report="", returncode=1,
-            error=f"Consolidation agent timed out ({CONSOLIDATION_TIMEOUT_SEC // 60} min)",
+            error=f"Consolidation agent timed out ({timeout_sec // 60} min)",
         )
     if result.error:
         return AgentResult(report="", returncode=1, error=f"Failed to spawn agent: {result.error}")
