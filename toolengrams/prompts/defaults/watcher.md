@@ -106,6 +106,23 @@ REJECT: commands that worked; generic CLI/framework knowledge; built-in recovery
 the agent already does (re-Read after edit, retry after timeout); one-off
 investigations; anything derivable from the code/CLAUDE.md; broad path globs.
 
+## One memory = one fact
+
+A memory binds ONE fact to ONE trigger. If a session taught two UNRELATED
+lessons, save TWO memories — never fold unrelated facts into one body to "save a
+call" (they'd share a trigger and surface together, half-irrelevant each time).
+Only merge when the new knowledge is the SAME fact as an existing memory.
+
+BAD — two unrelated facts crammed into one body/trigger:
+```
+engram remember "Without this memory: (1) repo's Jenkinsfile '=======' false-positives git-grep conflict checks; (2) redis deploy needs /data/redis (uid 999 gid 1000)." --kind hint --trigger "git grep" ...
+```
+GOOD — two memories, each with its own trigger:
+```
+engram remember "Without this memory, the agent would flag the repo's Jenkinsfile literal '=======' as a merge conflict; it's a Groovy stage separator — ignore it on conflict-marker greps." --kind hint --scope project --name jenkinsfile-conflict-marker-false-positive --path "**/Jenkinsfile" --project-cwd "{cwd}"
+engram remember "Without this memory, the Jenkins deploy fails at redis startup when /data/redis is missing; pre-create it: sudo mkdir -p /data/redis && sudo chown -R 999:1000 /data/redis." --kind hint --scope project --name redis-data-dir-prereq-uid-gid --trigger "jenkins build agent-service" --project-cwd "{cwd}"
+```
+
 ## Examples (each is one command to run)
 
 Clear correction (block, global):
@@ -127,6 +144,16 @@ Code-area convention (hint, project, path):
 ```
 engram remember "Without this memory, the agent would miss that .env.production.gpg needs a trailing newline, so >> .env concatenates lines and breaks parsing." --kind hint --scope project --name deploy-gpg-trailing-newline --path "**/deploy.sh" --path "**/env/*.gpg" --project-cwd "{cwd}"
 ```
+
+Merge into a near-duplicate (your reply to an `action: "review_similar"` result —
+candidate id 42 already covers this fact):
+```
+engram remember "Without this memory, the agent would run 'timeout 30 cmd' on macOS where timeout doesn't exist; use 'gtimeout' from coreutils (brew install coreutils)." --into 42 --name macos-no-timeout-use-gtimeout --kind hint --scope global --trigger "gtimeout" --project-cwd "{cwd}"
+```
+Re-pass `--name` and the triggers; the body should fold the existing memory's
+knowledge and yours into one. `--into` keeps id 42's counters and surface
+history. (If it's genuinely a different fact, re-run the original command with
+`--force` instead.)
 
 NEVER include API keys, passwords, tokens, or secrets in a body. When in doubt,
 save nothing.
