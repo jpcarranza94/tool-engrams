@@ -8,11 +8,16 @@ window — plus the env_int/env_float helpers. See docs/adr/0012.
 
 from __future__ import annotations
 
+import io
+import json
 import os
+import sys
+import time
 from datetime import date, timedelta
 from types import SimpleNamespace
 
 from toolengrams import config
+from toolengrams.__main__ import main as engram_main
 from toolengrams.cli import consolidate
 from toolengrams.reinforcement import scoring
 from toolengrams.utils import env_float, env_int
@@ -92,3 +97,46 @@ def test_new_tunable_keys_hydrate(tmp_path, monkeypatch):
     assert os.environ["ENGRAM_GATE_THRESHOLD"] == "0.42"
     assert os.environ["ENGRAM_SIMILARITY_THRESHOLD"] == "0.8"
     assert os.environ["ENGRAM_CONSOLIDATION_MAX_SESSIONS"] == "20"
+
+
+# ---------- end-to-end: the hook path hydrates config before is_gated ----------
+
+
+def _fire_pretool(monkeypatch):
+    payload = {"session_id": "s", "cwd": "/tmp/x", "hook_event_name": "PreToolUse",
+               "tool_name": "Bash", "tool_input": {"command": "git status"},
+               "tool_use_id": "tu"}
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
+    buf = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", buf)
+    engram_main(["pretool", "--target", "claude-code"])
+    return buf.getvalue()
+
+
+def test_pretool_gate_reads_config_threshold_end_to_end(temp_db, monkeypatch, tmp_path):
+    # The whole tunables thesis: module constants evaluate at IMPORT, but
+    # __main__.main() hydrates config BEFORE dispatching the hook, so is_gated's
+    # call-time read sees config.json. A hint at q≈0.86 surfaces under the
+    # default 0.5 gate but is suppressed when config raises the gate above it.
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("ENGRAM_HOME", str(home))
+
+    now = int(time.time())
+    cur = temp_db.execute(
+        "INSERT INTO memories (name, description, body, kind, scope, project_slug, "
+        " created_ts, useful_count, noise_count) "
+        "VALUES ('git-status-hint', '', 'Without this memory the agent would forget zzz', "
+        " 'hint', 'global', NULL, ?, 5, 0)", (now,))
+    mid = cur.lastrowid
+    temp_db.execute(
+        "INSERT INTO triggers (memory_id, kind, first_token, tokens_json) "
+        "VALUES (?, 'token_subseq', 'git', ?)", (mid, json.dumps(["git", "status"])))
+    temp_db.commit()
+
+    # No config → default 0.5 gate → q≈0.86 surfaces.
+    assert "zzz" in _fire_pretool(monkeypatch).lower()
+
+    # Raise the gate above the memory's q via config.json → suppressed.
+    config.set_value("gate.threshold", "0.99")
+    assert "zzz" not in _fire_pretool(monkeypatch).lower()

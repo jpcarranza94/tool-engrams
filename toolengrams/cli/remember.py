@@ -32,6 +32,7 @@ from ..formation import (
     scan_for_secrets,
     update_existing_memory,
 )
+from .. import envvars
 from ..utils import env_float, slugify_cwd
 from ..watcher import runs_store
 
@@ -59,7 +60,10 @@ def main(argv: list[str] | None = None) -> int:
     extra_triggers = _parse_extra_triggers(args.extra_trigger or [])
     candidates, all_triggers = _resolve_triggers(body, args, extra_triggers)
 
-    if not all_triggers:
+    # --into folds into an already-triggered memory, so a triggerless merge body
+    # is fine (update_existing_memory keeps the target's triggers). Only a NEW
+    # memory needs something to bind to.
+    if not all_triggers and args.into is None:
         print(json.dumps({
             "error": "no_triggers",
             "message": (
@@ -169,7 +173,7 @@ def main(argv: list[str] | None = None) -> int:
             # (--force) — formation is remember-only, so it can't edit/forget
             # a dup after the fact (ADR-0014).
             similar = find_similar(conn, name, body, limit=3)
-            threshold = env_float("ENGRAM_SIMILARITY_THRESHOLD", SIMILARITY_THRESHOLD)
+            threshold = env_float(envvars.SIMILARITY_THRESHOLD, SIMILARITY_THRESHOLD)
             if not args.force and similar and similar[0][1] >= threshold:
                 print(json.dumps({
                     "action": "review_similar",

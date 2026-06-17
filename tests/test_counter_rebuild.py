@@ -89,6 +89,19 @@ def test_restore_recomputes_counters_not_zero(temp_db):
 # ---------- bump delta ----------
 
 
+def test_rebuild_undoes_soft_demote(temp_db):
+    # forget's soft-demote zeroes useful_count deliberately; rebuild-counters
+    # re-derives from surfaces, so a demoted-but-still-helpful memory re-earns
+    # its q (ADR-0013, documented as intentional). Pin that interaction.
+    mid = _mem(temp_db, useful=4)
+    _surface(temp_db, mid, "helpful", n=4)
+    memory_store.soft_demote(temp_db, mid)
+    assert _counts(temp_db, mid)[0] == 0           # demoted to 0
+
+    memory_store.recount_from_surfaces(temp_db, [mid])
+    assert _counts(temp_db, mid) == (4, 0)         # rebuilt from surfaces
+
+
 def test_bump_useful_delta(temp_db):
     mid = _mem(temp_db)
     memory_store.bump_useful(temp_db, [mid], delta=3)

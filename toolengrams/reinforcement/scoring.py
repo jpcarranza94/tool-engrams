@@ -12,6 +12,7 @@ is consolidation's job, not the ranker's.
 
 from __future__ import annotations
 
+from .. import envvars
 from ..models import Candidate
 from ..utils import env_float, env_int
 
@@ -55,7 +56,7 @@ def is_gated(candidate: Candidate) -> bool:
     if candidate.kind == "block" or candidate.pinned:
         return False
     judged = candidate.useful_count + candidate.noise_count
-    if judged < env_int("ENGRAM_GATE_WARMUP_N", WARMUP_N):
+    if judged < env_int(envvars.GATE_WARMUP_N, WARMUP_N):
         return False
     return q(candidate.useful_count, candidate.noise_count) < \
-        env_float("ENGRAM_GATE_THRESHOLD", GATE_THRESHOLD)
+        env_float(envvars.GATE_THRESHOLD, GATE_THRESHOLD)

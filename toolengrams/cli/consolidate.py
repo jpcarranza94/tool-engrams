@@ -25,6 +25,7 @@ from ..retrieval import session_state
 from ..target import TARGETS, SessionFile
 from ..utils import env_int
 from ..watcher import runs_store
+from .. import envvars
 
 
 # Session surfaces older than this are cleaned up.
@@ -102,9 +103,9 @@ def main(argv: list[str] | None = None) -> int:
             # prune old session_surfaces + watcher run-log rows.
             now_ts = int(time.time())
             cleaned = session_state.prune_surfaces_before(
-                conn, now_ts - env_int("ENGRAM_SURFACES_TTL_DAYS", SURFACES_TTL_DAYS) * 86400)
+                conn, now_ts - env_int(envvars.SURFACES_TTL_DAYS, SURFACES_TTL_DAYS) * 86400)
             runs_store.prune_runs_before(
-                conn, now_ts - env_int("ENGRAM_WATCHER_RUNS_TTL_DAYS", WATCHER_RUNS_TTL_DAYS) * 86400)
+                conn, now_ts - env_int(envvars.WATCHER_RUNS_TTL_DAYS, WATCHER_RUNS_TTL_DAYS) * 86400)
 
             # Consolidate each candidate day, oldest first, so a later day's
             # surfacing evaluation sees the memory state earlier days left behind.
@@ -220,9 +221,9 @@ def _print_dry_run(conn, targets: list[date]) -> None:
         "status": "dry_run",
         "plan": plan,
         "surfaces_would_clean": session_state.count_surfaces_before(
-            conn, now_ts - env_int("ENGRAM_SURFACES_TTL_DAYS", SURFACES_TTL_DAYS) * 86400),
+            conn, now_ts - env_int(envvars.SURFACES_TTL_DAYS, SURFACES_TTL_DAYS) * 86400),
         "watcher_runs_would_clean": runs_store.count_runs_before(
-            conn, now_ts - env_int("ENGRAM_WATCHER_RUNS_TTL_DAYS", WATCHER_RUNS_TTL_DAYS) * 86400),
+            conn, now_ts - env_int(envvars.WATCHER_RUNS_TTL_DAYS, WATCHER_RUNS_TTL_DAYS) * 86400),
     }))
 
 
@@ -316,7 +317,7 @@ def _resolve_dates(args: argparse.Namespace) -> list[date]:
         return [date.fromisoformat(args.date)]
     today = date.today()
     if args.yesterday:
-        lookback = env_int("ENGRAM_CATCHUP_LOOKBACK_DAYS", CATCHUP_LOOKBACK_DAYS)
+        lookback = env_int(envvars.CATCHUP_LOOKBACK_DAYS, CATCHUP_LOOKBACK_DAYS)
         return [today - timedelta(days=n)
                 for n in range(lookback, 0, -1)]
     return [today]

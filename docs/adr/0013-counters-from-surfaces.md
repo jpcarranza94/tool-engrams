@@ -68,3 +68,9 @@ negative signal.)
   its outcomes, and hard suppression is `archive`/quarantine's job.
 - `surface_count` remains telemetry only (times shown), never a quality input —
   unchanged.
+- **Concurrency:** `rebuild-counters` recomputes inside a single
+  `UPDATE … (subquery over session_surfaces)` statement, so under SQLite's
+  statement-level locking (+ `busy_timeout`) it and a concurrent `judge` bump
+  serialize. The only write a rebuild could clobber is a surface row that landed
+  after its statement began — and the next rebuild re-derives it. Since
+  `rebuild-counters` is a human-driven one-shot, the window is immaterial.

@@ -16,7 +16,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from .. import memory_store
+from .. import envvars, memory_store
 from ..engine import EngineRequest, SandboxSpec, get_engine
 from ..prompts.consolidation import build_consolidation_prompt
 from ..retrieval import session_state
@@ -95,7 +95,7 @@ def _prioritize_sessions(sessions: list[SessionFile]) -> list[SessionFile]:
     to process in time), take up to MAX_SESSIONS or MAX_TOTAL_BYTES.
     """
     # Filter out giant sessions the agent can't process in 30 min.
-    max_sessions = env_int("ENGRAM_CONSOLIDATION_MAX_SESSIONS", MAX_SESSIONS)
+    max_sessions = env_int(envvars.CONSOLIDATION_MAX_SESSIONS, MAX_SESSIONS)
     eligible = [s for s in sessions if s.size_bytes <= MAX_SINGLE_SESSION_BYTES]
     sorted_sessions = sorted(eligible, key=lambda s: -s.size_bytes)
     selected: list[SessionFile] = []
@@ -160,7 +160,7 @@ def run_consolidation_agent(
     env = prepend_engram_bin(os.environ.copy())
     env["ENGRAM_DB"] = str(db_path)
 
-    timeout_sec = env_int("ENGRAM_CONSOLIDATION_TIMEOUT", CONSOLIDATION_TIMEOUT_SEC)
+    timeout_sec = env_int(envvars.CONSOLIDATION_TIMEOUT, CONSOLIDATION_TIMEOUT_SEC)
     # engine.invoke never raises — process failures come back on the result.
     result = engine.invoke(EngineRequest(
         prompt=prompt,

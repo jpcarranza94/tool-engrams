@@ -92,6 +92,23 @@ def test_into_merges_into_existing(temp_db, capsys):
     assert "MERGED" in memory_store.get(temp_db, aid).body
 
 
+def test_into_triggerless_body_preserves_target_triggers(temp_db, capsys):
+    # A merge body with no extractable triggers and no --trigger must NOT wipe
+    # the target's triggers (it folds into an already-triggered memory).
+    aid = _seed_a(capsys)
+    before = temp_db.execute(
+        "SELECT COUNT(*) c FROM triggers WHERE memory_id=?", (aid,)).fetchone()["c"]
+    assert before >= 1
+
+    rc, out = _remember(
+        [_BODY_DUP + " extra detail", "--name", "macos-timeout-a",
+         "--scope", "global", "--into", str(aid)], capsys)  # no --trigger
+    assert rc == 0 and out["action"] == "merged_into"
+    after = temp_db.execute(
+        "SELECT COUNT(*) c FROM triggers WHERE memory_id=?", (aid,)).fetchone()["c"]
+    assert after == before                          # triggers preserved, not wiped
+
+
 def test_into_nonexistent_errors(temp_db, capsys):
     rc, out = _remember(
         [_BODY_A, "--name", "x", "--scope", "global",
