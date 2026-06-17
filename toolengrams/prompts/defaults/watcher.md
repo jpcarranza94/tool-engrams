@@ -38,6 +38,15 @@ engram remember "<body>" --kind <block|hint> --scope <global|project> \
   it held still-valid guidance missing from yours, immediately re-run
   `engram remember` once more with a single body that merges both. If your
   body already covers it, do nothing.
+- If the CLI replies `action: "review_similar"`, NOTHING was saved yet — a
+  near-duplicate may already cover this. Read the `candidates` (each has an
+  `id`, `name`, `body_preview`, `similarity`). Then choose ONE:
+    - **Already covered / same idea** → fold into it: re-run
+      `engram remember --into <id> "<one body merging both>"` (with the same
+      `--trigger`/`--path`/`--kind`/`--scope`/`--project-cwd`). Keeps that
+      memory's id, counters, and surface history.
+    - **Genuinely different** → re-run the exact same command with `--force`.
+    - **Not worth saving after seeing the neighbors** → do nothing.
 - Do not run any other command, inspect the DB, or investigate. Save and stop.
 
 ## Memory fields

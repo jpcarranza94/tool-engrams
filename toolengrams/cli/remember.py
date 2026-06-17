@@ -27,11 +27,12 @@ from ..formation import (
     extract_candidates,
     extras_to_candidates,
     find_overlapping_memory,
+    find_similar,
     insert_candidate_triggers,
     scan_for_secrets,
     update_existing_memory,
 )
-from ..utils import slugify_cwd
+from ..utils import env_float, slugify_cwd
 from ..watcher import runs_store
 
 VALID_KINDS = {"block", "hint"}
@@ -40,6 +41,12 @@ DEFAULT_KIND = "hint"
 DEFAULT_SCOPE = "project"
 
 _NAME_MAX = 80
+
+# Token-Jaccard at/above which a would-be-new memory is withheld for review
+# instead of inserted (the formation agent then merges with --into or insists
+# with --force). Trigger-overlap dupes are still auto-merged upstream; this is
+# the semantic net for same-idea/different-trigger duplicates. See docs/adr/0014.
+SIMILARITY_THRESHOLD = 0.6
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -97,14 +104,43 @@ def main(argv: list[str] | None = None) -> int:
             extra_triggers=extra_triggers,
         )
 
+        # Explicit merge: the agent's response to a prior action=review_similar.
+        # Folds this body into a chosen memory by id (keeps its counters/surfaces).
+        if args.into is not None:
+            target = memory_store.get(conn, args.into)
+            if target is None or target.archived_ts is not None:
+                print(json.dumps({
+                    "error": "into_not_found",
+                    "message": f"--into {args.into}: no active memory with that id.",
+                    "into": args.into,
+                }))
+                return 1
+            memory_id = update_existing_memory(
+                conn=conn, existing_id=args.into,
+                name=name, description=description, body=body,
+                kind=args.kind, pinned=args.pinned,
+                candidates=candidates, extra_triggers=extra_triggers,
+                origin_session_id=origin_session,
+            )
+            runs_store.record_cli_event(conn, kind="created",
+                                        memory_id=memory_id, memory_name=name)
+            payload = _build_payload(memory_id=memory_id, action="merged_into",
+                                     existing_match=None, **common)
+            payload["merged_into"] = args.into
+            print(json.dumps(payload))
+            return 0
+
         if args.dry_run:
             payload = _build_payload(
                 memory_id=None, action="dry_run",
                 existing_match=existing, **common,
             )
+            payload["similar_memories"] = _similar_payload(
+                find_similar(conn, name, body, limit=3))
             print(json.dumps(payload, indent=2))
             return 0
 
+        similar_advisory: list[dict] | None = None
         if existing:
             # Echo the body being replaced + a merge instruction: a stateless
             # formation tick has no memory of what it saved before, so the
@@ -127,9 +163,32 @@ def main(argv: list[str] | None = None) -> int:
                     "remember again with one merged body."
                 )
         else:
+            # Semantic near-duplicate gate: catches same-idea/different-trigger
+            # duplicates that find_overlapping_memory (trigger-overlap) misses.
+            # Withhold the insert and let the agent merge (--into) or insist
+            # (--force) — formation is remember-only, so it can't edit/forget
+            # a dup after the fact (ADR-0014).
+            similar = find_similar(conn, name, body, limit=3)
+            threshold = env_float("ENGRAM_SIMILARITY_THRESHOLD", SIMILARITY_THRESHOLD)
+            if not args.force and similar and similar[0][1] >= threshold:
+                print(json.dumps({
+                    "action": "review_similar",
+                    "reason": "A near-duplicate of an existing memory may already cover this.",
+                    "would_create": {"name": name, "kind": args.kind,
+                                     "scope": args.scope, "body_chars": len(body)},
+                    "candidates": _similar_payload(similar),
+                    "guidance": (
+                        "If one of these already covers your knowledge, FOLD into it: "
+                        "engram remember --into <id> \"<merged body>\" (keeps that "
+                        "memory's id, counters, and surfaces). If this is genuinely "
+                        "new, re-run the same command with --force."
+                    ),
+                }))
+                return 0
             memory_id = _insert(conn=conn, origin_session_id=origin_session, **common)
             action = "inserted"
             existing = None
+            similar_advisory = _similar_payload(similar)
 
         # If a formation watcher run spawned this call, record it for the monitor.
         runs_store.record_cli_event(conn, kind="created",
@@ -139,6 +198,8 @@ def main(argv: list[str] | None = None) -> int:
             memory_id=memory_id, action=action,
             existing_match=existing, **common,
         )
+        if similar_advisory:
+            payload["similar_memories"] = similar_advisory
         print(json.dumps(payload))
         return 0
 
@@ -238,6 +299,14 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="token_subseq:git,push | path_glob:**/*.py")
     parser.add_argument("--dry-run", action="store_true",
                         help="Extract and report candidates; do not insert.")
+    parser.add_argument("--into", type=int, default=None, metavar="ID",
+                        help=("Fold this body into an existing memory by id "
+                              "(merge response to an action=review_similar "
+                              "result). Keeps that memory's id, counters, and "
+                              "surface history."))
+    parser.add_argument("--force", action="store_true",
+                        help=("Insert even when a near-duplicate exists "
+                              "(bypass the action=review_similar gate)."))
     return parser
 
 
@@ -399,6 +468,22 @@ def _build_payload(
     if existing_match:
         result["existing_match"] = existing_match
     return result
+
+
+def _similar_payload(similar: list) -> list[dict[str, Any]]:
+    """Render find_similar()'s (Memory, score) pairs for the JSON output."""
+    return [
+        {
+            "id": m.id,
+            "name": m.name,
+            "scope": m.scope,
+            "project_slug": m.project_slug,
+            "kind": m.kind,
+            "similarity": round(score, 2),
+            "body_preview": (m.body or "")[:200],
+        }
+        for m, score in similar
+    ]
 
 
 def _candidate_to_dict(c: FormationCandidate) -> dict[str, Any]:

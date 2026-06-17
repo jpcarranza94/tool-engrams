@@ -19,6 +19,27 @@ def is_watcher_child() -> bool:
     return os.environ.get(WATCHER_CHILD_ENV) == "1"
 
 
+def env_int(name: str, default: int) -> int:
+    """Read an int tuning knob from os.environ, falling back to `default` when
+    unset or unparseable. Read at CALL time (not import) so config.hydrate_env()
+    — which runs in __main__ after all modules import — has populated the value.
+    """
+    raw = os.environ.get(name, "")
+    try:
+        return int(raw) if raw.strip() else default
+    except ValueError:
+        return default
+
+
+def env_float(name: str, default: float) -> float:
+    """Float counterpart of env_int (e.g. the q gate / similarity thresholds)."""
+    raw = os.environ.get(name, "")
+    try:
+        return float(raw) if raw.strip() else default
+    except ValueError:
+        return default
+
+
 def prepend_engram_bin(env: dict[str, str]) -> dict[str, str]:
     """Prepend this interpreter's bin dir to env['PATH'] (mutates and returns).
 

@@ -44,7 +44,7 @@ from .. import db, pause
 from ..prompts.eval import build_eval_prompt
 from ..prompts.watcher import build_watcher_prompt
 from ..retrieval import session_state
-from ..utils import WATCHER_CHILD_ENV, safe_filename_id as _safe
+from ..utils import WATCHER_CHILD_ENV, env_int, safe_filename_id as _safe
 from . import runs_store, state
 from .agent import (
     DELTA_FILENAME,
@@ -497,11 +497,12 @@ def run_tick(session_id: str, transcript_path: str, cwd: str,
                  f"lines={len(new_lines)}")
 
         # Hold the window on failure, give up after the cap (fail_streak persisted).
-        advance, fail_streak = _retry_decision(failed, fail_streak, MAX_FORM_RETRIES)
+        max_retries = env_int("ENGRAM_MAX_FORM_RETRIES", MAX_FORM_RETRIES)
+        advance, fail_streak = _retry_decision(failed, fail_streak, max_retries)
         if advance:
             if failed:
                 _log(f"SKIP-GIVEUP session={session_id} role={role} "
-                     f"lines={len(new_lines)} after {MAX_FORM_RETRIES} attempts")
+                     f"lines={len(new_lines)} after {max_retries} attempts")
             last_line += len(new_lines)
         state.commit_tick(session_id, role=role,
                           last_line=last_line, armed=0, fail_streak=fail_streak)
