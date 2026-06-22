@@ -35,6 +35,28 @@ MAX_SINGLE_SESSION_BYTES = 5 * 1024 * 1024  # 5 MB per session — skip giants
 # Per-run wall-clock budget for the consolidation agent's `claude -p`.
 CONSOLIDATION_TIMEOUT_SEC = 1800  # 30 minutes
 
+# Never-surfaced + older than this many days = "cold" (see _cold_memories). The
+# conservative default keeps freshly-formed memories — which legitimately haven't
+# hit their trigger yet — out of the bucket.
+COLD_MEMORY_DAYS = 30
+
+
+def _cold_memories(memories: list, cutoff_ts: int) -> list:
+    """Memories that have never surfaced and predate `cutoff_ts`, oldest first.
+
+    A `surface_count == 0` memory past the cold horizon has had real wall-clock
+    time to match a live tool call and never did — either its trigger can't match
+    how the command is actually typed (fixable) or the pattern simply doesn't
+    recur (dead weight). `created_ts` is a proxy for "had a chance to fire": the
+    system keeps no per-memory exposure clock, and for a never-surfaced memory
+    `last_surfaced_ts` is uninformative (always 0), so creation age is the only
+    signal available. Pure filter over the already-loaded list — no extra query.
+    """
+    return sorted(
+        (m for m in memories if m.surface_count == 0 and m.created_ts < cutoff_ts),
+        key=lambda m: m.created_ts,
+    )
+
 
 def _get_memory_summary(db_path: Path) -> str:
     """Detailed memory state for consolidation agent context.
@@ -44,6 +66,7 @@ def _get_memory_summary(db_path: Path) -> str:
     """
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
+    now = int(time.time())
 
     # Audit-first ordering (never-verified, then oldest-verified) puts the most
     # audit-worthy memories at the top of the agent's context so a truncated
@@ -66,7 +89,24 @@ def _get_memory_summary(db_path: Path) -> str:
         # Body truncated to 500 chars; agent can `engram recall --id N` for full text.
         lines.append(f"       body: {m.body[:500]}")
 
-    quarantines = runs_store.recent_quarantines(conn, int(time.time()) - 48 * 3600)
+    # Cold (never-surfaced) memories — listed separately so the agent triages
+    # them instead of losing them among the inventory rows above (which carry the
+    # full kind/scope/created detail; here a bare id+name pointer suffices).
+    # Clamp to >= 1: a 0/negative horizon would move the cutoff to now-or-future
+    # and flag every just-created never-surfaced memory as cold — the exact
+    # false-positive-archive failure mode the conservative default guards against.
+    cold_days = max(1, env_int(envvars.COLD_MEMORY_DAYS, COLD_MEMORY_DAYS))
+    cold = _cold_memories(memories, now - cold_days * 86400)
+    if cold:
+        lines.append(
+            f"\nCold — never surfaced in {cold_days}+ days ({len(cold)}). The trigger has "
+            "had time to match a live call and never did. TRIAGE each (see Task 2): fix the "
+            "trigger if it can't match the real command, `engram forget --delete` if the "
+            "pattern won't recur, or leave genuinely-useful-but-rare facts alone:"
+        )
+        lines.extend(f"  [{m.id}] \"{m.name}\"" for m in cold)
+
+    quarantines = runs_store.recent_quarantines(conn, now - 48 * 3600)
     if quarantines:
         lines.append(f"\nQuarantined by the eval watcher (last 48h, {len(quarantines)}) — "
                      "REVIEW EACH: restore (engram forget --restore), repair the body "
