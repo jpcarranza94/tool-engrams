@@ -62,6 +62,7 @@ SPEC: list[tuple[str, str, type]] = [
     ("consolidation.watcher_runs_ttl_days", envvars.WATCHER_RUNS_TTL_DAYS, int),
     ("consolidation.max_sessions", envvars.CONSOLIDATION_MAX_SESSIONS, int),
     ("consolidation.timeout", envvars.CONSOLIDATION_TIMEOUT, int),
+    ("consolidation.cold_memory_days", envvars.COLD_MEMORY_DAYS, int),
     ("prompts.watcher_path", "ENGRAM_WATCHER_PROMPT_PATH", str),
     ("prompts.eval_path", "ENGRAM_EVAL_PROMPT_PATH", str),
     ("prompts.consolidation_path", "ENGRAM_CONSOLIDATION_PROMPT_PATH", str),

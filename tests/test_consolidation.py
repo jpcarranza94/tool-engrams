@@ -10,6 +10,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
+from toolengrams import memory_store
 from toolengrams.cli import consolidate
 from toolengrams.consolidation import agent
 from toolengrams.engine import EngineResult
@@ -305,3 +306,65 @@ def test_catchup_skips_when_another_sweep_holds_lock(temp_db, monkeypatch, capsy
     assert rc == 0
     out = json.loads(capsys.readouterr().out.strip())
     assert out == {"action": "skipped", "reason": "already_running"}
+
+
+# ---------- cold (never-surfaced) memory selection ----------
+
+DAY = 86400
+
+
+def _insert_mem(conn, name, *, created_ago_days, surface_count=0):
+    mid = memory_store.insert_memory(
+        conn, name=name, description=None, body=f"body of {name}",
+        kind="hint", scope="global", project_slug=None, pinned=False,
+        created_ts=int(time.time()) - created_ago_days * DAY,
+    )
+    if surface_count:
+        conn.execute("UPDATE memories SET surface_count=? WHERE id=?",
+                     (surface_count, mid))
+    conn.commit()
+    return mid
+
+
+def _cold_ids(conn, *, days):
+    """Run the predicate over the loaded inventory, like _get_memory_summary."""
+    memories = memory_store.list_memories(conn, order="audit")
+    cold = agent._cold_memories(memories, int(time.time()) - days * DAY)
+    return [m.id for m in cold]
+
+
+def test_cold_memories_selects_old_unsurfaced_only(temp_db):
+    cold = _insert_mem(temp_db, "cold-old-unsurfaced", created_ago_days=40)
+    _insert_mem(temp_db, "fresh-unsurfaced", created_ago_days=2)
+    _insert_mem(temp_db, "old-but-surfaced", created_ago_days=40, surface_count=3)
+    # fresh (too new) and surfaced (has fired) are both excluded
+    assert _cold_ids(temp_db, days=30) == [cold]
+
+
+def test_cold_memories_orders_oldest_first(temp_db):
+    older = _insert_mem(temp_db, "older", created_ago_days=90)
+    newer = _insert_mem(temp_db, "newer", created_ago_days=40)
+    assert _cold_ids(temp_db, days=30) == [older, newer]
+
+
+def test_memory_summary_renders_cold_section(temp_db):
+    cold = _insert_mem(temp_db, "cold-old-unsurfaced", created_ago_days=40)
+    summary = agent._get_memory_summary(Path(os.environ["ENGRAM_DB"]))
+    body = summary.split("Cold — never surfaced in 30+ days", 1)
+    assert len(body) == 2, "cold section header missing"
+    assert f'[{cold}] "cold-old-unsurfaced"' in body[1]
+
+
+def test_memory_summary_no_cold_section_when_none(temp_db):
+    _insert_mem(temp_db, "fresh-unsurfaced", created_ago_days=1)
+    summary = agent._get_memory_summary(Path(os.environ["ENGRAM_DB"]))
+    assert "Cold — never surfaced" not in summary
+
+
+def test_cold_horizon_respects_env_override(temp_db, monkeypatch):
+    mid = _insert_mem(temp_db, "ten-day-old", created_ago_days=10)
+    # default horizon (30d) leaves a 10-day-old memory out; tightening pulls it in
+    monkeypatch.setenv("ENGRAM_COLD_MEMORY_DAYS", "7")
+    summary = agent._get_memory_summary(Path(os.environ["ENGRAM_DB"]))
+    assert "Cold — never surfaced in 7+ days" in summary
+    assert f"[{mid}]" in summary.split("Cold — never surfaced", 1)[1]
