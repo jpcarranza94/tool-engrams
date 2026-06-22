@@ -368,3 +368,20 @@ def test_cold_horizon_respects_env_override(temp_db, monkeypatch):
     summary = agent._get_memory_summary(Path(os.environ["ENGRAM_DB"]))
     assert "Cold — never surfaced in 7+ days" in summary
     assert f"[{mid}]" in summary.split("Cold — never surfaced", 1)[1]
+
+
+def test_cold_horizon_clamps_nonpositive_env(temp_db, monkeypatch):
+    # A 0/negative horizon would push the cutoff to now-or-future and flag a
+    # fresh, just-created memory as cold. The clamp to >=1 must prevent that.
+    _insert_mem(temp_db, "fresh-unsurfaced", created_ago_days=0)
+    monkeypatch.setenv("ENGRAM_COLD_MEMORY_DAYS", "-5")
+    summary = agent._get_memory_summary(Path(os.environ["ENGRAM_DB"]))
+    assert "Cold — never surfaced" not in summary
+
+
+def test_cold_memories_uses_strict_cutoff(temp_db):
+    mid = _insert_mem(temp_db, "edge", created_ago_days=10)
+    [m] = memory_store.list_memories(temp_db, order="audit")
+    # created exactly at the cutoff is excluded (strict <); one second later, in
+    assert agent._cold_memories([m], m.created_ts) == []
+    assert [x.id for x in agent._cold_memories([m], m.created_ts + 1)] == [mid]

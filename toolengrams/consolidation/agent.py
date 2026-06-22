@@ -92,7 +92,10 @@ def _get_memory_summary(db_path: Path) -> str:
     # Cold (never-surfaced) memories — listed separately so the agent triages
     # them instead of losing them among the inventory rows above (which carry the
     # full kind/scope/created detail; here a bare id+name pointer suffices).
-    cold_days = env_int(envvars.COLD_MEMORY_DAYS, COLD_MEMORY_DAYS)
+    # Clamp to >= 1: a 0/negative horizon would move the cutoff to now-or-future
+    # and flag every just-created never-surfaced memory as cold — the exact
+    # false-positive-archive failure mode the conservative default guards against.
+    cold_days = max(1, env_int(envvars.COLD_MEMORY_DAYS, COLD_MEMORY_DAYS))
     cold = _cold_memories(memories, now - cold_days * 86400)
     if cold:
         lines.append(
