@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import sqlite3
 import tempfile
 import time
@@ -64,6 +65,42 @@ def _read_watcher_stats() -> dict:
     except Exception:
         pass
     return stats
+
+
+def _render_report(text: str | None) -> str:
+    """Render a consolidation report (markdown-ish prose) to safe HTML.
+
+    No markdown dependency on the dashboard path — escape everything, then
+    lightly style headings / bullets / fenced code line by line. Unknown lines
+    pass through as plain paragraphs, so a malformed report still degrades to
+    readable text. Heading prefixes ("# ", "## ", "### ") contain no characters
+    html.escape rewrites, so slicing the escaped string by the prefix length is
+    safe.
+    """
+    if not text or not text.strip():
+        return '<div class="report-empty">No report recorded for this run.</div>'
+    out: list[str] = []
+    in_code = False
+    for raw in text.splitlines():
+        if raw.strip().startswith("```"):
+            in_code = not in_code
+            continue
+        esc = html.escape(raw)
+        if in_code:
+            out.append(f'<div class="r-code">{esc or "&nbsp;"}</div>')
+        elif raw.startswith("### "):
+            out.append(f'<div class="r-h3">{esc[4:]}</div>')
+        elif raw.startswith("## "):
+            out.append(f'<div class="r-h2">{esc[3:]}</div>')
+        elif raw.startswith("# "):
+            out.append(f'<div class="r-h1">{esc[2:]}</div>')
+        elif raw.lstrip().startswith(("- ", "* ")):
+            out.append(f'<div class="r-li">{esc}</div>')
+        elif not raw.strip():
+            out.append('<div class="r-gap"></div>')
+        else:
+            out.append(f'<div class="r-p">{esc}</div>')
+    return '<div class="report">' + "".join(out) + "</div>"
 
 
 def _build_html(conn: sqlite3.Connection) -> str:
@@ -161,15 +198,18 @@ def _build_html(conn: sqlite3.Connection) -> str:
             <td class="mono">{s['session_id'][:12]}…</td>
         </tr>""")
 
-    # Consolidation rows.
+    # Consolidation rows — each summary row expands to show the run's full
+    # report (the agent's prose recommendations), which is otherwise invisible.
     consol_rows = []
     for c in consolidations:
         qs = c['quality_score']
         qs_display = f"{qs:.0%}" if qs is not None else "—"
         qs_class = "good" if qs and qs >= 0.6 else "ok" if qs and qs >= 0.3 else "low" if qs is not None else ""
+        report_keys = c.keys() if hasattr(c, "keys") else []
+        report = c["report"] if "report" in report_keys else None
         consol_rows.append(f"""
-        <tr>
-            <td>{c['run_date']}</td>
+        <tr class="consol-row">
+            <td><span class="caret">▸</span>{c['run_date']}</td>
             <td class="num">{c['sessions_scanned']}</td>
             <td class="num">{c['episodes_evaluated'] or 0}</td>
             <td class="num">{c['surfaces_helpful'] or 0}</td>
@@ -177,7 +217,8 @@ def _build_html(conn: sqlite3.Connection) -> str:
             <td class="num"><span class="usefulness {qs_class}">{qs_display}</span></td>
             <td class="num">{c['memories_discovered'] or 0}</td>
             <td class="num">{c['memories_archived'] or 0}</td>
-        </tr>""")
+        </tr>
+        <tr class="consol-detail"><td colspan="8">{_render_report(report)}</td></tr>""")
 
     # Watcher status indicator.
     obs_color = "#7ee787" if watcher_alive > 0 else "#8b949e"
@@ -236,6 +277,26 @@ td {{ padding: 10px 12px; border-top: 1px solid #21262d; vertical-align: top; fo
 .archived-row td {{ opacity: 0.5; }}
 .empty {{ color: #8b949e; padding: 20px; text-align: center; font-style: italic; }}
 .obs-dot {{ display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }}
+
+/* Consolidation: expandable report rows */
+.consol-row {{ cursor: pointer; }}
+.consol-row:hover td {{ background: #1c2230; }}
+.caret {{ display: inline-block; color: #8b949e; margin-right: 6px; transition: transform 0.15s; }}
+.consol-row.open .caret {{ transform: rotate(90deg); }}
+.consol-detail {{ display: none; }}
+.consol-detail.open {{ display: table-row; }}
+.consol-detail td {{ background: #0d1117; padding: 0; }}
+.report {{ font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; line-height: 1.5;
+           border: 1px solid #21262d; border-radius: 6px; margin: 8px; padding: 14px 18px;
+           max-height: 520px; overflow: auto; }}
+.report-empty {{ color: #8b949e; font-style: italic; padding: 14px 18px; }}
+.r-h1 {{ color: #58a6ff; font-weight: 700; font-size: 14px; margin: 8px 0 4px; }}
+.r-h2 {{ color: #bc8cff; font-weight: 700; margin: 12px 0 2px; }}
+.r-h3 {{ color: #79c0ff; font-weight: 600; margin: 8px 0 2px; }}
+.r-li {{ color: #c9d1d9; padding-left: 10px; }}
+.r-p {{ color: #c9d1d9; }}
+.r-code {{ color: #7ee787; white-space: pre-wrap; }}
+.r-gap {{ height: 8px; }}
 </style>
 </head>
 <body>
@@ -294,6 +355,17 @@ document.querySelectorAll('.tab').forEach(tab => {{
         document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
         tab.classList.add('active');
         document.getElementById(tab.dataset.tab).classList.add('active');
+    }});
+}});
+
+// Consolidation rows: click to toggle the report detail row beneath.
+document.querySelectorAll('.consol-row').forEach(row => {{
+    row.addEventListener('click', () => {{
+        const detail = row.nextElementSibling;
+        row.classList.toggle('open');
+        if (detail && detail.classList.contains('consol-detail')) {{
+            detail.classList.toggle('open');
+        }}
     }});
 }});
 </script>

@@ -66,7 +66,7 @@ def recent_runs(conn: sqlite3.Connection, limit: int) -> list[sqlite3.Row]:
     return conn.execute(
         "SELECT run_date, sessions_scanned, memories_archived, memories_discovered, "
         "memories_strengthened, memories_weakened, "
-        "quality_score, surfaces_helpful, surfaces_noise, episodes_evaluated "
+        "quality_score, surfaces_helpful, surfaces_noise, episodes_evaluated, report "
         "FROM consolidation_runs ORDER BY started_ts DESC LIMIT ?",
         (limit,),
     ).fetchall()
