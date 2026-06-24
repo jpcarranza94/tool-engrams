@@ -75,7 +75,7 @@ def insert_candidate_triggers(
         elif c.kind == "path_glob":
             if not c.path_pattern:
                 continue
-            memory_store.add_path_trigger(conn, memory_id, c.path_pattern)
+            memory_store.add_path_trigger(conn, memory_id, c.path_pattern, c.access_mode)
         else:
             continue
         n += 1

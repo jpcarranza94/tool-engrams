@@ -17,6 +17,10 @@ from typing import Literal
 MemoryKind = Literal["block", "hint"]
 MemoryScope = Literal["global", "project"]
 TriggerKind = Literal["token_subseq", "path_glob"]
+# Access intent for a path_glob trigger: 'write' fires only on mutating file
+# tools (Edit/Write/MultiEdit/NotebookEdit), 'read' only on read-only ones
+# (Read/Grep/Glob), 'any' on either. NULL for token_subseq triggers.
+AccessMode = Literal["write", "read", "any"]
 
 
 @dataclass(slots=True)
@@ -72,6 +76,7 @@ class Trigger:
     first_token: str | None
     tokens_json: str | None
     path_pattern: str | None
+    access_mode: str | None = None
 
     @property
     def tokens(self) -> list[str]:
@@ -86,6 +91,7 @@ class Trigger:
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "Trigger":
+        keys = row.keys()
         return cls(
             id=row["id"],
             memory_id=row["memory_id"],
@@ -93,6 +99,7 @@ class Trigger:
             first_token=row["first_token"],
             tokens_json=row["tokens_json"],
             path_pattern=row["path_pattern"],
+            access_mode=row["access_mode"] if "access_mode" in keys else None,
         )
 
 

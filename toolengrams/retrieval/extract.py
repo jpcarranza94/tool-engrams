@@ -32,13 +32,35 @@ _SUBCOMMAND_TOOLS = {
 # Match ~/... or /abs/paths inside a Bash command string.
 _PATH_RE = re.compile(r"(?<!\S)(~(?:/[^\s;|&><]*)?|/[^\s;|&><]+)")
 
+# Read-vs-write access intent per file tool (issue #63). A path_glob trigger
+# stores its own intent (triggers.access_mode); the call's intent — derived
+# here from the tool name — is matched against it so an edit-intended memory
+# stops firing on mere reads. Tools not in either set (Bash, WebFetch) are
+# ACCESS_ANY: they can read or write, so they match path triggers of any mode.
+ACCESS_READ = "read"
+ACCESS_WRITE = "write"
+ACCESS_ANY = "any"
+
+_READ_TOOLS = frozenset({"Read", "Grep", "Glob"})
+_WRITE_TOOLS = frozenset({"Edit", "Write", "MultiEdit", "NotebookEdit"})
+
+
+def access_mode_for_tool(tool_name: str) -> str:
+    """The call's access intent: ACCESS_READ for read-only file tools,
+    ACCESS_WRITE for mutating ones, ACCESS_ANY for everything else."""
+    if tool_name in _READ_TOOLS:
+        return ACCESS_READ
+    if tool_name in _WRITE_TOOLS:
+        return ACCESS_WRITE
+    return ACCESS_ANY
+
 
 def extract_hints(tool_name: str, tool_input: dict[str, Any]) -> ExtractedTriggerHint:
     hint = ExtractedTriggerHint(tool_name=tool_name)
 
     if tool_name == "Bash":
         _extract_from_bash(tool_input, hint)
-    elif tool_name in {"Read", "Edit", "Write", "MultiEdit", "NotebookEdit"}:
+    elif tool_name == "Read" or tool_name in _WRITE_TOOLS:
         _extract_from_file_tool(tool_input, hint)
     elif tool_name == "Grep":
         _extract_from_grep(tool_input, hint)

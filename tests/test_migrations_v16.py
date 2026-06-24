@@ -29,6 +29,7 @@ def test_v15_db_upgrades_with_claude_code_default(tmp_path: Path):
     raw.executescript("""
         ALTER TABLE watcher_state DROP COLUMN target;
         ALTER TABLE watcher_runs DROP COLUMN engine;
+        ALTER TABLE triggers DROP COLUMN access_mode;
     """)
     raw.execute(
         "INSERT INTO watcher_state (work_session_id, role, transcript_path, "

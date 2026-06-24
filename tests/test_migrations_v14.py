@@ -29,12 +29,14 @@ def test_v13_db_upgrades_preserving_rows_and_fk(tmp_path: Path):
     path = tmp_path / "v13.sqlite"
     raw = sqlite3.connect(str(path))
     raw.executescript(db.SCHEMA_PATH.read_text())
-    # Downgrade the v15 bits the live snapshot now carries: old DBs being
-    # simulated here HAD the resume-era columns and LACKED origin_session_id.
+    # Downgrade bits the live snapshot now carries but these older DBs lacked:
+    # the v15 resume-era columns + origin_session_id, and the v17 triggers
+    # access_mode column (the forward migration chain re-applies each cleanly).
     raw.executescript("""
         ALTER TABLE memories DROP COLUMN origin_session_id;
         ALTER TABLE watcher_state ADD COLUMN watcher_session_id TEXT;
         ALTER TABLE watcher_state ADD COLUMN watcher_pid INTEGER;
+        ALTER TABLE triggers DROP COLUMN access_mode;
     """)
     raw.executescript("""
         PRAGMA foreign_keys = OFF;

@@ -44,7 +44,8 @@ def main(argv: list[str] | None = None) -> int:
     for glob in args.add_path or []:
         if glob.strip():
             add_candidates.append(FormationCandidate(
-                kind="path_glob", path_pattern=glob.strip(), source="trigger-cli"))
+                kind="path_glob", path_pattern=glob.strip(),
+                access_mode=args.access_mode, source="trigger-cli"))
     removes = list(args.remove or [])
 
     with db.session() as conn:
@@ -109,6 +110,7 @@ def _trigger_dict(t) -> dict:
         "kind": t.kind,
         "tokens": t.tokens if t.kind == "token_subseq" else None,
         "path_pattern": t.path_pattern,
+        "access_mode": t.access_mode if t.kind == "path_glob" else None,
     }
 
 
@@ -119,6 +121,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
                         help="Token trigger phrase to add (repeatable), e.g. 'git push --force'.")
     parser.add_argument("--add-path", action="append", metavar="GLOB",
                         help="Path glob to add (repeatable), e.g. '**/migrations/*.py'.")
+    parser.add_argument("--access-mode", choices=("write", "read", "any"), default="write",
+                        help=("Access intent for --add-path globs (default write): "
+                              "'write' fires only on Edit/Write/MultiEdit/NotebookEdit, "
+                              "'read' only on Read/Grep/Glob, 'any' on either. "
+                              "Use 'any' to restore the pre-#63 fire-on-read behavior."))
     parser.add_argument("--remove", action="append", type=int, metavar="TRIGGER_ID",
                         help="Trigger id to remove (repeatable; see --list for ids).")
     parser.add_argument("--list", action="store_true",

@@ -358,3 +358,64 @@ def test_pretool_logs_turn_at_surface(temp_db, monkeypatch):
         (mem,),
     ).fetchone()
     assert row["turn_at_surface"] == 4
+
+
+def _seed_path_hint(conn, name: str, body: str, pattern: str, access_mode: str) -> int:
+    """Insert a hint memory bound to a path_glob trigger with an access mode."""
+    now_ts = int(time.time())
+    cur = conn.execute(
+        "INSERT INTO memories (name, description, body, kind, scope, project_slug, created_ts) "
+        "VALUES (?, '', ?, 'hint', 'global', NULL, ?)",
+        (name, body, now_ts),
+    )
+    mid = cur.lastrowid
+    conn.execute(
+        "INSERT INTO triggers (memory_id, kind, path_pattern, access_mode) "
+        "VALUES (?, 'path_glob', ?, ?)",
+        (mid, pattern, access_mode),
+    )
+    return mid
+
+
+def test_pretool_write_path_hint_skips_read_fires_on_edit(temp_db, monkeypatch):
+    """A write-mode path memory (issue #63) does NOT surface on a Read of the
+    matching file, but DOES on an Edit of it."""
+    _seed_path_hint(temp_db, "edit py rule", "Edit-only python rule", "**/*.py", "write")
+
+    read_payload = {
+        "session_id": "sess-mode",
+        "cwd": "/tmp/test-projects/myapp",
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Read",
+        "tool_input": {"file_path": "/tmp/test-projects/myapp/main.py"},
+        "tool_use_id": "tu-read",
+    }
+    assert _run_pretool(read_payload, monkeypatch) == {}
+
+    edit_payload = {
+        "session_id": "sess-mode",
+        "cwd": "/tmp/test-projects/myapp",
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Edit",
+        "tool_input": {"file_path": "/tmp/test-projects/myapp/main.py",
+                       "old_string": "a", "new_string": "b"},
+        "tool_use_id": "tu-edit",
+    }
+    hso = _run_pretool(edit_payload, monkeypatch)["hookSpecificOutput"]
+    assert "Edit-only python rule" in hso["additionalContext"]
+
+
+def test_pretool_any_path_hint_fires_on_read(temp_db, monkeypatch):
+    """An 'any'-mode path memory keeps the pre-#63 fire-on-read behavior."""
+    _seed_path_hint(temp_db, "any py rule", "Any-mode python rule", "**/*.py", "any")
+
+    payload = {
+        "session_id": "sess-any",
+        "cwd": "/tmp/test-projects/myapp",
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Read",
+        "tool_input": {"file_path": "/tmp/test-projects/myapp/main.py"},
+        "tool_use_id": "tu-any",
+    }
+    hso = _run_pretool(payload, monkeypatch)["hookSpecificOutput"]
+    assert "Any-mode python rule" in hso["additionalContext"]

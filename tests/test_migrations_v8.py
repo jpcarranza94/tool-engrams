@@ -24,12 +24,14 @@ def test_v7_db_upgrades_through_all_pending(tmp_path: Path):
     path = tmp_path / "v7.sqlite"
     raw = sqlite3.connect(str(path))
     raw.executescript(db.SCHEMA_PATH.read_text())
-    # Downgrade the v15 bits the live snapshot now carries: old DBs being
-    # simulated here HAD the resume-era columns and LACKED origin_session_id.
+    # Downgrade bits the live snapshot now carries but these older DBs lacked:
+    # the v15 resume-era columns + origin_session_id, and the v17 triggers
+    # access_mode column (the forward migration chain re-applies each cleanly).
     raw.executescript("""
         ALTER TABLE memories DROP COLUMN origin_session_id;
         ALTER TABLE watcher_state ADD COLUMN watcher_session_id TEXT;
         ALTER TABLE watcher_state ADD COLUMN watcher_pid INTEGER;
+        ALTER TABLE triggers DROP COLUMN access_mode;
     """)
     # Strip post-v7 columns/indices to simulate a real v7 DB.
     raw.executescript("""

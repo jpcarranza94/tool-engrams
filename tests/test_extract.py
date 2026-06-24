@@ -7,7 +7,13 @@ of the call (not prefix pairs) and relies on subsequence matching downstream.
 
 from __future__ import annotations
 
-from toolengrams.retrieval.extract import extract_hints
+from toolengrams.retrieval.extract import (
+    ACCESS_ANY,
+    ACCESS_READ,
+    ACCESS_WRITE,
+    access_mode_for_tool,
+    extract_hints,
+)
 
 
 def test_bash_tokenizes_command():
@@ -79,3 +85,24 @@ def test_unknown_tool_no_hints():
     hint = extract_hints("SendMessage", {"to": "foo", "message": "bar"})
     assert hint.tokens == []
     assert hint.paths == []
+
+
+# ---------- access-mode classification (issue #63) ----------
+
+
+def test_access_mode_read_tools():
+    assert access_mode_for_tool("Read") == ACCESS_READ
+    assert access_mode_for_tool("Grep") == ACCESS_READ
+    assert access_mode_for_tool("Glob") == ACCESS_READ
+
+
+def test_access_mode_write_tools():
+    for tool in ("Edit", "Write", "MultiEdit", "NotebookEdit"):
+        assert access_mode_for_tool(tool) == ACCESS_WRITE
+
+
+def test_access_mode_other_tools_are_any():
+    # Bash / WebFetch can read or write — neither read- nor write-only.
+    assert access_mode_for_tool("Bash") == ACCESS_ANY
+    assert access_mode_for_tool("WebFetch") == ACCESS_ANY
+    assert access_mode_for_tool("SendMessage") == ACCESS_ANY

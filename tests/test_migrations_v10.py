@@ -23,12 +23,14 @@ def test_v9_db_upgrades_to_v10_default_zero(tmp_path: Path):
     path = tmp_path / "v9.sqlite"
     raw = sqlite3.connect(str(path))
     raw.executescript(db.SCHEMA_PATH.read_text())
-    # Downgrade the v15 bits the live snapshot now carries: old DBs being
-    # simulated here HAD the resume-era columns and LACKED origin_session_id.
+    # Downgrade bits the live snapshot now carries but these older DBs lacked:
+    # the v15 resume-era columns + origin_session_id, and the v17 triggers
+    # access_mode column (the forward migration chain re-applies each cleanly).
     raw.executescript("""
         ALTER TABLE memories DROP COLUMN origin_session_id;
         ALTER TABLE watcher_state ADD COLUMN watcher_session_id TEXT;
         ALTER TABLE watcher_state ADD COLUMN watcher_pid INTEGER;
+        ALTER TABLE triggers DROP COLUMN access_mode;
     """)
     # Strip everything added after v9 (v10 memories_verified, the v11
     # watcher_state columns, and the v12 noise_count + watcher_state re-key),
