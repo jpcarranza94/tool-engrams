@@ -5,6 +5,13 @@ land on `main` without deprecation cycles; pin a tag if you need stability.
 
 ## [Unreleased]
 
+### Removed
+- **`engram seed` is gone.** The demo-memory smoke-test command shipped fixture
+  data inside the production CLI; verification now uses a one-line `engram
+  remember` to plant a throwaway demo memory (see README "Verify it's working").
+  The `test_pretool` surfacing tests that relied on `seed.main()` own their
+  fixtures directly now.
+
 ### Fixed
 - **`q` quality ratio derives from `session_surfaces` ground truth (ADR-0013).**
   `useful_count`/`noise_count` had drifted below memories' real helpfulness —

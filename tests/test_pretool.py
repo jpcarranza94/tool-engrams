@@ -12,7 +12,6 @@ import json
 import sys
 import time
 
-from toolengrams.cli import seed
 from toolengrams.hooks import pretool
 
 
@@ -48,11 +47,45 @@ def _seed_token_memory(conn, name: str, body: str, tokens: list[str], *,
     return mid
 
 
+def _seed_demo_hints(conn) -> None:
+    """Insert the hint memories the surfacing tests assert against.
+
+    These used to come from `engram seed` (since removed); the tests own
+    their fixtures now.
+    """
+    _seed_token_memory(
+        conn, "psql replica is read-only",
+        "psql -h replica.internal connects to a PostgreSQL production replica. "
+        "SELECT-only — never attempt writes.",
+        ["psql", "-h"], kind="hint",
+    )
+    _seed_token_memory(
+        conn, "git commit uses HEREDOC for multi-line messages",
+        "For commits with multi-line bodies always use the HEREDOC form.",
+        ["git", "commit"], kind="hint",
+    )
+    _seed_token_memory(
+        conn, "ssh to production: check VPN first on connection timeout",
+        "If ssh deploy@production times out, the usual cause is the VPN. "
+        "Check VPN state first.",
+        ["ssh", "deploy@production"], kind="hint",
+    )
+
+
+def _seed_block_demo(conn) -> None:
+    """Insert the force-push block memory the deny test asserts against."""
+    _seed_token_memory(
+        conn, "git push --force overwrites co-workers' commits",
+        "Use git push --force-with-lease instead.",
+        ["git", "push", "--force"], kind="block",
+    )
+
+
 def test_pretool_hint_memory_injects_without_permission_decision(temp_db, monkeypatch):
     """Seed's psql replica memory is kind=hint → context only. An explicit
     'allow' would bypass the user's permission prompts (security: hint
     triggers form autonomously and must never grant approval)."""
-    seed.main([])
+    _seed_demo_hints(temp_db)
 
     payload = {
         "session_id": "sess-abc",
@@ -70,7 +103,7 @@ def test_pretool_hint_memory_injects_without_permission_decision(temp_db, monkey
 
 def test_pretool_block_memory_denies_and_injects_context(temp_db, monkeypatch):
     """Seed's opt-in force-push memory is kind=block → denies + injects body."""
-    seed.main(["--with-block"])
+    _seed_block_demo(temp_db)
 
     payload = {
         "session_id": "sess-xyz",
@@ -90,7 +123,7 @@ def test_pretool_block_memory_denies_and_injects_context(temp_db, monkeypatch):
 def test_pretool_default_seed_never_denies_git_commit(temp_db, monkeypatch):
     """The default seed set is hint-only — a plain git commit must not be
     denied by freshly seeded demo memories (first-run safety)."""
-    seed.main([])
+    _seed_demo_hints(temp_db)
 
     payload = {
         "session_id": "sess-commit",
@@ -108,7 +141,7 @@ def test_pretool_default_seed_never_denies_git_commit(temp_db, monkeypatch):
 
 def test_pretool_surface_notice_emits_system_message(temp_db, monkeypatch):
     """ENGRAM_SURFACE_NOTICE=1 → a visible systemMessage names what surfaced."""
-    seed.main([])
+    _seed_demo_hints(temp_db)
     monkeypatch.setenv("ENGRAM_SURFACE_NOTICE", "1")
 
     payload = {
@@ -126,7 +159,7 @@ def test_pretool_surface_notice_emits_system_message(temp_db, monkeypatch):
 
 
 def test_pretool_no_system_message_by_default(temp_db, monkeypatch):
-    seed.main([])
+    _seed_demo_hints(temp_db)
     monkeypatch.delenv("ENGRAM_SURFACE_NOTICE", raising=False)
 
     payload = {
@@ -185,7 +218,7 @@ def test_pretool_session_dedup_skips_second_time(temp_db, monkeypatch):
 
 
 def test_pretool_unknown_tool_returns_empty(temp_db, monkeypatch):
-    seed.main([])
+    _seed_demo_hints(temp_db)
 
     payload = {
         "session_id": "sess-1",
@@ -200,7 +233,7 @@ def test_pretool_unknown_tool_returns_empty(temp_db, monkeypatch):
 
 
 def test_pretool_no_matching_memory_returns_empty(temp_db, monkeypatch):
-    seed.main([])
+    _seed_demo_hints(temp_db)
 
     payload = {
         "session_id": "sess-2",

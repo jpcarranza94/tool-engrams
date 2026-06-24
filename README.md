@@ -6,7 +6,7 @@
 
 > **Status:** alpha. Breaking changes expected; no stable users to protect. See `docs/design.md` for the design (and `docs/adr/` for the load-bearing decisions).
 
-> **Off switch:** `engram pause` stops everything with one command — no surfacing, no background watchers, no spend. `engram resume` turns it back on (`ENGRAM_DISABLED=1` does the same per shell). This system runs background LLM sessions that cost real money — read [Cost, privacy & the off switch](#cost-privacy--the-off-switch) before installing.
+> **Off switch:** `engram pause` stops everything with one command — no surfacing, no background watchers, no spend. `engram resume` turns it back on (`ENGRAM_DISABLED=1` does the same per shell). This system runs background LLM sessions through **your own Claude Code / Codex login** — the same subscription or API key you already use interactively, not a separate bill — so they draw on your existing usage. Read [Cost, privacy & the off switch](#cost-privacy--the-off-switch) before installing.
 
 ## Quickstart
 
@@ -14,7 +14,6 @@
 git clone https://github.com/jpcarranza94/tool-engrams.git
 cd tool-engrams
 ./install.sh        # defaults to --target claude-code --engine claude-code
-engram seed         # plants demo memories for the smoke test
 ```
 
 Then **open a new target-agent session** — hooks load at session start, so an
@@ -272,7 +271,7 @@ The hot path (hooks) has **no external dependencies** — stdlib + sqlite3 only.
 
 **What runs in the background.** After a turn completes (Stop), the hooks fire detached engine sessions: one **formation** tick (forms memories from the transcript delta) and, only when surfaced memories are pending judgment, one **evaluation** tick. Rapid turns coalesce (default 45s window), so it's at most one model call per role per coalesced Stop event — not per tool call. A nightly **consolidation** agent reviews sessions from every wired target. Nothing model-driven runs on the tool-call hot path.
 
-**What it costs.** Scales with how much actually happens (delta size), not with session age: every tick is a fresh engine call (ADR-0005 — a 5-session audit found the old resumed-conversation design spent up to 96% of its budget re-carrying history for decisions the current delta already determined, a 2.5–9× premium). Pre-redesign observed sonnet days ranged ~$1–$9; expect materially less now. Don't trust estimates — measure your own: `engram monitor` shows the engine for each run plus USD cost when the engine reports it, and token counts for all engines that expose usage.
+**What it costs.** Background ticks authenticate with your existing Claude Code (or Codex) login — the same credentials you already use interactively — so there's no separate ToolEngrams account or bill: on a subscription plan the calls count against your plan's usage limits, and on API-key billing they're metered as ordinary token spend (the USD figures below are that API-billing case). Cost scales with how much actually happens (delta size), not with session age: every tick is a fresh engine call (ADR-0005 — a 5-session audit found the old resumed-conversation design spent up to 96% of its budget re-carrying history for decisions the current delta already determined, a 2.5–9× premium). Pre-redesign observed sonnet days ranged ~$1–$9; expect materially less now. Don't trust estimates — measure your own: `engram monitor` shows the engine for each run plus USD cost when the engine reports it, and token counts for all engines that expose usage.
 
 **The levers.**
 
@@ -346,7 +345,9 @@ installing. The session you ran `./install.sh` from won't have them. For Codex,
 accept the hook trust prompt on first run after install.
 
 ```bash
-engram seed                        # 1. plant three demo hint memories
+# 1. plant one throwaway demo memory bound to a command you can safely run
+engram remember "If ssh to deploy@production times out, check the VPN first." \
+  --trigger "ssh deploy@production" --kind hint
 export ENGRAM_SURFACE_NOTICE=1     # 2. optional: print a visible line when a memory fires
 ```
 
@@ -354,19 +355,25 @@ export ENGRAM_SURFACE_NOTICE=1     # 2. optional: print a visible line when a me
 `ENGRAM_SURFACE_NOTICE` in the same shell you launch the new session from,
 or it silently does nothing.)
 
-3. In the new session, ask the agent to run `ssh deploy@production`. The seeded
-   VPN hint is injected alongside the call — ask the agent what context it
-   received, or watch for the `ToolEngrams surfaced: …` line if you enabled
-   the notice.
+3. In the new session, ask the agent to run `ssh deploy@production`. The hint is
+   injected alongside the call — ask the agent what context it received, or
+   watch for the `ToolEngrams surfaced: …` line if you enabled the notice.
 4. `engram status` — the surfaces count incremented.
 5. `engram doctor` — wiring + liveness diagnostics (hooks present, `engram` on
    PATH, target/engine versions, DB schema, when a hook last fired). Exit code 1 on
    any failure, so it's scriptable.
-6. `engram seed --remove` — delete the demo memories again.
+6. `engram forget` the demo memory when done (its name is printed by `engram
+   remember`; `engram recall` lists it).
 
-Want to see the deny path? `engram seed --with-block` adds one `block` memory
-on `git push --force` (a call you won't trip by accident): the forced push is
-denied and redirected to `--force-with-lease`.
+Want to see the deny path? Plant a `block` instead — on a command you won't trip
+by accident:
+
+```bash
+engram remember "Use git push --force-with-lease instead of --force." \
+  --trigger "git push --force" --kind block
+```
+
+In a new session the forced push is denied and redirected to `--force-with-lease`.
 
 **Expect the first day to be quiet.** Organic memories form from real
 failure→recovery episodes, not from every turn. Watch formation decisions
@@ -416,8 +423,6 @@ engram dashboard                  HTML dashboard in browser
 engram monitor                    Live watcher dashboard (active runs / 24h / decision stream)
                                     --json for a one-shot snapshot (auto when piped)
 engram consolidate                Run the nightly agent now
-engram seed [--with-block]        Insert example memories for smoke-testing
-engram seed --remove              Delete the seeded examples (exact names only)
 engram rebuild-triggers           Re-extract triggers from bodies (post-migration repair)
 ```
 

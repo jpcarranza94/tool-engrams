@@ -337,7 +337,7 @@ done
 echo "Sessions already running will not pick them up."
 echo ""
 echo "Verify it's working (see README, 'Verify it's working'):"
-echo "  1. engram seed                       — plant demo memories"
+echo "  1. engram remember \"If ssh to deploy@production times out, check the VPN first.\" --trigger \"ssh deploy@production\" --kind hint"
 if [[ " ${TARGETS[*]} " == *" claude-code "* ]]; then
     echo "  2. In a NEW Claude Code session, ask Claude to run: ssh deploy@production"
 elif [[ " ${TARGETS[*]} " == *" codex "* ]]; then
@@ -346,7 +346,7 @@ else
     echo "  2. In a NEW target-agent session, ask it to run: ssh deploy@production"
 fi
 echo "  3. engram status                     — total_surfaces incremented"
-echo "  4. engram seed --remove              — clean up the demos"
+echo "  4. engram forget the demo memory     — engram recall lists its name"
 echo ""
 echo "Commands:"
 echo "  engram doctor          — wiring + liveness diagnostics"

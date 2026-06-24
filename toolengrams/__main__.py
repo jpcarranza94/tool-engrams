@@ -1,7 +1,7 @@
 """engram CLI entrypoint — ToolEngrams command-line interface.
 
 Wires hook handlers (pretool, session-start, user-prompt, post-tool)
-plus seed and all formation subcommands (remember, forget, pin, recall).
+plus all formation subcommands (remember, forget, pin, recall).
 """
 
 from __future__ import annotations
@@ -32,7 +32,6 @@ from .cli import (
     recall,
     remember,
     resolve_slug,
-    seed,
     skip,
     status,
     trigger,
@@ -67,7 +66,6 @@ _SELF_PARSING = {
     "quarantine": quarantine.main,
     "status": status.main,
     "doctor": doctor.main,
-    "seed": seed.main,
     "dashboard": dashboard.main,
     "watcher-tick": watcher.tick.main,
     "monitor": monitor.main,
@@ -153,8 +151,6 @@ def main(argv: list[str] | None = None) -> int:
         # 2 — exit 2 is a BLOCKING hook error in Claude Code, and the typo'd
         # or version-skewed target is exactly the fail-open case.
         hp.add_argument("--target", default=CLAUDE_CODE)
-    sub.add_parser("seed", help="Insert example memories for smoke testing "
-                                "(--with-block, --remove)", add_help=False)
     sub.add_parser("cleanup", help="Reap cold watcher residue: dead watcher_state rows, stale sandboxes, internal transcripts")
     sub.add_parser("pause", help="Kill switch: stop all surfacing, watcher ticks, and background spend")
     sub.add_parser("resume", help="Undo 'engram pause' — turn the memory system back on")
