@@ -21,6 +21,7 @@ import time
 from typing import Any
 
 from .. import db, memory_store
+from ..models import DEFAULT_PATH_ACCESS_MODE
 from ..formation import (
     FormationCandidate,
     consolidate_vocabulary,
@@ -253,6 +254,12 @@ def _resolve_triggers(
     explicit = _parse_explicit_triggers(args.trigger or [], args.path or [])
     candidates = explicit if explicit else extract_candidates(body)
 
+    # Stamp the authored access mode on every path trigger (explicit --path or
+    # body-extracted); token triggers are unaffected. Defaults to 'write'.
+    for c in candidates:
+        if c.kind == "path_glob":
+            c.access_mode = args.access_mode
+
     all_triggers = candidates + [
         FormationCandidate(
             kind=t["kind"],
@@ -307,6 +314,12 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--path", action="append", default=None,
                         metavar="GLOB",
                         help="Path glob to bind to (repeatable). e.g. --path '**/*.py'")
+    parser.add_argument("--access-mode", choices=("write", "read", "any"),
+                        default=DEFAULT_PATH_ACCESS_MODE,
+                        help=("Access intent for path triggers (default write): "
+                              "'write' fires only on Edit/Write/MultiEdit/NotebookEdit, "
+                              "'read' only on Read/Grep/Glob, 'any' on either. Applies "
+                              "to --path globs and paths extracted from the body."))
     parser.add_argument("--extra-trigger", action="append", default=None,
                         metavar="SPEC",
                         help="token_subseq:git,push | path_glob:**/*.py")
@@ -504,6 +517,7 @@ def _candidate_to_dict(c: FormationCandidate) -> dict[str, Any]:
         "kind": c.kind,
         "tokens": list(c.tokens) if c.tokens else None,
         "path_pattern": c.path_pattern,
+        "access_mode": c.access_mode if c.kind == "path_glob" else None,
         "source": c.source,
         "existing_memories": c.existing_memories,
     }

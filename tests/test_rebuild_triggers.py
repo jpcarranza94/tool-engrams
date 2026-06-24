@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import time
 
+from toolengrams import memory_store
 from toolengrams.cli import rebuild_triggers
 
 
@@ -99,6 +100,27 @@ def test_only_triggerless_skips_memories_that_already_have_triggers(temp_db, cap
     summary = json.loads(capsys.readouterr().out)
     # Should not have rebuilt this one.
     assert summary["total_memories_considered"] == 0
+
+
+def test_rebuild_preserves_tuned_access_mode(temp_db, monkeypatch, capsys):
+    """A path trigger tuned via `engram trigger --access-mode` keeps its mode
+    across a rebuild, even though the mode isn't expressible in body text."""
+    mid = _seed_memory_no_triggers(temp_db, "rule", "Edit ~/.gitconfig with care.")
+    # Tune the path trigger whose pattern the body extractor will re-derive.
+    memory_store.add_path_trigger(temp_db, mid, "~/.gitconfig", access_mode="any")
+    monkeypatch.setenv("ENGRAM_DB", temp_db.execute("PRAGMA database_list").fetchone()[2])
+
+    rebuild_triggers.main([])
+
+    rows = temp_db.execute(
+        "SELECT path_pattern, access_mode FROM triggers "
+        "WHERE memory_id=? AND kind='path_glob'",
+        (mid,),
+    ).fetchall()
+    modes = {r["path_pattern"]: r["access_mode"] for r in rows}
+    assert modes["~/.gitconfig"] == "any"          # tuned mode preserved
+    # A pattern with no prior tuning falls back to the default.
+    assert modes.get("**/.gitconfig") == "write"
 
 
 def test_archived_memories_skipped(temp_db, capsys):

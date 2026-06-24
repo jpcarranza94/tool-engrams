@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from toolengrams import paths
+from toolengrams import db, paths
 from toolengrams.cli import doctor
 from toolengrams.retrieval.session_state import increment_session_turn
 from toolengrams.target import claude_code, codex
@@ -303,6 +303,21 @@ def test_hook_liveness_passes_after_activity(temp_db):
     increment_session_turn(temp_db, "session-1", int(time.time()))
     result = doctor._check_hook_liveness()
     assert result["status"] == doctor.PASS
+
+
+def test_db_check_passes_on_clean_schema(temp_db):
+    c = doctor._check_db()
+    assert c["status"] == doctor.PASS
+
+
+def test_db_check_flags_schema_drift(temp_db):
+    """A DB stamped at the latest version but missing a migrated column (the
+    version-without-column corruption) is caught, not reported as ok."""
+    temp_db.execute("ALTER TABLE triggers DROP COLUMN access_mode")
+    temp_db.execute(f"PRAGMA user_version = {db.SCHEMA_VERSION}")
+    c = doctor._check_db()
+    assert c["status"] == doctor.FAIL
+    assert "access_mode" in c["detail"]
 
 
 def test_watcher_liveness_warns_when_never_ticked(temp_db):

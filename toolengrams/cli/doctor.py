@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
+import sqlite3
 import time
 from pathlib import Path
 
@@ -235,11 +236,60 @@ def _check_db() -> dict:
         with db.session() as conn:
             schema_version = conn.execute("PRAGMA user_version").fetchone()[0]
             active = memory_store.health_stats(conn)["active"]
+            drift = _schema_drift(conn, schema_version)
     except Exception as e:
         return _check("db", FAIL, f"cannot open DB at {db.db_path()}: {e}")
+    if drift:
+        return _check("db", FAIL,
+                      f"schema drift at v{schema_version}: missing {drift} — the "
+                      "version was stamped without its migration running. Restore "
+                      "from a backup or re-apply the migration by hand; "
+                      "PRAGMA user_version only proves the number, not the columns")
     return _check("db", PASS,
                   f"db ok (schema v{schema_version}, {active} active memories, "
                   f"{db.db_path()})")
+
+
+def _columns_by_table(conn: sqlite3.Connection) -> dict[str, set[str]]:
+    """Map each table name to its column set (index access works for both Row
+    and plain-tuple row factories)."""
+    out: dict[str, set[str]] = {}
+    for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'"):
+        name = row[0]
+        out[name] = {c[1] for c in conn.execute(f"PRAGMA table_info({name})")}
+    return out
+
+
+def _snapshot_columns() -> dict[str, set[str]]:
+    """Columns per table from the canonical schema.sql snapshot, built in an
+    in-memory DB so doctor compares against the code, not a hand-kept manifest."""
+    snap = sqlite3.connect(":memory:")
+    try:
+        snap.executescript(db.SCHEMA_PATH.read_text())
+        return _columns_by_table(snap)
+    finally:
+        snap.close()
+
+
+def _schema_drift(conn: sqlite3.Connection, version: int) -> str | None:
+    """Expected-but-missing 'table.column's, or None if the live schema matches.
+
+    schema.sql is a v_latest snapshot, so the comparison is only meaningful when
+    the DB is stamped at the latest version. A mismatch there means user_version
+    was bumped without the migration that adds the column actually running — the
+    silent-skip failure mode _apply_migrations now guards against; this is the
+    at-rest detector for a DB already in that state. Only missing columns are
+    flagged (extra columns from a newer DB are ignored)."""
+    if version != db.SCHEMA_VERSION:
+        return None
+    actual = _columns_by_table(conn)
+    missing = [
+        f"{table}.{col}"
+        for table, cols in _snapshot_columns().items()
+        for col in cols
+        if col not in actual.get(table, set())
+    ]
+    return ", ".join(sorted(missing)) if missing else None
 
 
 def _check_kill_switch() -> dict:
