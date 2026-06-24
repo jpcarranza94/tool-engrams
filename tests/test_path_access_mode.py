@@ -62,6 +62,19 @@ def test_any_call_mode_skips_filter(temp_db):
     assert {write_id, read_id} <= matched
 
 
+def test_block_path_memory_exempt_from_access_filter(temp_db):
+    """A block is enforcement, not surfacing: a write-mode path block must still
+    fire on a read call (it must never go silent because the backfill set it to
+    'write'). Mirrors the q-gate / same-session block exemptions."""
+    mid = ms.insert_memory(
+        temp_db, name="blk", description="", body="body", kind="block",
+        scope="global", project_slug=None, pinned=False, created_ts=int(time.time()),
+    )
+    ms.add_path_trigger(temp_db, mid, "**/*.py", access_mode="write")
+    assert mid in _ids(temp_db, "read")   # would be filtered out if it were a hint
+    assert mid in _ids(temp_db, "write")
+
+
 def test_legacy_null_access_mode_fails_open(temp_db):
     """A path trigger written before v17 (access_mode NULL) keeps matching any
     call — the migration backfills real rows, NULL is the defensive fallback."""
@@ -89,6 +102,17 @@ def test_retrieve_write_trigger_fires_on_edit_not_read(temp_db):
     read = retrieve_candidates(temp_db, _hint("Read", "/proj/main.py"), None)
     assert mid in {c.memory_id for c in edit}
     assert mid not in {c.memory_id for c in read}
+
+
+def test_retrieve_hint_kind_respects_access_mode(temp_db):
+    """The failure-surface hook calls retrieve_candidates(kind='hint'); the
+    access filter must apply on that path too — a write hint stays suppressed on
+    a read-only failed call, fires on a write one."""
+    mid = _path_mem(temp_db, "write")  # _path_mem creates kind='hint'
+    read = retrieve_candidates(temp_db, _hint("Read", "/proj/main.py"), None, kind="hint")
+    edit = retrieve_candidates(temp_db, _hint("Edit", "/proj/main.py"), None, kind="hint")
+    assert mid not in {c.memory_id for c in read}
+    assert mid in {c.memory_id for c in edit}
 
 
 def test_retrieve_default_path_trigger_is_write(temp_db):

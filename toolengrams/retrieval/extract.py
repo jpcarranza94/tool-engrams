@@ -18,7 +18,7 @@ import re
 import shlex
 from typing import Any
 
-from ..models import ExtractedTriggerHint
+from ..models import AccessMode, ExtractedTriggerHint
 
 # Known CLI first tokens we care about for second-token extraction during
 # memory formation (see formation/candidates.py). Retrieval itself doesn't
@@ -37,9 +37,9 @@ _PATH_RE = re.compile(r"(?<!\S)(~(?:/[^\s;|&><]*)?|/[^\s;|&><]+)")
 # here from the tool name — is matched against it so an edit-intended memory
 # stops firing on mere reads. Tools not in either set (Bash, WebFetch) are
 # ACCESS_ANY: they can read or write, so they match path triggers of any mode.
-ACCESS_READ = "read"
-ACCESS_WRITE = "write"
-ACCESS_ANY = "any"
+ACCESS_READ: AccessMode = "read"
+ACCESS_WRITE: AccessMode = "write"
+ACCESS_ANY: AccessMode = "any"
 
 _READ_TOOLS = frozenset({"Read", "Grep", "Glob"})
 _WRITE_TOOLS = frozenset({"Edit", "Write", "MultiEdit", "NotebookEdit"})
@@ -53,7 +53,7 @@ _WRITE_TOOLS = frozenset({"Edit", "Write", "MultiEdit", "NotebookEdit"})
 _FILE_PATH_TOOLS = frozenset({"Read", "Edit", "Write", "MultiEdit", "NotebookEdit"})
 
 
-def access_mode_for_tool(tool_name: str) -> str:
+def access_mode_for_tool(tool_name: str) -> AccessMode:
     """The call's access intent: ACCESS_READ for read-only file tools,
     ACCESS_WRITE for mutating ones, ACCESS_ANY for everything else."""
     if tool_name in _READ_TOOLS:

@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import sqlite3
+
+import pytest
+
 from toolengrams import db
 
 
@@ -52,6 +56,18 @@ def test_already_at_current_version_is_noop(tmp_path):
     ver = conn.execute("PRAGMA user_version").fetchone()[0]
     assert ver == db.SCHEMA_VERSION
     conn.close()
+
+
+def test_apply_migrations_raises_on_missing_in_range_file():
+    """A missing in-range migration file must be a hard error, not a silent skip
+    that lets _migrate stamp user_version past a migration that never ran (the
+    failure mode that once left a DB marked v17 without the access_mode column)."""
+    conn = sqlite3.connect(":memory:")
+    try:
+        with pytest.raises(FileNotFoundError):
+            db._apply_migrations(conn, from_version=10_000, to_version=10_000)
+    finally:
+        conn.close()
 
 
 def test_env_var_override(tmp_path, monkeypatch):

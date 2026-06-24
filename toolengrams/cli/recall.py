@@ -97,4 +97,5 @@ def _trigger_dict(t: Trigger) -> dict:
         "first_token": t.first_token,
         "tokens_json": t.tokens_json,
         "path_pattern": t.path_pattern,
+        "access_mode": t.access_mode if t.kind == "path_glob" else None,
     }
