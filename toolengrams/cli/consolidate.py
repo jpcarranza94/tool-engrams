@@ -174,8 +174,10 @@ def _consolidate_date(conn, target: date, *, force: bool) -> dict:
                 "sessions_scanned": len(sessions), "error": result.error,
                 "report": result.report}
 
-    # Parse structured metrics from the report (JSON block at the end).
-    metrics = _extract_metrics(result.report or "")
+    # Parse structured metrics + recommendations from the report's trailing
+    # JSON envelope.
+    report_text = result.report or ""
+    metrics = _extract_metrics(report_text)
 
     now_ts = int(time.time())
     runs.record_run(
@@ -196,6 +198,10 @@ def _consolidate_date(conn, target: date, *, force: bool) -> dict:
         surfaces_noise=metrics.get("surfaces_noise", 0),
         memories_verified=metrics.get("memories_verified", 0),
     )
+    # Recommendations are first-class (issue #64): persisted alongside the run so
+    # the dashboard can track recurrence/resolution across runs.
+    runs.insert_recommendations(
+        conn, iso, _extract_recommendations(report_text), now_ts=now_ts)
 
     return {"status": "completed", "run_date": iso,
             "sessions_scanned": len(sessions), "error": None,
@@ -275,13 +281,21 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _extract_metrics(report: str) -> dict:
-    """Parse the structured JSON metrics block from the consolidation report.
+# Fixed vocabularies for structured recommendations (issue #64). An unknown
+# value is coerced to the safe default rather than dropping the recommendation —
+# losing the advisory over a typo'd severity would be worse than mislabeling it.
+_REC_SEVERITIES = {"info", "warn", "critical"}
+_REC_STATUSES = {"open", "done"}
 
-    The agent is instructed to end its report with a ```json block
-    containing a "metrics" key. We try to extract it; if parsing fails
-    we return an empty dict (graceful degradation — the report text
-    is still stored either way).
+
+def _extract_json_block(report: str) -> dict:
+    """Parse the trailing ```json envelope from the consolidation report.
+
+    The agent ends its report with one JSON object carrying `metrics` and
+    (issue #64) `recommendations`. Returns the parsed object, or {} if there is
+    no parseable trailing block (graceful degradation — the prose report is
+    stored either way). Both `_extract_metrics` and `_extract_recommendations`
+    read from this single parse.
     """
     try:
         # Find the last JSON block in the report.
@@ -296,12 +310,54 @@ def _extract_metrics(report: str) -> dict:
             elif report[i] == "{":
                 depth -= 1
             if depth == 0:
-                candidate = report[i:last_brace + 1]
-                parsed = json.loads(candidate)
-                return parsed.get("metrics", parsed)
+                parsed = json.loads(report[i:last_brace + 1])
+                return parsed if isinstance(parsed, dict) else {}
     except (json.JSONDecodeError, ValueError):
         pass
     return {}
+
+
+def _extract_metrics(report: str) -> dict:
+    """The `metrics` sub-dict from the report's JSON envelope.
+
+    Falls back to the whole parsed object when there is no `metrics` key, so a
+    bare `{...}` of metric fields (older agents) still parses.
+    """
+    block = _extract_json_block(report)
+    return block.get("metrics", block)
+
+
+def _extract_recommendations(report: str) -> list[dict]:
+    """The validated `recommendations` array from the report's JSON envelope.
+
+    Each entry is normalized to {title, severity, status, detail, issue_url}.
+    Entries without a non-empty title are dropped (the title is the cross-run
+    dedup key); severity/status outside the fixed vocab fall back to their
+    defaults. Returns [] when the block is missing or `recommendations` is not a
+    list — the prose report is stored regardless.
+    """
+    raw = _extract_json_block(report).get("recommendations")
+    if not isinstance(raw, list):
+        return []
+    out: list[dict] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get("title") or "").strip()
+        if not title:
+            continue
+        severity = item.get("severity")
+        status = item.get("status")
+        detail = item.get("detail")
+        issue_url = item.get("issue_url")
+        out.append({
+            "title": title,
+            "severity": severity if severity in _REC_SEVERITIES else "info",
+            "status": status if status in _REC_STATUSES else "open",
+            "detail": str(detail).strip() if detail else None,
+            "issue_url": str(issue_url).strip() if issue_url else None,
+        })
+    return out
 
 
 def _resolve_dates(args: argparse.Namespace) -> list[date]:

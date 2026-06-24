@@ -103,12 +103,58 @@ def _render_report(text: str | None) -> str:
     return '<div class="report">' + "".join(out) + "</div>"
 
 
+_SEVERITY_RANK = {"info": 0, "warn": 1, "critical": 2}
+
+
+def _group_recommendations(rows) -> list[dict]:
+    """Collapse cross-run recommendation rows into one entry per title.
+
+    Rows arrive newest-run-first (see runs.recommendations_across_runs). Items
+    are deduped by casefolded title so a recurring advisory shows once with every
+    date it was raised. Per group: the **most recent** occurrence supplies the
+    display title and status (the current state of the issue); severity is the
+    **max** seen (a single critical run keeps the group critical); detail/issue_url
+    take the most recent non-empty value. Output is sorted severity-desc then
+    newest-date-desc so the loudest, freshest items lead.
+
+    Pure over a list of mappings (sqlite3.Row or dict) — no DB access — so the
+    dedup/grouping logic is unit-testable without rendering.
+    """
+    groups: dict[str, dict] = {}
+    order: list[str] = []
+    for r in rows:
+        title = r["title"]
+        key = title.strip().casefold()
+        g = groups.get(key)
+        if g is None:
+            # First sighting == most recent run (rows are newest-first): seed the
+            # "current state" fields here and never overwrite them.
+            g = {"title": title, "severity": r["severity"], "status": r["status"],
+                 "detail": r["detail"], "issue_url": r["issue_url"], "dates": []}
+            groups[key] = g
+            order.append(key)
+        if r["run_date"] not in g["dates"]:
+            g["dates"].append(r["run_date"])
+        if _SEVERITY_RANK.get(r["severity"], 0) > _SEVERITY_RANK.get(g["severity"], 0):
+            g["severity"] = r["severity"]
+        if not g["detail"] and r["detail"]:
+            g["detail"] = r["detail"]
+        if not g["issue_url"] and r["issue_url"]:
+            g["issue_url"] = r["issue_url"]
+    grouped = [groups[k] for k in order]
+    grouped.sort(key=lambda g: (_SEVERITY_RANK.get(g["severity"], 0), g["dates"][0]),
+                 reverse=True)
+    return grouped
+
+
 def _build_html(conn: sqlite3.Connection) -> str:
     memories = memory_store.list_memories(conn, include_archived=True, order="dashboard")
     triggers = memory_store.all_triggers(conn)
 
     surfaces = session_state.recent_surfaces_with_memory(conn, limit=50)
     consolidations = consolidation_runs.recent_runs(conn, limit=10)
+    recommendations = _group_recommendations(
+        consolidation_runs.recommendations_across_runs(conn, run_limit=10))
 
     # Group triggers by memory_id.
     triggers_by_mem: dict[int, list] = {}
@@ -220,6 +266,26 @@ def _build_html(conn: sqlite3.Connection) -> str:
         </tr>
         <tr class="consol-detail"><td colspan="8">{_render_report(report)}</td></tr>""")
 
+    # Recommendation rows — one per recurring advisory, deduped across runs.
+    rec_rows = []
+    for g in recommendations:
+        title_esc = html.escape(g["title"])
+        if g["issue_url"]:
+            title_html = (f'<a class="rec-link" href="{html.escape(g["issue_url"])}" '
+                          f'target="_blank" rel="noopener">{title_esc}</a>')
+        else:
+            title_html = title_esc
+        detail_html = (f'<div class="rec-detail">{html.escape(g["detail"])}</div>'
+                       if g["detail"] else "")
+        dates_html = ", ".join(html.escape(d) for d in g["dates"])
+        rec_rows.append(f"""
+        <tr>
+            <td><div class="rec-title">{title_html}</div>{detail_html}</td>
+            <td><span class="tag sev-{g['severity']}">{g['severity']}</span></td>
+            <td><span class="tag st-{g['status']}">{g['status']}</span></td>
+            <td class="rec-dates">{dates_html}</td>
+        </tr>""")
+
     # Watcher status indicator.
     obs_color = "#7ee787" if watcher_alive > 0 else "#8b949e"
     obs_label = f"{watcher_alive} active" if watcher_alive > 0 else "idle"
@@ -297,6 +363,18 @@ td {{ padding: 10px 12px; border-top: 1px solid #21262d; vertical-align: top; fo
 .r-p {{ color: #c9d1d9; }}
 .r-code {{ color: #7ee787; white-space: pre-wrap; }}
 .r-gap {{ height: 8px; }}
+
+/* Recommendations (cross-run, deduped by title) */
+.rec-title {{ font-weight: 600; color: #f0f6fc; }}
+.rec-link {{ color: #58a6ff; text-decoration: none; }}
+.rec-link:hover {{ text-decoration: underline; }}
+.rec-detail {{ color: #8b949e; font-size: 12px; margin-top: 4px; line-height: 1.4; }}
+.rec-dates {{ color: #8b949e; font-size: 12px; white-space: nowrap; }}
+.tag.sev-info {{ background: #1a2733; color: #58a6ff; }}
+.tag.sev-warn {{ background: #3a2f1a; color: #d29922; }}
+.tag.sev-critical {{ background: #3d1f1f; color: #f85149; }}
+.tag.st-open {{ background: #21262d; color: #8b949e; }}
+.tag.st-done {{ background: #1a3326; color: #7ee787; }}
 </style>
 </head>
 <body>
@@ -320,6 +398,7 @@ td {{ padding: 10px 12px; border-top: 1px solid #21262d; vertical-align: top; fo
     <div class="tab active" data-tab="memories">Memories<span class="tab-count">{len(active)}</span></div>
     <div class="tab" data-tab="surfaces">Surfaces<span class="tab-count">{len(surfaces)}</span></div>
     <div class="tab" data-tab="consolidation">Consolidation<span class="tab-count">{len(consolidations)}</span></div>
+    <div class="tab" data-tab="recommendations">Recommendations<span class="tab-count">{len(recommendations)}</span></div>
     <div class="tab" data-tab="archived">Archived<span class="tab-count">{len(archived)}</span></div>
 </div>
 
@@ -341,6 +420,13 @@ td {{ padding: 10px 12px; border-top: 1px solid #21262d; vertical-align: top; fo
 <table>
 <tr><th>Date</th><th>Sessions</th><th>Evaluated</th><th>Helpful</th><th>Noise</th><th>Quality</th><th>Created</th><th>Pruned</th></tr>
 {"".join(consol_rows) or '<tr><td colspan="8" class="empty">No consolidation runs</td></tr>'}
+</table>
+</div>
+
+<div class="tab-panel" id="recommendations">
+<table>
+<tr><th>Recommendation</th><th>Severity</th><th>Status</th><th>Raised on</th></tr>
+{"".join(rec_rows) or '<tr><td colspan="4" class="empty">No recommendations recorded</td></tr>'}
 </table>
 </div>
 
