@@ -24,7 +24,7 @@ import time
 from .. import memory_store
 from ..models import Candidate
 from ..reinforcement.scoring import final_score
-from .extract import ExtractedTriggerHint
+from .extract import ExtractedTriggerHint, access_mode_for_tool
 
 
 def retrieve_candidates(
@@ -56,7 +56,8 @@ def retrieve_candidates(
 
     # --- path_glob matches ---
     if hint.paths:
-        rows = memory_store.match_path_triggers(conn, project_slug, kind)
+        access_mode = access_mode_for_tool(hint.tool_name)
+        rows = memory_store.match_path_triggers(conn, project_slug, kind, access_mode)
         for row in rows:
             if _any_path_matches(row["path_pattern"], hint.paths):
                 _merge_path_candidate(candidates, row)

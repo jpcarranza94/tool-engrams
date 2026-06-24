@@ -36,7 +36,14 @@ CREATE TABLE IF NOT EXISTS triggers (
     first_token     TEXT,     -- tokens[0] stored as-is (lookup is case-sensitive,
                               -- like command names); null for path_glob
     tokens_json     TEXT,     -- JSON array of required tokens in order; null for path_glob
-    path_pattern    TEXT      -- fnmatch pattern; null for token_subseq
+    path_pattern    TEXT,     -- fnmatch pattern; null for token_subseq
+    access_mode     TEXT      -- path_glob access intent: 'write'|'read'|'any'.
+                              -- 'write' fires only on Edit/Write/MultiEdit/
+                              -- NotebookEdit; 'read' only on Read/Grep/Glob;
+                              -- 'any' on either. New path inserts always set a
+                              -- value (add_path_trigger defaults to 'write').
+                              -- NULL means token_subseq, or a pre-v17 legacy
+                              -- path row — matched as 'any' (fail-open).
 );
 
 CREATE INDEX IF NOT EXISTS idx_triggers_first_token

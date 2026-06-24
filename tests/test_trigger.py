@@ -48,6 +48,26 @@ def test_add_token_trigger(temp_db, capsys):
     assert kinds == {"path_glob", "token_subseq"}
 
 
+def test_add_path_trigger_with_access_mode(temp_db, capsys):
+    """--access-mode tags added path globs; the default Dockerfile glob stays write."""
+    mid = _mem_with_trigger(temp_db)
+    rc = trigger.main([str(mid), "--add-path", "**/*.py", "--access-mode", "any"])
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["action"] == "updated"
+    modes = {t.path_pattern: t.access_mode for t in _triggers(temp_db, mid)}
+    assert modes["**/*.py"] == "any"
+    assert modes["**/Dockerfile"] == "write"
+
+
+def test_list_shows_access_mode(temp_db, capsys):
+    mid = _mem_with_trigger(temp_db)
+    trigger.main([str(mid), "--list"])
+    out = json.loads(capsys.readouterr().out)
+    path_trig = [t for t in out["triggers"] if t["kind"] == "path_glob"][0]
+    assert path_trig["access_mode"] == "write"
+
+
 def test_narrow_glob_replace_in_one_call(temp_db, capsys):
     """Remove a broad glob and add a narrow one — the noise-fix path."""
     mid = _mem_with_trigger(temp_db)

@@ -10,7 +10,7 @@ from typing import Iterator
 
 from . import paths
 
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 17
 SCHEMA_PATH = Path(__file__).parent / "schema.sql"
 MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 
@@ -75,11 +75,24 @@ def _apply_migrations(
     from_version: int,
     to_version: int,
 ) -> None:
-    """Apply all migration files from from_version to to_version inclusive."""
+    """Apply all migration files from from_version to to_version inclusive.
+
+    A missing in-range file is a hard error, NOT a skip: the migration chain is
+    contiguous, so an absent `vN.sql` means the schema would fall behind the
+    user_version that _migrate is about to stamp. Skipping then stamping is how a
+    DB once ended up marked v17 with no `access_mode` column (the column-add
+    migration was never run) — refuse loudly instead of corrupting the
+    version<->schema invariant.
+    """
     for v in range(from_version, to_version + 1):
         path = MIGRATIONS_DIR / f"v{v}.sql"
-        if path.exists():
-            conn.executescript(path.read_text())
+        if not path.exists():
+            raise FileNotFoundError(
+                f"migration {path.name} is missing but version {v} is in the "
+                f"pending range [{from_version}, {to_version}]; refusing to stamp "
+                f"user_version past a migration that never ran"
+            )
+        conn.executescript(path.read_text())
 
 
 @contextmanager

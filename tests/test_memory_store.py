@@ -121,6 +121,17 @@ def test_triggers_roundtrip_and_match(temp_db):
     assert mid in {r["id"] for r in prows}
 
 
+def test_all_triggers_roundtrips_access_mode(temp_db):
+    """all_triggers (the dashboard SELECT) reads access_mode back through
+    Trigger.from_row — covers the column + the guard-free keyed access."""
+    mid = _insert(temp_db, name="pathmem", scope="global")
+    ms.add_path_trigger(temp_db, mid, "**/*.py", access_mode="read")
+    ms.add_token_trigger(temp_db, mid, ["git", "push"])
+    by_kind = {t.kind: t for t in ms.all_triggers(temp_db) if t.memory_id == mid}
+    assert by_kind["path_glob"].access_mode == "read"
+    assert by_kind["token_subseq"].access_mode is None
+
+
 def test_match_token_triggers_kind_filter(temp_db):
     # The kind-filtered SQL combination: only memories of the asked kind come back.
     block = _insert(temp_db, name="blk", kind="block", scope="global")

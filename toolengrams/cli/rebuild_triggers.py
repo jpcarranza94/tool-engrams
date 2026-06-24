@@ -90,6 +90,19 @@ def main(argv: list[str] | None = None) -> int:
                     summary["no_triggers_extracted"] += 1
                     continue
 
+                # Preserve access-mode tuning: rebuild re-derives triggers from
+                # body text, which can't express a path trigger's access_mode, so
+                # a mode set via `engram trigger --access-mode` would otherwise be
+                # reset to the default. Carry the existing mode over by pattern.
+                tuned = {
+                    t.path_pattern: t.access_mode
+                    for t in memory_store.triggers_for(conn, mid)
+                    if t.kind == "path_glob" and t.access_mode
+                }
+                for c in candidates:
+                    if c.kind == "path_glob" and c.path_pattern in tuned:
+                        c.access_mode = tuned[c.path_pattern]
+
                 if not args.dry_run:
                     # Wipe existing triggers (even if this memory already has some) —
                     # we're re-deriving from the body as source of truth.
@@ -105,6 +118,7 @@ def main(argv: list[str] | None = None) -> int:
                             "kind": c.kind,
                             "tokens": list(c.tokens) if c.tokens else None,
                             "path_pattern": c.path_pattern,
+                            "access_mode": c.access_mode if c.kind == "path_glob" else None,
                             "source": c.source,
                         }
                         for c in candidates

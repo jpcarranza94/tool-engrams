@@ -18,7 +18,7 @@ import re
 import shlex
 from typing import Any
 
-from ..models import ExtractedTriggerHint
+from ..models import AccessMode, ExtractedTriggerHint
 
 # Known CLI first tokens we care about for second-token extraction during
 # memory formation (see formation/candidates.py). Retrieval itself doesn't
@@ -32,13 +32,43 @@ _SUBCOMMAND_TOOLS = {
 # Match ~/... or /abs/paths inside a Bash command string.
 _PATH_RE = re.compile(r"(?<!\S)(~(?:/[^\s;|&><]*)?|/[^\s;|&><]+)")
 
+# Read-vs-write access intent per file tool (issue #63). A path_glob trigger
+# stores its own intent (triggers.access_mode); the call's intent — derived
+# here from the tool name — is matched against it so an edit-intended memory
+# stops firing on mere reads. Tools not in either set (Bash, WebFetch) are
+# ACCESS_ANY: they can read or write, so they match path triggers of any mode.
+ACCESS_READ: AccessMode = "read"
+ACCESS_WRITE: AccessMode = "write"
+ACCESS_ANY: AccessMode = "any"
+
+_READ_TOOLS = frozenset({"Read", "Grep", "Glob"})
+_WRITE_TOOLS = frozenset({"Edit", "Write", "MultiEdit", "NotebookEdit"})
+
+# Tools whose payload carries a single file_path/notebook_path, routed to
+# _extract_from_file_tool. This is extraction-routing, NOT access
+# classification: Grep/Glob are read tools but have their own extractors, and
+# Read has no write semantics — so this set deliberately doesn't equal
+# _READ_TOOLS ∪ _WRITE_TOOLS. Keeping it separate stops the two concerns from
+# drifting when a future tool fits one grouping but not the other.
+_FILE_PATH_TOOLS = frozenset({"Read", "Edit", "Write", "MultiEdit", "NotebookEdit"})
+
+
+def access_mode_for_tool(tool_name: str) -> AccessMode:
+    """The call's access intent: ACCESS_READ for read-only file tools,
+    ACCESS_WRITE for mutating ones, ACCESS_ANY for everything else."""
+    if tool_name in _READ_TOOLS:
+        return ACCESS_READ
+    if tool_name in _WRITE_TOOLS:
+        return ACCESS_WRITE
+    return ACCESS_ANY
+
 
 def extract_hints(tool_name: str, tool_input: dict[str, Any]) -> ExtractedTriggerHint:
     hint = ExtractedTriggerHint(tool_name=tool_name)
 
     if tool_name == "Bash":
         _extract_from_bash(tool_input, hint)
-    elif tool_name in {"Read", "Edit", "Write", "MultiEdit", "NotebookEdit"}:
+    elif tool_name in _FILE_PATH_TOOLS:
         _extract_from_file_tool(tool_input, hint)
     elif tool_name == "Grep":
         _extract_from_grep(tool_input, hint)

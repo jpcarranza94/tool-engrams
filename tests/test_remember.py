@@ -49,6 +49,34 @@ def test_empty_body_returns_exit_2(temp_db, monkeypatch, capsys):
     assert rc == 2
 
 
+def test_path_access_mode_applied_to_explicit_path(temp_db, monkeypatch, capsys):
+    payload = _run(
+        ["--path", "**/*.py", "--access-mode", "read", "body about python files"],
+        monkeypatch, capsys=capsys,
+    )
+    assert payload["action"] == "inserted"
+    modes = {r["path_pattern"]: r["access_mode"]
+             for r in _rows(temp_db,
+                            "SELECT path_pattern, access_mode FROM triggers "
+                            "WHERE kind='path_glob'")}
+    assert modes["**/*.py"] == "read"
+
+
+def test_path_access_mode_defaults_to_write(temp_db, monkeypatch, capsys):
+    _run(["--path", "**/*.py", "body"], monkeypatch, capsys=capsys)
+    row = _rows(temp_db, "SELECT access_mode FROM triggers WHERE kind='path_glob'")[0]
+    assert row["access_mode"] == "write"
+
+
+def test_access_mode_applies_to_body_extracted_paths(temp_db, monkeypatch, capsys):
+    _run(["--access-mode", "any", "Reading ~/.config/foo.toml is safe"],
+         monkeypatch, capsys=capsys)
+    rows = _rows(temp_db,
+                 "SELECT access_mode FROM triggers WHERE kind='path_glob'")
+    assert rows
+    assert all(r["access_mode"] == "any" for r in rows)
+
+
 def test_name_synthesized_from_first_line(temp_db, monkeypatch, capsys):
     body = "First line is the synthesized name\nSecond line has more context `git`."
     payload = _run([body], monkeypatch, capsys=capsys)

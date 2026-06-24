@@ -22,7 +22,7 @@ import sqlite3
 import time
 from typing import Sequence
 
-from .models import Memory, Trigger
+from .models import DEFAULT_PATH_ACCESS_MODE, AccessMode, Memory, Trigger
 
 # Full column list for Memory.from_row — every column the Memory dataclass
 # reads. `from_row` uses KEYED access, so order here is irrelevant; only presence
@@ -144,7 +144,7 @@ def name_exists(conn: sqlite3.Connection, name: str) -> bool:
 def all_triggers(conn: sqlite3.Connection) -> list[Trigger]:
     """Every trigger, ordered by memory_id (dashboard rendering)."""
     rows = conn.execute(
-        "SELECT id, memory_id, kind, first_token, tokens_json, path_pattern "
+        "SELECT id, memory_id, kind, first_token, tokens_json, path_pattern, access_mode "
         "FROM triggers ORDER BY memory_id"
     ).fetchall()
     return [Trigger.from_row(r) for r in rows]
@@ -236,7 +236,7 @@ def health_stats(conn: sqlite3.Connection) -> dict:
 
 def triggers_for(conn: sqlite3.Connection, memory_id: int) -> list[Trigger]:
     rows = conn.execute(
-        "SELECT id, memory_id, kind, first_token, tokens_json, path_pattern "
+        "SELECT id, memory_id, kind, first_token, tokens_json, path_pattern, access_mode "
         "FROM triggers WHERE memory_id = ?",
         (memory_id,),
     ).fetchall()
@@ -269,18 +269,38 @@ def match_token_triggers(conn: sqlite3.Connection, first_token: str,
 
 
 def match_path_triggers(conn: sqlite3.Connection, project_slug: str | None,
-                        kind: str | None) -> list[sqlite3.Row]:
-    """path_glob candidates, scope-filtered, non-archived (raw rows for rank.py)."""
-    kind_sql = " AND m.kind = ?" if kind else ""
-    args = (project_slug, kind) if kind else (project_slug,)
+                        kind: str | None,
+                        access_mode: AccessMode | None = None) -> list[sqlite3.Row]:
+    """path_glob candidates, scope-filtered, non-archived (raw rows for rank.py).
+
+    `access_mode` is the call's read-vs-write intent ('read'|'write'), derived
+    from the tool name (issue #63). A trigger matches when its own access_mode
+    is 'any', equals the call's mode, or is NULL (legacy rows = match-any,
+    fail-open). A call mode of 'any'/None (e.g. Bash, which can do either)
+    skips the filter entirely. Stays a cheap WHERE clause for the hot path.
+
+    Block memories are exempt: they are enforcement, not surfacing, and are
+    already exempt from the q-gate and same-session suppression (hooks/pretool.py).
+    A path block must fail toward firing — deny on read OR write — and never go
+    silent just because its trigger was backfilled to 'write'.
+    """
+    clauses = ["t.kind = 'path_glob'", "m.archived_ts IS NULL",
+               "(m.scope = 'global' OR m.project_slug = ?)"]
+    args: list = [project_slug]
+    if kind:
+        clauses.append("m.kind = ?")
+        args.append(kind)
+    if access_mode and access_mode != "any":
+        clauses.append(
+            "(m.kind = 'block' OR t.access_mode IS NULL "
+            "OR t.access_mode = 'any' OR t.access_mode = ?)")
+        args.append(access_mode)
     return conn.execute(
         "SELECT m.id, m.name, m.body, m.kind, m.scope, m.surface_count, "
         "       m.useful_count, m.noise_count, m.last_surfaced_ts, m.pinned, "
         "       m.origin_session_id, t.path_pattern "
         "FROM triggers t JOIN memories m ON m.id = t.memory_id "
-        "WHERE t.kind = 'path_glob' AND m.archived_ts IS NULL "
-        "  AND (m.scope = 'global' OR m.project_slug = ?)"
-        f"{kind_sql}",
+        f"WHERE {' AND '.join(clauses)}",
         args,
     ).fetchall()
 
@@ -529,10 +549,15 @@ def add_token_trigger(conn: sqlite3.Connection, memory_id: int,
     )
 
 
-def add_path_trigger(conn: sqlite3.Connection, memory_id: int, path_pattern: str) -> None:
+def add_path_trigger(conn: sqlite3.Connection, memory_id: int, path_pattern: str,
+                     access_mode: AccessMode = DEFAULT_PATH_ACCESS_MODE) -> None:
+    """Insert a path_glob trigger. `access_mode` ('write'|'read'|'any') is the
+    read-vs-write intent the retrieval filter keys on (issue #63); it defaults
+    to 'write' because most file-path lessons are about mutation."""
     conn.execute(
-        "INSERT INTO triggers (memory_id, kind, path_pattern) VALUES (?, 'path_glob', ?)",
-        (memory_id, path_pattern),
+        "INSERT INTO triggers (memory_id, kind, path_pattern, access_mode) "
+        "VALUES (?, 'path_glob', ?, ?)",
+        (memory_id, path_pattern, access_mode),
     )
 
 
