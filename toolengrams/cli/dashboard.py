@@ -281,8 +281,8 @@ def _build_html(conn: sqlite3.Connection) -> str:
         rec_rows.append(f"""
         <tr>
             <td><div class="rec-title">{title_html}</div>{detail_html}</td>
-            <td><span class="tag sev-{g['severity']}">{g['severity']}</span></td>
-            <td><span class="tag st-{g['status']}">{g['status']}</span></td>
+            <td><span class="tag sev-{g['severity']}">{html.escape(g['severity'])}</span></td>
+            <td><span class="tag st-{g['status']}">{html.escape(g['status'])}</span></td>
             <td class="rec-dates">{dates_html}</td>
         </tr>""")
 

@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import sqlite3
 
+from .. import db
+
 
 def was_run(conn: sqlite3.Connection, run_date: str) -> bool:
     """True if a consolidation run is already recorded for this date (the
@@ -89,21 +91,26 @@ def insert_recommendations(
     title, severity, status, detail, issue_url (the caller normalizes the vocab
     and drops malformed entries). `resolved_ts` is stamped now for items the
     agent already marked `done`, NULL otherwise.
+
+    Delete + insert run in one transaction so a concurrent reader (the dashboard)
+    never observes the day with its recommendations momentarily cleared — unlike
+    `record_run`'s single-statement upsert, this is two statements.
     """
-    conn.execute(
-        "DELETE FROM consolidation_recommendations WHERE run_date = ?", (run_date,)
-    )
-    conn.executemany(
-        "INSERT INTO consolidation_recommendations "
-        "(run_date, title, severity, status, detail, issue_url, created_ts, resolved_ts) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        [
-            (run_date, r["title"], r["severity"], r["status"], r.get("detail"),
-             r.get("issue_url"), now_ts,
-             now_ts if r["status"] == "done" else None)
-            for r in recommendations
-        ],
-    )
+    with db.transaction(conn):
+        conn.execute(
+            "DELETE FROM consolidation_recommendations WHERE run_date = ?", (run_date,)
+        )
+        conn.executemany(
+            "INSERT INTO consolidation_recommendations "
+            "(run_date, title, severity, status, detail, issue_url, created_ts, resolved_ts) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                (run_date, r["title"], r["severity"], r["status"], r.get("detail"),
+                 r.get("issue_url"), now_ts,
+                 now_ts if r["status"] == "done" else None)
+                for r in recommendations
+            ],
+        )
 
 
 def recommendations_across_runs(
