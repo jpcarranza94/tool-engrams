@@ -44,6 +44,14 @@ ACCESS_ANY = "any"
 _READ_TOOLS = frozenset({"Read", "Grep", "Glob"})
 _WRITE_TOOLS = frozenset({"Edit", "Write", "MultiEdit", "NotebookEdit"})
 
+# Tools whose payload carries a single file_path/notebook_path, routed to
+# _extract_from_file_tool. This is extraction-routing, NOT access
+# classification: Grep/Glob are read tools but have their own extractors, and
+# Read has no write semantics — so this set deliberately doesn't equal
+# _READ_TOOLS ∪ _WRITE_TOOLS. Keeping it separate stops the two concerns from
+# drifting when a future tool fits one grouping but not the other.
+_FILE_PATH_TOOLS = frozenset({"Read", "Edit", "Write", "MultiEdit", "NotebookEdit"})
+
 
 def access_mode_for_tool(tool_name: str) -> str:
     """The call's access intent: ACCESS_READ for read-only file tools,
@@ -60,7 +68,7 @@ def extract_hints(tool_name: str, tool_input: dict[str, Any]) -> ExtractedTrigge
 
     if tool_name == "Bash":
         _extract_from_bash(tool_input, hint)
-    elif tool_name == "Read" or tool_name in _WRITE_TOOLS:
+    elif tool_name in _FILE_PATH_TOOLS:
         _extract_from_file_tool(tool_input, hint)
     elif tool_name == "Grep":
         _extract_from_grep(tool_input, hint)

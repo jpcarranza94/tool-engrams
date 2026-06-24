@@ -40,8 +40,10 @@ CREATE TABLE IF NOT EXISTS triggers (
     access_mode     TEXT      -- path_glob access intent: 'write'|'read'|'any'.
                               -- 'write' fires only on Edit/Write/MultiEdit/
                               -- NotebookEdit; 'read' only on Read/Grep/Glob;
-                              -- 'any' on either. NULL for token_subseq (and
-                              -- legacy path rows = match-any, fail-open).
+                              -- 'any' on either. New path inserts always set a
+                              -- value (add_path_trigger defaults to 'write').
+                              -- NULL means token_subseq, or a pre-v17 legacy
+                              -- path row — matched as 'any' (fail-open).
 );
 
 CREATE INDEX IF NOT EXISTS idx_triggers_first_token

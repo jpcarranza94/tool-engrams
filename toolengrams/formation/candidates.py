@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from typing import Iterable, Literal
 
 from .. import memory_store
+from ..models import DEFAULT_PATH_ACCESS_MODE
 from ..retrieval.extract import _SUBCOMMAND_TOOLS, _tokenize_bash
 
 CandidateKind = Literal["token_subseq", "path_glob"]
@@ -55,7 +56,7 @@ class FormationCandidate:
     kind: CandidateKind
     tokens: tuple[str, ...] = ()
     path_pattern: str | None = None
-    access_mode: str = "write"             # path_glob intent (issue #63); ignored for token_subseq
+    access_mode: str = DEFAULT_PATH_ACCESS_MODE  # path_glob intent (issue #63); ignored for token_subseq
     source: str = ""                       # "backtick" | "path" | "url" | "extra" | "explicit"
     existing_memories: int = 0             # set by consolidate_vocabulary
 

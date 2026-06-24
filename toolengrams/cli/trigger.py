@@ -26,6 +26,7 @@ import json
 
 from .. import db, memory_store
 from ..formation import FormationCandidate, insert_candidate_triggers
+from ..models import DEFAULT_PATH_ACCESS_MODE
 
 
 class _WouldOrphan(Exception):
@@ -121,7 +122,8 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
                         help="Token trigger phrase to add (repeatable), e.g. 'git push --force'.")
     parser.add_argument("--add-path", action="append", metavar="GLOB",
                         help="Path glob to add (repeatable), e.g. '**/migrations/*.py'.")
-    parser.add_argument("--access-mode", choices=("write", "read", "any"), default="write",
+    parser.add_argument("--access-mode", choices=("write", "read", "any"),
+                        default=DEFAULT_PATH_ACCESS_MODE,
                         help=("Access intent for --add-path globs (default write): "
                               "'write' fires only on Edit/Write/MultiEdit/NotebookEdit, "
                               "'read' only on Read/Grep/Glob, 'any' on either. "

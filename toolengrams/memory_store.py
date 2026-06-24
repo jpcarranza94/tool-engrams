@@ -22,7 +22,7 @@ import sqlite3
 import time
 from typing import Sequence
 
-from .models import Memory, Trigger
+from .models import DEFAULT_PATH_ACCESS_MODE, Memory, Trigger
 
 # Full column list for Memory.from_row — every column the Memory dataclass
 # reads. `from_row` uses KEYED access, so order here is irrelevant; only presence
@@ -544,7 +544,7 @@ def add_token_trigger(conn: sqlite3.Connection, memory_id: int,
 
 
 def add_path_trigger(conn: sqlite3.Connection, memory_id: int, path_pattern: str,
-                     access_mode: str = "write") -> None:
+                     access_mode: str = DEFAULT_PATH_ACCESS_MODE) -> None:
     """Insert a path_glob trigger. `access_mode` ('write'|'read'|'any') is the
     read-vs-write intent the retrieval filter keys on (issue #63); it defaults
     to 'write' because most file-path lessons are about mutation."""

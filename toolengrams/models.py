@@ -21,6 +21,11 @@ TriggerKind = Literal["token_subseq", "path_glob"]
 # tools (Edit/Write/MultiEdit/NotebookEdit), 'read' only on read-only ones
 # (Read/Grep/Glob), 'any' on either. NULL for token_subseq triggers.
 AccessMode = Literal["write", "read", "any"]
+# The single source of truth for the path-glob default: most file-path lessons
+# are about mutation, so a freshly-formed path trigger is write-scoped unless
+# the author says otherwise. Referenced by formation, storage, and the CLI so
+# the policy is one named decision, not three drifting literals.
+DEFAULT_PATH_ACCESS_MODE: AccessMode = "write"
 
 
 @dataclass(slots=True)
@@ -76,7 +81,7 @@ class Trigger:
     first_token: str | None
     tokens_json: str | None
     path_pattern: str | None
-    access_mode: str | None = None
+    access_mode: AccessMode | None = None
 
     @property
     def tokens(self) -> list[str]:
@@ -91,7 +96,6 @@ class Trigger:
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "Trigger":
-        keys = row.keys()
         return cls(
             id=row["id"],
             memory_id=row["memory_id"],
@@ -99,7 +103,7 @@ class Trigger:
             first_token=row["first_token"],
             tokens_json=row["tokens_json"],
             path_pattern=row["path_pattern"],
-            access_mode=row["access_mode"] if "access_mode" in keys else None,
+            access_mode=row["access_mode"],
         )
 
 
