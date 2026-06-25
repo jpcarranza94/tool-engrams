@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from toolengrams.cli.consolidate import _extract_metrics
+from toolengrams.consolidation.report_parse import extract_metrics as _extract_metrics
 
 
 def test_metrics_block_extracts_all_fields():

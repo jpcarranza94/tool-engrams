@@ -109,6 +109,11 @@ def invoke(req: EngineRequest) -> EngineResult:
     argv = [binary, "-p"]
     if model:
         argv += ["--model", model]
+    # Continue the prior conversation (same context, same cwd/sandbox) instead
+    # of opening a fresh one — used to ask the agent to re-emit a malformed
+    # report JSON block in place.
+    if req.resume_session_id:
+        argv += ["--resume", req.resume_session_id]
     argv += ["--output-format", "json"]
     if req.schema:
         argv += ["--json-schema", req.schema]
@@ -150,6 +155,7 @@ def invoke(req: EngineRequest) -> EngineResult:
         returncode=proc.returncode,
         error=error,
         text=_extract_text(stdout),
+        session_id=payload.get("session_id"),
         cost_usd=payload.get("total_cost_usd"),
         input_tokens=usage.get("input_tokens"),
         output_tokens=usage.get("output_tokens"),

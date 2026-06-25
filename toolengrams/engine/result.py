@@ -21,6 +21,12 @@ class EngineResult:
     # request carried a schema, the constrained JSON — same precedence the
     # claude adapter always had (structured beats free text).
     text: str = ""
+    # The engine's own id for the conversation this call ran in, when it keeps
+    # one (claude-code's result envelope carries a session_id). Lets a caller
+    # continue the SAME session via EngineRequest.resume_session_id — the basis
+    # for the consolidation report-correction retry. Stays None on engines that
+    # don't persist a session (codex runs `--ephemeral`).
+    session_id: str | None = None
     # Spend, from the engine's own accounting. cost_usd stays None on engines
     # that report tokens but not dollars.
     cost_usd: float | None = None

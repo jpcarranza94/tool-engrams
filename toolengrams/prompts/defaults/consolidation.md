@@ -109,7 +109,7 @@ Be conservative with archive. False positives here delete user-curated knowledge
 
 ### 6. Write a consolidation report
 
-Your final response MUST end with a structured metrics block in exactly this format (the system parses it):
+Your final response MUST end with a structured JSON block in exactly this format (the system parses it):
 
 ```json
 {{
@@ -124,11 +124,26 @@ Your final response MUST end with a structured metrics block in exactly this for
     "memories_verified": <int>,
     "total_active_after": <int>,
     "quality_score": <float 0.0-1.0>
-  }}
+  }},
+  "recommendations": [
+    {{
+      "title": "<short stable label>",
+      "severity": "info|warn|critical",
+      "status": "open|done",
+      "detail": "<one or two sentences of context>"
+    }}
+  ]
 }}
 ```
 
 Where `quality_score` = surfaces_helpful / max(surfaces_evaluated, 1). This is the key metric we track across days to measure system health.
+
+**`recommendations`** are durable, system-level observations worth tracking ACROSS runs — not a log of the per-memory edits you already made today. Emit one when you notice something the maintainer should watch or act on: a noise pattern that keeps recurring, a trigger class that over-matches, a structural gap, a memory that should exist but you lacked evidence to create. Omit the key (or use `[]`) when there's nothing durable to flag — most days have few or none.
+
+- `title` is the **dedup key**: the dashboard groups recommendations across runs by title (casefolded). Reuse the EXACT same title when re-raising a recurring issue so it shows once with every date it appeared, not as N near-duplicates. Keep it short and canonical (e.g. `"path-glob read-vs-write noise"`), not a sentence.
+- `severity`: `info` (FYI / trend), `warn` (degrading, worth attention), `critical` (actively harming quality). Defaults to `info` if you pick anything else.
+- `status`: `open` (default) for an unresolved issue; `done` only if THIS run's actions fully resolved it (e.g. you narrowed the offending trigger).
+- `detail` is optional context. Do NOT put secrets, full memory bodies, or per-run counts here — those live in the prose report above.
 
 Before the JSON block, include a human-readable report with:
 - Sessions reviewed and what kind of work happened

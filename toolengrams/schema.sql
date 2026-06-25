@@ -106,6 +106,24 @@ CREATE TABLE IF NOT EXISTS consolidation_runs (
     report                 TEXT
 );
 
+-- First-class consolidation recommendations (issue #64) — the agent's durable,
+-- cross-run advisories, lifted out of the prose report so the dashboard can
+-- track recurrence and resolution. One row per (run_date, recommendation);
+-- a re-run replaces a day's set wholesale (see consolidation/runs.py).
+CREATE TABLE IF NOT EXISTS consolidation_recommendations (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_date    TEXT NOT NULL,                      -- 'YYYY-MM-DD'; consolidation_runs.run_date
+    title       TEXT NOT NULL,                      -- short, stable label (dedup key across runs)
+    severity    TEXT NOT NULL DEFAULT 'info',       -- info | warn | critical
+    status      TEXT NOT NULL DEFAULT 'open',       -- open | done
+    detail      TEXT,                               -- optional longer explanation
+    issue_url   TEXT,                               -- optional link to a tracking issue
+    created_ts  INTEGER NOT NULL,
+    resolved_ts INTEGER                             -- set when status flips to 'done'
+);
+CREATE INDEX IF NOT EXISTS idx_consol_recs_run_date
+    ON consolidation_recommendations(run_date);
+
 -- Watcher state — two symmetric rows per work session, one per role
 -- (formation | eval). Tracks each role's own transcript cursor and the
 -- event-driven tick state (armed / coalesce / cross-event retry streak).

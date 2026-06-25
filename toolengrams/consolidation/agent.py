@@ -8,6 +8,7 @@ quality, identifies missed corrections, and runs engram commands directly.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import sqlite3
@@ -18,14 +19,23 @@ from pathlib import Path
 
 from .. import envvars, memory_store
 from ..engine import EngineRequest, SandboxSpec, get_engine
-from ..prompts.consolidation import build_consolidation_prompt
+from ..prompts.consolidation import (
+    build_consolidation_prompt,
+    build_consolidation_retry_prompt,
+)
 from ..retrieval import session_state
 from ..watcher import runs_store
 from ..reinforcement.scoring import q
 from ..utils import env_int, prepend_engram_bin
 from ..target.interface import SessionFile
+from . import report_parse
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+
+# How many times a malformed report JSON block is re-requested in the SAME agent
+# session before giving up and storing whatever parsed (a correctness bound, not
+# a tunable — each retry is one extra cheap turn).
+MAX_REPORT_RETRIES = 2
 
 # Session budget for the consolidation agent. Prevents timeout on heavy days.
 MAX_SESSIONS = 10
@@ -209,26 +219,80 @@ def run_consolidation_agent(
         cwd=work_dir,
         env=env,
     ))
-    # Clean up temp dir (settings only, no important state).
-    shutil.rmtree(work_dir, ignore_errors=True)
 
     if result.timed_out:
+        shutil.rmtree(work_dir, ignore_errors=True)
         return AgentResult(
             report="", returncode=1,
             error=f"Consolidation agent timed out ({timeout_sec // 60} min)",
         )
     if result.error:
+        shutil.rmtree(work_dir, ignore_errors=True)
         return AgentResult(report="", returncode=1, error=f"Failed to spawn agent: {result.error}")
 
-    # Extract the agent's response.
-    report = result.text
-    if not report:
-        report = result.stdout[:5000] if result.stdout else ""
+    # Extract the agent's response, then — if its trailing JSON envelope is
+    # malformed — give the SAME session up to a couple of chances to re-emit it
+    # before we clean up the sandbox (resume needs the work dir to survive).
+    report = _result_report(result)
+    report = _retry_invalid_envelope(
+        engine, report, result, timeout=timeout_sec, cwd=work_dir, env=env)
+
+    # Clean up temp dir (settings only, no important state).
+    shutil.rmtree(work_dir, ignore_errors=True)
 
     return AgentResult(
         report=report,
         returncode=result.returncode,
         error=None if result.returncode == 0 else f"Agent exited with code {result.returncode}",
     )
+
+
+def _result_report(result) -> str:
+    """The agent's report text: the structured `text`, or the stdout head as a
+    last resort (same precedence the recorder always used)."""
+    return result.text or (result.stdout[:5000] if result.stdout else "")
+
+
+def _retry_invalid_envelope(engine, report, primary, *, timeout, cwd, env) -> str:
+    """Re-request a malformed report JSON block in the SAME agent session.
+
+    No-op when the report already validates, or when the session can't be
+    resumed — the engine returned no session_id (codex runs ephemeral), so there
+    is nothing to continue and the lenient parse stands. Bounded by
+    MAX_REPORT_RETRIES. A correction call that itself fails or times out is left
+    to stand: a flaky retry must never downgrade an otherwise-good run.
+    """
+    session_id = primary.session_id
+    for _ in range(MAX_REPORT_RETRIES):
+        if not session_id:
+            break
+        problems = report_parse.validate_envelope(report_parse.extract_json_block(report))
+        if not problems:
+            break
+        retry = engine.invoke(EngineRequest(
+            prompt=build_consolidation_retry_prompt("; ".join(problems)),
+            timeout=timeout,
+            role="consolidation",
+            cwd=cwd,
+            env=env,
+            resume_session_id=session_id,
+        ))
+        if retry.returncode != 0 or retry.timed_out or not retry.text:
+            break
+        report = _merge_corrected(report, _result_report(retry))
+        session_id = retry.session_id or session_id
+    return report
+
+
+def _merge_corrected(original: str, correction: str) -> str:
+    """Append the correction's JSON block after the original prose so the
+    trailing — now valid — block is the one report_parse re-reads, while the
+    human-readable report above is preserved. If the correction carries no
+    usable block, keep the original unchanged.
+    """
+    block = report_parse.extract_json_block(correction)
+    if not block:
+        return original
+    return original.rstrip() + "\n\n```json\n" + json.dumps(block, indent=2) + "\n```\n"
 
 
