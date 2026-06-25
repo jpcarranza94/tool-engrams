@@ -3,7 +3,10 @@ metrics still parse from the same envelope (issue #64)."""
 
 from __future__ import annotations
 
-from toolengrams.cli.consolidate import _extract_metrics, _extract_recommendations
+from toolengrams.consolidation.report_parse import (
+    extract_metrics as _extract_metrics,
+    extract_recommendations as _extract_recommendations,
+)
 
 
 _ENVELOPE = """

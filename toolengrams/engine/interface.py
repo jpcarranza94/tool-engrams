@@ -52,6 +52,11 @@ class EngineRequest:
     env: dict | None = None
     # JSON Schema text for constrained output, when the engine supports it.
     schema: str | None = None
+    # Continue an existing conversation instead of starting fresh: pass a
+    # session_id returned by a prior EngineResult. Honored by engines that
+    # persist sessions (claude-code → `--resume`); ignored where there is no
+    # session to resume (codex `--ephemeral`).
+    resume_session_id: str | None = None
 
 
 @runtime_checkable

@@ -66,6 +66,41 @@ def test_invoke_builds_argv_with_all_flags(monkeypatch):
     assert r.engine == "claude-code"
 
 
+def test_invoke_passes_resume_session_id(monkeypatch):
+    captured = {}
+    _which_ok(monkeypatch)
+    monkeypatch.setattr(claude_code.subprocess, "run",
+                        lambda argv, **kw: captured.update(argv=argv) or _Proc())
+    claude_code.invoke(EngineRequest(prompt="fix it", timeout=10,
+                                     role="consolidation", resume_session_id="sess-42"))
+    argv = captured["argv"]
+    assert argv[argv.index("--resume") + 1] == "sess-42"
+    assert argv[-2:] == ["--", "fix it"]
+
+
+def test_invoke_omits_resume_when_unset(monkeypatch):
+    captured = {}
+    _which_ok(monkeypatch)
+    monkeypatch.setattr(claude_code.subprocess, "run",
+                        lambda argv, **kw: captured.update(argv=argv) or _Proc())
+    claude_code.invoke(EngineRequest(prompt="p", timeout=10))
+    assert "--resume" not in captured["argv"]
+
+
+def test_session_id_parsed_from_envelope(monkeypatch):
+    _which_ok(monkeypatch)
+    monkeypatch.setattr(claude_code.subprocess, "run",
+                        lambda argv, **kw: _Proc(stdout=ENVELOPE, returncode=0))
+    assert claude_code.invoke(EngineRequest(prompt="p", timeout=5)).session_id == "w1"
+
+
+def test_session_id_none_without_envelope(monkeypatch):
+    _which_ok(monkeypatch)
+    monkeypatch.setattr(claude_code.subprocess, "run",
+                        lambda argv, **kw: _Proc(stdout='{"result":"ok"}'))
+    assert claude_code.invoke(EngineRequest(prompt="p", timeout=5)).session_id is None
+
+
 def test_invoke_resolves_model_from_role(monkeypatch):
     captured = {}
     _which_ok(monkeypatch)
