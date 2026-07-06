@@ -147,10 +147,35 @@ def test_gate_threshold_is_exclusive():
     assert not is_gated(_candidate(kind="hint", useful_count=2, noise_count=2))
 
 
-def test_gate_exempts_block():
-    # A block past warm-up with terrible q still fires — safety rules aren't gated.
+def test_gate_exempts_block_below_block_warmup():
+    # A block with terrible q but only 10 verdicts (< BLOCK_GATE_WARMUP=12) still
+    # fires — a rare-but-correct safety DENY isn't suppressed on thin evidence.
     assert not is_gated(_candidate(kind="block", useful_count=0, noise_count=10))
+
+
+def test_gate_suppresses_strongly_negative_block_past_warmup():
+    # 4 useful, 10 noise → judged=14 ≥ 12 and q = 5/16 ≈ 0.31 < 0.35 floor.
+    # The WS3.2 loophole: a heavily-observed, net-negative block IS now gated.
+    assert is_gated(_candidate(kind="block", useful_count=4, noise_count=10))
+
+
+def test_gate_holds_block_at_warmup_boundary():
+    # judged = 11 < 12 → still exempt even though q is terrible (safety margin).
+    assert not is_gated(_candidate(kind="block", useful_count=0, noise_count=11))
+
+
+def test_gate_lets_marginal_block_through_above_floor():
+    # judged = 20 (past warm-up) but q = 9/22 ≈ 0.409 ≥ 0.35 floor → still fires.
+    # Only *strongly* net-negative blocks gate; a middling one keeps its DENY.
+    assert not is_gated(_candidate(kind="block", useful_count=8, noise_count=12))
 
 
 def test_gate_exempts_pinned():
     assert not is_gated(_candidate(kind="hint", pinned=True, useful_count=0, noise_count=10))
+
+
+def test_gate_exempts_pinned_block_even_when_strongly_negative():
+    # pinned wins over the block gate: a pinned memory is never suppressed.
+    assert not is_gated(
+        _candidate(kind="block", pinned=True, useful_count=4, noise_count=10)
+    )
