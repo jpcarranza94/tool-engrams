@@ -170,6 +170,19 @@ def test_gate_lets_marginal_block_through_above_floor():
     assert not is_gated(_candidate(kind="block", useful_count=8, noise_count=12))
 
 
+def test_gate_block_at_exact_warmup_boundary_is_gateable():
+    # judged = 12 == BLOCK_GATE_WARMUP: the warm-up bar is inclusive (judged <
+    # warmup exempts, so exactly-12 is NOT exempt). q = 1/14 ≈ 0.07 < 0.35 → gated.
+    # Pins the `<` in the warm-up check against a `<=` mutation that flips at 12.
+    assert is_gated(_candidate(kind="block", useful_count=0, noise_count=12))
+
+
+def test_gate_block_floor_is_exclusive():
+    # judged = 18 ≥ warm-up, q = 7/20 = 0.35 exactly; the floor is strict < → NOT
+    # gated. Pins the `<` in the floor check against a `<=` mutation.
+    assert not is_gated(_candidate(kind="block", useful_count=6, noise_count=12))
+
+
 def test_gate_exempts_pinned():
     assert not is_gated(_candidate(kind="hint", pinned=True, useful_count=0, noise_count=10))
 

@@ -105,7 +105,9 @@ def _run(payload: dict[str, Any], target) -> int:
             return 0
 
         # Surfacing gate: suppress hints that have proven more noise than signal
-        # (q < 0.5 after warm-up). block + pinned are exempt (see scoring.is_gated).
+        # (q < 0.5 after warm-up), and heavily-observed net-negative blocks
+        # (judged >= BLOCK_GATE_WARMUP and q < BLOCK_GATE_FLOOR). Only pinned is
+        # unconditionally exempt (see scoring.is_gated).
         candidates = [c for c in candidates if not is_gated(c)]
 
         # Same-session suppression (ADR-0006): a hint never surfaces into the

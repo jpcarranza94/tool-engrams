@@ -148,7 +148,9 @@ def insert_candidate_triggers(
             if not path_glob_is_specific_enough(c.path_pattern):
                 print(
                     f"engram: rejected trigger for memory {memory_id} — "
-                    f"path glob {c.path_pattern!r} is too broad to bind a memory",
+                    f"path glob {c.path_pattern!r} is too broad to bind a memory; "
+                    f"qualify it with a directory segment (e.g. "
+                    f"'**/billing/models.py') so it doesn't match across every repo",
                     file=sys.stderr,
                 )
                 continue

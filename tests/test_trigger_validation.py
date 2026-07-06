@@ -155,6 +155,10 @@ def test_path_specificity_predicate_rejects_broad_globs():
     assert not path_glob_is_specific_enough("**")
     assert not path_glob_is_specific_enough("**/__init__.py")  # common basename
     assert not path_glob_is_specific_enough("**/settings.json")
+    # Case-insensitive basename match: the set stores lowercase, the predicate
+    # lowercases the basename — pins the `.lower()` against deletion.
+    assert not path_glob_is_specific_enough("**/Dockerfile")
+    assert not path_glob_is_specific_enough("**/Makefile")
 
 
 def test_path_specificity_predicate_allows_narrow_patterns():
