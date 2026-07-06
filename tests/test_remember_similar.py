@@ -9,7 +9,7 @@ import json
 
 from toolengrams import memory_store
 from toolengrams.cli import remember
-from toolengrams.formation import find_similar
+from toolengrams.formation import find_similar, score_pair
 
 # Two near-identical bodies with NON-overlapping triggers — so the trigger-based
 # find_overlapping_memory misses them and the semantic gate is what must catch it.
@@ -49,6 +49,19 @@ def test_find_similar_ranks_and_excludes(temp_db, capsys):
 
     excluded = find_similar(temp_db, "macos-timeout-x", _BODY_DUP, exclude_id=aid)
     assert all(m.id != aid for m, _ in excluded)   # exclude_id is honored
+
+
+def test_score_pair_is_pairwise_jaccard():
+    # score_pair is the same token-Jaccard metric find_similar ranks by, computed
+    # directly on two (name, body) pairs with no DB/FTS — the seam the collision
+    # gate uses when it already holds both texts.
+    near = score_pair("macos-timeout-a", _BODY_A, "macos-timeout-b", _BODY_DUP)
+    assert near >= 0.6                             # near-duplicate bodies
+    far = score_pair("macos-timeout-a", _BODY_A, "git-branch", _BODY_DIFFERENT)
+    assert far < near
+    assert far < 0.3                               # unrelated facts
+    # Empty side → 0.0 (mirrors jaccard's guard, no crash).
+    assert score_pair("n", "", "m", "anything at all") == 0.0
 
 
 # ---------- the gate ----------
@@ -119,14 +132,26 @@ def test_into_without_name_keeps_target_name(temp_db, capsys):
     assert memory_store.get(temp_db, aid).name == "macos-timeout-a"
 
 
-def test_overlap_resave_without_name_keeps_existing_name(temp_db, capsys):
-    # The trigger-overlap auto-merge has the same trap: a re-save with the same
-    # trigger but no --name must keep the existing name.
+def test_overlap_resave_withholds_and_preserves_existing(temp_db, capsys):
+    # The trigger-overlap path no longer auto-merges (that silently overwrote
+    # memories): a re-save sharing a trigger is WITHHELD for review, and the
+    # existing memory's name and body are left untouched.
     aid = _seed_a(capsys)  # name: macos-timeout-a, trigger: "alpha beta"
+    before = memory_store.get(temp_db, aid)
     rc, out = _remember(
         [_BODY_A + " updated", "--scope", "global", "--trigger", "alpha beta"], capsys)
-    assert out["action"] == "updated"
-    assert memory_store.get(temp_db, aid).name == "macos-timeout-a"
+    assert rc == 0
+    assert out["action"] == "review_collision"
+    assert out["collision"]["id"] == aid
+    after = memory_store.get(temp_db, aid)
+    assert after.name == "macos-timeout-a"     # name untouched
+    assert after.body == before.body           # body untouched — no overwrite
+
+    # --force still lets an insistent caller create a distinct memory sharing it.
+    rc, out = _remember(
+        [_BODY_A + " forced", "--name", "macos-timeout-c", "--scope", "global",
+         "--trigger", "alpha beta", "--force"], capsys)
+    assert out["action"] == "inserted"
 
 
 def test_into_nonexistent_errors(temp_db, capsys):

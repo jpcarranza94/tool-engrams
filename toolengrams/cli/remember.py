@@ -31,6 +31,7 @@ from ..formation import (
     find_similar,
     insert_candidate_triggers,
     scan_for_secrets,
+    score_pair,
     update_existing_memory,
 )
 from .. import envvars
@@ -46,8 +47,10 @@ _NAME_MAX = 80
 
 # Token-Jaccard at/above which a would-be-new memory is withheld for review
 # instead of inserted (the formation agent then merges with --into or insists
-# with --force). Trigger-overlap dupes are still auto-merged upstream; this is
-# the semantic net for same-idea/different-trigger duplicates. See docs/adr/0014.
+# with --force). Trigger-overlap dupes are ALSO withheld (action=review_collision,
+# never a silent auto-fold); this is the semantic net for same-idea/different-
+# trigger duplicates, and the same threshold decides whether a trigger collision
+# leads with a fold or keep-both recommendation. See docs/adr/0014.
 SIMILARITY_THRESHOLD = 0.6
 
 
@@ -149,71 +152,52 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(payload, indent=2))
             return 0
 
-        similar_advisory: list[dict] | None = None
-        effective_name = name
-        if existing:
-            # Echo the body being replaced + a merge instruction: a stateless
-            # formation tick has no memory of what it saved before, so the
-            # replace must be a visible, correctable act (ADR-0005).
-            prev = memory_store.get(conn, existing["id"])
-            # Preserve the existing name unless explicitly renamed — a re-save
-            # without --name must not overwrite a good name with the synthesized
-            # "Without this memory…" body-as-name.
-            effective_name = args.name or (prev.name if prev else name)
-            memory_id = update_existing_memory(
-                conn=conn, existing_id=existing["id"],
-                name=effective_name, description=description, body=body,
-                kind=args.kind, pinned=args.pinned,
-                candidates=candidates, extra_triggers=extra_triggers,
-                origin_session_id=origin_session,
-            )
-            action = "updated"
-            if prev is not None and prev.body.strip() != body.strip():
-                existing = dict(existing)
-                existing["previous_body"] = prev.body
-                existing["merge_note"] = (
-                    "Your body REPLACED previous_body. If previous_body held "
-                    "still-valid guidance missing from yours, run engram "
-                    "remember again with one merged body."
-                )
-        else:
-            # Semantic near-duplicate gate: catches same-idea/different-trigger
-            # duplicates that find_overlapping_memory (trigger-overlap) misses.
-            # Withhold the insert and let the agent merge (--into) or insist
-            # (--force) — formation is remember-only, so it can't edit/forget
-            # a dup after the fact (ADR-0014).
-            similar = find_similar(conn, name, body, limit=3)
-            threshold = env_float(envvars.SIMILARITY_THRESHOLD, SIMILARITY_THRESHOLD)
-            if not args.force and similar and similar[0][1] >= threshold:
-                print(json.dumps({
-                    "action": "review_similar",
-                    "reason": "A near-duplicate of an existing memory may already cover this.",
-                    "would_create": {"name": name, "kind": args.kind,
-                                     "scope": args.scope, "body_chars": len(body)},
-                    "candidates": _similar_payload(similar),
-                    "guidance": (
-                        "If one of these already covers your knowledge, FOLD into it: "
-                        "engram remember --into <id> \"<merged body>\" (keeps that "
-                        "memory's id, counters, and surfaces). If this is genuinely "
-                        "new, re-run the same command with --force."
-                    ),
-                }))
-                return 0
-            memory_id = _insert(conn=conn, origin_session_id=origin_session, **common)
-            action = "inserted"
-            existing = None
-            similar_advisory = _similar_payload(similar)
+        # Trigger-overlap collision: the new memory shares an exact trigger with
+        # an existing in-scope memory. This is NOT a silent auto-fold — that
+        # overwrote (and destroyed) whole memories in place. Withhold the write,
+        # surface the victim, and let the agent decide: keep BOTH facts and narrow
+        # the shared trigger (--force), or explicitly fold into it counter-
+        # preservingly (--into <id>). --force bypasses this gate (ADR-0014).
+        if existing and not args.force:
+            print(json.dumps(_review_collision_payload(
+                existing=existing, name=name, body=body, args=args)))
+            return 0
+
+        # Semantic near-duplicate gate: catches same-idea/different-trigger
+        # duplicates that find_overlapping_memory (trigger-overlap) misses.
+        # Withhold the insert and let the agent merge (--into) or insist
+        # (--force) — formation is remember-only, so it can't edit/forget
+        # a dup after the fact (ADR-0014).
+        similar = find_similar(conn, name, body, limit=3)
+        threshold = env_float(envvars.SIMILARITY_THRESHOLD, SIMILARITY_THRESHOLD)
+        if not args.force and similar and similar[0][1] >= threshold:
+            print(json.dumps({
+                "action": "review_similar",
+                "reason": "A near-duplicate of an existing memory may already cover this.",
+                "would_create": {"name": name, "kind": args.kind,
+                                 "scope": args.scope, "body_chars": len(body)},
+                "candidates": _similar_payload(similar),
+                "guidance": (
+                    "If one of these already covers your knowledge, FOLD into it: "
+                    "engram remember --into <id> \"<merged body>\" (keeps that "
+                    "memory's id, counters, and surfaces). If this is genuinely "
+                    "new, re-run the same command with --force."
+                ),
+            }))
+            return 0
+
+        memory_id = _insert(conn=conn, origin_session_id=origin_session, **common)
 
         # If a formation watcher run spawned this call, record it for the monitor.
         runs_store.record_cli_event(conn, kind="created",
-                                    memory_id=memory_id, memory_name=effective_name)
+                                    memory_id=memory_id, memory_name=name)
 
         payload = _build_payload(
-            memory_id=memory_id, action=action,
-            existing_match=existing, **{**common, "name": effective_name},
+            memory_id=memory_id, action="inserted",
+            existing_match=None, **common,
         )
-        if similar_advisory:
-            payload["similar_memories"] = similar_advisory
+        if similar:
+            payload["similar_memories"] = _similar_payload(similar)
         print(json.dumps(payload))
         return 0
 
@@ -327,12 +311,15 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="Extract and report candidates; do not insert.")
     parser.add_argument("--into", type=int, default=None, metavar="ID",
                         help=("Fold this body into an existing memory by id "
-                              "(merge response to an action=review_similar "
-                              "result). Keeps that memory's id, counters, and "
-                              "surface history."))
+                              "(merge response to an action=review_similar or "
+                              "action=review_collision result). Keeps that "
+                              "memory's id, counters, and surface history."))
     parser.add_argument("--force", action="store_true",
-                        help=("Insert even when a near-duplicate exists "
-                              "(bypass the action=review_similar gate)."))
+                        help=("Insert a distinct new memory even when it would "
+                              "collide with an existing one: bypasses BOTH the "
+                              "trigger-overlap gate (action=review_collision) and "
+                              "the semantic near-duplicate gate "
+                              "(action=review_similar)."))
     return parser
 
 
@@ -494,6 +481,70 @@ def _build_payload(
     if existing_match:
         result["existing_match"] = existing_match
     return result
+
+
+def _review_collision_payload(
+    *,
+    existing: dict,
+    name: str,
+    body: str,
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    """Non-writing response when a NEW memory shares an exact trigger with an
+    existing in-scope memory. Mirrors the review_similar contract: NOTHING is
+    written; the formation agent resolves the collision on the next turn.
+
+    Default recommendation is KEEP-BOTH + narrow the shared trigger — a trigger
+    collision between two genuinely-different facts must not fold into one
+    muddled body (that is its own data-loss). FOLD (`--into <id>`) is only led
+    with when the two BODIES are ALSO semantic near-duplicates. We already hold
+    both texts (dedup returns the victim's name/body), so score the pair
+    directly — no FTS search needed, and no dependence on the victim ranking in
+    a find_similar window.
+    """
+    threshold = env_float(envvars.SIMILARITY_THRESHOLD, SIMILARITY_THRESHOLD)
+    collision_score = score_pair(
+        name, body, existing["name"], existing.get("body") or "")
+    lead_fold = collision_score >= threshold
+
+    victim_id = existing["id"]
+    shared = existing.get("shared_triggers") or []
+    shared_str = ", ".join(shared)
+    return {
+        "action": "review_collision",
+        "reason": (
+            "Your new memory shares an exact trigger with an existing in-scope "
+            "memory. NOTHING was written — a trigger collision is NOT an "
+            "overwrite. Resolve it before this fact is saved."
+        ),
+        "would_create": {"name": name, "kind": args.kind,
+                         "scope": args.scope, "body_chars": len(body)},
+        "collision": {
+            "id": victim_id,
+            "name": existing["name"],
+            "kind": existing.get("kind"),
+            "shared_triggers": shared,
+            "similarity": round(collision_score, 2),
+            "body_preview": (existing.get("body") or "")[:300],
+        },
+        "guidance": {
+            "recommended": "fold" if lead_fold else "keep_both",
+            "keep_both": (
+                "DEFAULT: these are most likely DIFFERENT facts that happen to "
+                f"share {shared_str}. Keep BOTH: re-run the SAME command with "
+                "--force AND a NARROWER --trigger so the two memories don't both "
+                "fire on every matching command."
+            ),
+            "fold": (
+                f"Only if this is the SAME fact as memory {victim_id}: fold "
+                "counter-preservingly with "
+                f"engram remember --into {victim_id} \"<one merged body>\" "
+                "(keeps that memory's id, counters, and surface history). Drop "
+                "the old fact entirely is NOT available to formation (remember-"
+                "only); the closest is --into to repurpose that memory in place."
+            ),
+        },
+    }
 
 
 def _similar_payload(similar: list) -> list[dict[str, Any]]:

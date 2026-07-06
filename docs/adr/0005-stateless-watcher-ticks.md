@@ -58,10 +58,12 @@ explicitly and boundedly:
 2. **Formation: session-saves list.** The tick message lists memories this
    watcher already created/updated for this work session (name, kind,
    trigger — not bodies), hydrated from `watcher_run_events`.
-3. **`engram remember` dedup echo.** On `existing_match`, the CLI returns the
-   existing memory's current body with an explicit merge instruction, so an
-   overwrite is a deliberate merge instead of a blind replace — body-quality
-   protection at exactly the moment it matters, statelessly.
+3. **`engram remember` collision withhold** (updated by ADR-0014). The original
+   dedup echo — return the existing body plus a merge instruction on
+   `existing_match` — was replaced: a trigger collision now withholds the write
+   and returns `review_collision` for the agent to resolve (`--into` fold or
+   `--force` distinct). There is no blind overwrite left to protect against, and
+   the withhold-and-surface payload is itself the stateless body-quality guard.
 4. **Evaluation gets nothing extra.** The re-presented pending list is the
    state. Deferral stays "don't judge yet"; a fresh tick re-derives it.
 

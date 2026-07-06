@@ -88,18 +88,24 @@ def test_env_fallback_sets_origin(temp_db, monkeypatch):
     assert memory_store.get(temp_db, mid).origin_session_id == "sess-env"
 
 
-def test_dedup_update_echoes_previous_body(temp_db, monkeypatch):
+def test_dedup_collision_withholds_and_surfaces_victim(temp_db, monkeypatch):
+    """A trigger collision is WITHHELD (never a silent overwrite): the victim's
+    body/id is surfaced for review and nothing is written."""
     _save(monkeypatch, "old guidance: use --foo with `mycli deploy`",
           trigger="mycli deploy")
+    victim = memory_store.get(temp_db,
+        temp_db.execute("SELECT id FROM memories").fetchone()["id"])
     buf = io.StringIO()
     monkeypatch.setattr(sys, "stdout", buf)
     assert remember.main(["new guidance: use --bar with `mycli deploy`",
                           "--kind", "hint", "--scope", "global",
                           "--trigger", "mycli deploy"]) == 0
     out = json.loads(buf.getvalue())
-    assert out["action"] == "updated"
-    assert "old guidance" in out["existing_match"]["previous_body"]
-    assert "merged body" in out["existing_match"]["merge_note"]
+    assert out["action"] == "review_collision"
+    assert out["collision"]["id"] == victim.id
+    assert "old guidance" in out["collision"]["body_preview"]
+    # Victim body untouched — no overwrite happened.
+    assert memory_store.get(temp_db, victim.id).body == victim.body
 
 
 def test_failure_hook_also_suppresses_origin_session(temp_db, monkeypatch):
@@ -135,17 +141,23 @@ def test_failure_hook_also_suppresses_origin_session(temp_db, monkeypatch):
     assert "failure-path hint body" in buf.getvalue()  # surfaces elsewhere
 
 
-def test_dedup_update_restamps_origin_to_updating_session(temp_db, monkeypatch):
-    """ADR-0006: a body fully replaced by session B's watcher belongs to B —
-    B's echo is now the one to suppress."""
-    from toolengrams import memory_store
-
+def test_into_merge_restamps_origin_to_updating_session(temp_db, monkeypatch):
+    """ADR-0006: a body folded by session B via --into belongs to B — B's echo is
+    now the one to suppress. (Auto-fold on trigger overlap was removed; the fold
+    must be the explicit --into act.)"""
     _save(monkeypatch, "v1 guidance for `mycli deploy`", origin="sess-A",
           trigger="mycli deploy")
-    _save(monkeypatch, "v2 guidance for `mycli deploy` rewritten", origin="sess-B",
-          trigger="mycli deploy")
+    aid = temp_db.execute("SELECT id FROM memories").fetchone()["id"]
+
+    buf = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", buf)
+    monkeypatch.setenv("ENGRAM_ORIGIN_SESSION", "sess-B")
+    assert remember.main(["v2 guidance for `mycli deploy` rewritten",
+                          "--kind", "hint", "--scope", "global",
+                          "--trigger", "mycli deploy", "--into", str(aid)]) == 0
+    monkeypatch.setattr(sys, "stdout", sys.__stdout__)
 
     rows = temp_db.execute(
         "SELECT id, origin_session_id FROM memories").fetchall()
-    assert len(rows) == 1                      # deduped into one row
+    assert len(rows) == 1                      # folded into one row
     assert rows[0]["origin_session_id"] == "sess-B"  # re-stamped to the updater

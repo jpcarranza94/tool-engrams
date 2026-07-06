@@ -15,7 +15,7 @@ from .candidates import (
 )
 from .dedup import find_overlapping_memory, update_existing_memory
 from .secrets import scan_for_secrets
-from .similar import find_similar
+from .similar import find_similar, score_pair
 from .triggers import extras_to_candidates, insert_candidate_triggers
 
 __all__ = [
@@ -28,5 +28,6 @@ __all__ = [
     "find_similar",
     "insert_candidate_triggers",
     "scan_for_secrets",
+    "score_pair",
     "update_existing_memory",
 ]
