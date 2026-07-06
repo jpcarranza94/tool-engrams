@@ -9,7 +9,7 @@ import json
 
 from toolengrams import memory_store
 from toolengrams.cli import remember
-from toolengrams.formation import find_similar
+from toolengrams.formation import find_similar, score_pair
 
 # Two near-identical bodies with NON-overlapping triggers — so the trigger-based
 # find_overlapping_memory misses them and the semantic gate is what must catch it.
@@ -49,6 +49,19 @@ def test_find_similar_ranks_and_excludes(temp_db, capsys):
 
     excluded = find_similar(temp_db, "macos-timeout-x", _BODY_DUP, exclude_id=aid)
     assert all(m.id != aid for m, _ in excluded)   # exclude_id is honored
+
+
+def test_score_pair_is_pairwise_jaccard():
+    # score_pair is the same token-Jaccard metric find_similar ranks by, computed
+    # directly on two (name, body) pairs with no DB/FTS — the seam the collision
+    # gate uses when it already holds both texts.
+    near = score_pair("macos-timeout-a", _BODY_A, "macos-timeout-b", _BODY_DUP)
+    assert near >= 0.6                             # near-duplicate bodies
+    far = score_pair("macos-timeout-a", _BODY_A, "git-branch", _BODY_DIFFERENT)
+    assert far < near
+    assert far < 0.3                               # unrelated facts
+    # Empty side → 0.0 (mirrors jaccard's guard, no crash).
+    assert score_pair("n", "", "m", "anything at all") == 0.0
 
 
 # ---------- the gate ----------

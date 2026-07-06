@@ -91,8 +91,11 @@ The trigger-overlap gate now adopts the same withhold-and-surface contract:
 2. **Safe default is keep-both + narrow**, not fold — two genuinely-different
    facts that merely share a trigger (e.g. two lessons both bound to `git push`)
    must not fold into one muddled body. `guidance.recommended` only leads with
-   `fold` when the new body and the colliding body are *also* semantic
-   near-duplicates (`find_similar` on the two bodies ≥ `SIMILARITY_THRESHOLD`).
+   `fold` when the two memories are *also* semantic near-duplicates —
+   `score_pair` (the same token-Jaccard metric `find_similar` ranks by) over the
+   new and colliding memories' name+body ≥ `SIMILARITY_THRESHOLD`. Scoring the
+   pair directly avoids an FTS search and doesn't depend on the victim ranking
+   inside a `find_similar` window.
 3. `--force` bypasses the collision gate (creates a distinct memory sharing the
    trigger); `--into <id>` performs the explicit counter-preserving merge. Since
    formation is remember-only, deleting the old memory is out of scope — "drop

@@ -261,8 +261,10 @@ def test_dedup_allows_distinct_memories(temp_db, monkeypatch, capsys):
 def test_dedup_collision_different_bodies_recommends_keep_both(temp_db, monkeypatch, capsys):
     """Same trigger but genuinely DIFFERENT facts → withhold and lead with the
     keep-both recommendation (folding two different facts is its own data-loss)."""
-    _run(["--name", "git push rule", "`git push` -- always target the origin remote"],
-         monkeypatch, capsys=capsys)
+    p1 = _run(["--name", "git push rule", "`git push` -- always target the origin remote"],
+              monkeypatch, capsys=capsys)
+    mid = p1["memory"]["id"]
+    before = _rows(temp_db, "SELECT body FROM memories WHERE id = ?", mid)[0]["body"]
     p2 = _run(["--name", "git push updated", "`git push` -- run the linter beforehand"],
               monkeypatch, capsys=capsys)
     assert p2["action"] == "review_collision"
@@ -270,18 +272,74 @@ def test_dedup_collision_different_bodies_recommends_keep_both(temp_db, monkeypa
 
     rows = _rows(temp_db, "SELECT COUNT(*) AS c FROM memories WHERE archived_ts IS NULL")
     assert rows[0]["c"] == 1                            # nothing new written
+    after = _rows(temp_db, "SELECT body FROM memories WHERE id = ?", mid)[0]["body"]
+    assert after == before                             # victim untouched — no overwrite
 
 
 def test_dedup_collision_near_dup_bodies_recommends_fold(temp_db, monkeypatch, capsys):
     """Same trigger AND near-duplicate bodies → lead with the fold recommendation."""
     body = ("Without this memory the agent would `git push` to a shared branch and "
             "clobber a teammate; always use with-lease to stay safe")
-    _run(["--name", "git-push-lease", body], monkeypatch, capsys=capsys)
+    p1 = _run(["--name", "git-push-lease", body], monkeypatch, capsys=capsys)
+    mid = p1["memory"]["id"]
     p2 = _run(["--name", "git-push-lease-again", body + " and coordinate first"],
               monkeypatch, capsys=capsys)
     assert p2["action"] == "review_collision"
     assert p2["guidance"]["recommended"] == "fold"
     assert p2["collision"]["similarity"] >= 0.6
+
+    # Even the fold recommendation is non-writing — the victim is untouched.
+    rows = _rows(temp_db, "SELECT COUNT(*) AS c FROM memories WHERE archived_ts IS NULL")
+    assert rows[0]["c"] == 1
+    assert body in _rows(temp_db, "SELECT body FROM memories WHERE id = ?", mid)[0]["body"]
+
+
+def test_dedup_collision_folds_when_victim_outside_similar_window(
+        temp_db, monkeypatch, capsys):
+    """The fold recommendation scores the colliding pair DIRECTLY (score_pair),
+    not through a find_similar top-N window. A near-duplicate victim must still be
+    recommended for fold even when many other memories rank ahead of it in a text
+    search — the regression the score_pair switch (commit 2) fixed. Under the old
+    find_similar(limit=10) window the distractors below crowded the victim out to
+    a spurious 0.0 → keep_both."""
+    new_body = ("the deploy script must export FOO before the migration or the "
+                "database ends up half migrated and needs manual repair")
+    v_body = ("the deploy script must export FOO before the migration or the "
+              "database ends up half migrated")
+    # Victim shares the trigger and is a near-duplicate of new_body (~0.7).
+    p1 = _run([v_body, "--name", "victim", "--trigger", "deploy foo"],
+              monkeypatch, capsys=capsys)
+    vid = p1["memory"]["id"]
+    # 12 higher-ranked distractors: body identical to new_body (Jaccard ~0.86 vs
+    # ~0.70 for the victim), each on its own trigger, forced past the semantic gate.
+    for i in range(12):
+        _run([new_body, "--name", f"noise-{i}", "--trigger", f"noisetok{i} alpha",
+              "--force"], monkeypatch, capsys=capsys)
+
+    p2 = _run([new_body, "--name", "newmem", "--trigger", "deploy foo"],
+              monkeypatch, capsys=capsys)
+    assert p2["action"] == "review_collision"
+    assert p2["collision"]["id"] == vid                # the victim, not a distractor
+    assert p2["collision"]["similarity"] >= 0.6
+    assert p2["guidance"]["recommended"] == "fold"     # NOT the spurious keep_both
+
+
+def test_dedup_collision_on_path_glob(temp_db, monkeypatch, capsys):
+    """Trigger collision also fires for path_glob triggers, and the shared glob is
+    surfaced in shared_triggers (the token_subseq path isn't the only one gated)."""
+    p1 = _run(["--path", "**/Makefile", "always use tabs, never spaces, in the Makefile"],
+              monkeypatch, capsys=capsys)
+    assert p1["action"] == "inserted"
+    mid = p1["memory"]["id"]
+
+    p2 = _run(["--path", "**/Makefile", "run make check before every commit"],
+              monkeypatch, capsys=capsys)
+    assert p2["action"] == "review_collision"
+    assert p2["collision"]["id"] == mid
+    assert "**/Makefile" in p2["collision"]["shared_triggers"]
+
+    rows = _rows(temp_db, "SELECT COUNT(*) AS c FROM memories WHERE archived_ts IS NULL")
+    assert rows[0]["c"] == 1                            # withheld, nothing written
 
 
 def test_force_creates_distinct_memory_sharing_trigger(temp_db, monkeypatch, capsys):

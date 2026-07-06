@@ -160,7 +160,7 @@ def main(argv: list[str] | None = None) -> int:
         # preservingly (--into <id>). --force bypasses this gate (ADR-0014).
         if existing and not args.force:
             print(json.dumps(_review_collision_payload(
-                conn, existing=existing, name=name, body=body, args=args)))
+                existing=existing, name=name, body=body, args=args)))
             return 0
 
         # Semantic near-duplicate gate: catches same-idea/different-trigger
@@ -484,7 +484,6 @@ def _build_payload(
 
 
 def _review_collision_payload(
-    conn,
     *,
     existing: dict,
     name: str,
