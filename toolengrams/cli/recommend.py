@@ -26,10 +26,6 @@ import time
 from .. import db
 from ..consolidation import runs
 
-# The recent-run window the backlog view spans (mirrors the dashboard / the
-# agent-injected backlog in consolidation/agent.py).
-RECENT_RUNS = 7
-
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
@@ -49,7 +45,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         # Default (and explicit --list): show the open backlog.
-        rows = runs.open_recommendations(conn, RECENT_RUNS)
+        rows = runs.open_recommendations(conn, runs.OPEN_BACKLOG_RUN_WINDOW)
         out = [{"title": r["title"], "severity": r["severity"],
                 "detail": r["detail"], "run_date": r["run_date"],
                 "issue_url": r["issue_url"]} for r in rows]

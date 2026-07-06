@@ -150,6 +150,14 @@ def all_triggers(conn: sqlite3.Connection) -> list[Trigger]:
     return [Trigger.from_row(r) for r in rows]
 
 
+def triggers_by_memory(conn: sqlite3.Connection) -> dict[int, list[Trigger]]:
+    """Map memory_id → its triggers, in one scan (no per-memory query)."""
+    by_mem: dict[int, list[Trigger]] = {}
+    for t in all_triggers(conn):
+        by_mem.setdefault(t.memory_id, []).append(t)
+    return by_mem
+
+
 def count_token_trigger_owners(conn: sqlite3.Connection, tokens: list[str]) -> int:
     """How many memories have a token_subseq trigger with exactly these tokens."""
     row = conn.execute(

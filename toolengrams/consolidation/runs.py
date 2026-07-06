@@ -15,6 +15,21 @@ import sqlite3
 
 from .. import db
 
+# Recent-run window for the standing OPEN recommendation backlog (WS5.1/WS5.2):
+# the nightly agent (agent.py) and the manual `engram recommend` CLI both read
+# `open_recommendations` over this many recent runs. Owned here beside the query
+# so the window can't drift between callers. Distinct from the dashboard's
+# cross-run window (`recommendations_across_runs`, run_limit=10) — that view
+# shows every date an item was raised; this one dedupes to the standing backlog.
+OPEN_BACKLOG_RUN_WINDOW = 7
+
+# The recent-run-dates subselect shared by the two cross-run recommendation
+# reads (across-runs display + open backlog); interpolated into each query so
+# the bounding window can't drift between them.
+_RECENT_RUN_DATES = (
+    "SELECT run_date FROM consolidation_runs ORDER BY started_ts DESC LIMIT ?"
+)
+
 
 def was_run(conn: sqlite3.Connection, run_date: str) -> bool:
     """True if a consolidation run is already recorded for this date (the
@@ -127,9 +142,7 @@ def recommendations_across_runs(
         "SELECT run_date, title, severity, status, detail, issue_url, "
         "       created_ts, resolved_ts "
         "FROM consolidation_recommendations "
-        "WHERE run_date IN ("
-        "    SELECT run_date FROM consolidation_runs "
-        "    ORDER BY started_ts DESC LIMIT ?) "
+        "WHERE run_date IN (" + _RECENT_RUN_DATES + ") "
         "ORDER BY run_date DESC, created_ts DESC",
         (run_limit,),
     ).fetchall()
@@ -168,9 +181,7 @@ def open_recommendations(
         "           PARTITION BY LOWER(title) "
         "           ORDER BY created_ts DESC, id DESC) AS rn "
         "  FROM consolidation_recommendations "
-        "  WHERE run_date IN ("
-        "      SELECT run_date FROM consolidation_runs "
-        "      ORDER BY started_ts DESC LIMIT ?)) "
+        "  WHERE run_date IN (" + _RECENT_RUN_DATES + ")) "
         "WHERE rn = 1 AND status = 'open' AND severity != 'critical' "
         "ORDER BY created_ts DESC",
         (run_limit,),

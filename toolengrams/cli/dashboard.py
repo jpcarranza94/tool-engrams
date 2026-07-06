@@ -149,17 +149,12 @@ def _group_recommendations(rows) -> list[dict]:
 
 def _build_html(conn: sqlite3.Connection) -> str:
     memories = memory_store.list_memories(conn, include_archived=True, order="dashboard")
-    triggers = memory_store.all_triggers(conn)
+    triggers_by_mem = memory_store.triggers_by_memory(conn)
 
     surfaces = session_state.recent_surfaces_with_memory(conn, limit=50)
     consolidations = consolidation_runs.recent_runs(conn, limit=10)
     recommendations = _group_recommendations(
         consolidation_runs.recommendations_across_runs(conn, run_limit=10))
-
-    # Group triggers by memory_id.
-    triggers_by_mem: dict[int, list] = {}
-    for t in triggers:
-        triggers_by_mem.setdefault(t.memory_id, []).append(t)
 
     # Stats.
     active = [m for m in memories if m.archived_ts is None]
