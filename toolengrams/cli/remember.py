@@ -31,6 +31,7 @@ from ..formation import (
     find_similar,
     insert_candidate_triggers,
     scan_for_secrets,
+    score_pair,
     update_existing_memory,
 )
 from .. import envvars
@@ -195,9 +196,8 @@ def main(argv: list[str] | None = None) -> int:
             memory_id=memory_id, action="inserted",
             existing_match=None, **common,
         )
-        similar_advisory = _similar_payload(similar)
-        if similar_advisory:
-            payload["similar_memories"] = similar_advisory
+        if similar:
+            payload["similar_memories"] = _similar_payload(similar)
         print(json.dumps(payload))
         return 0
 
@@ -498,18 +498,19 @@ def _review_collision_payload(
     Default recommendation is KEEP-BOTH + narrow the shared trigger — a trigger
     collision between two genuinely-different facts must not fold into one
     muddled body (that is its own data-loss). FOLD (`--into <id>`) is only led
-    with when the two BODIES are ALSO semantic near-duplicates: we reuse
-    find_similar to check whether the colliding memory ranks as a near-dup of
-    the new body.
+    with when the two BODIES are ALSO semantic near-duplicates. We already hold
+    both texts (dedup returns the victim's name/body), so score the pair
+    directly — no FTS search needed, and no dependence on the victim ranking in
+    a find_similar window.
     """
     threshold = env_float(envvars.SIMILARITY_THRESHOLD, SIMILARITY_THRESHOLD)
-    scored = {m.id: score for m, score in find_similar(conn, name, body, limit=10)}
-    collision_score = scored.get(existing["id"], 0.0)
+    collision_score = score_pair(
+        name, body, existing["name"], existing.get("body") or "")
     lead_fold = collision_score >= threshold
 
     victim_id = existing["id"]
     shared = existing.get("shared_triggers") or []
-    shared_str = ", ".join(shared) if shared else "(a trigger)"
+    shared_str = ", ".join(shared)
     return {
         "action": "review_collision",
         "reason": (

@@ -45,11 +45,14 @@ def find_overlapping_memory(
     """
     norm_name = normalize_name(name)
 
-    new_tokens: set[str] = set()   # serialized tokens_json strings
+    # Map each new token trigger's serialized tokens_json (the overlap key) to
+    # its display phrase, so a match can surface the phrase the user would type
+    # without re-parsing the JSON back out.
+    new_tokens: dict[str, str] = {}   # tokens_json -> space-joined phrase
     new_globs: set[str] = set()
     for c in candidates:
         if c.kind == "token_subseq" and c.tokens:
-            new_tokens.add(json.dumps(list(c.tokens)))
+            new_tokens[json.dumps(list(c.tokens))] = " ".join(c.tokens)
         elif c.kind == "path_glob" and c.path_pattern:
             new_globs.add(c.path_pattern)
 
@@ -70,7 +73,7 @@ def find_overlapping_memory(
             if key and key in new_tokens:
                 scores[mid]["overlap"] += 1
                 scores[mid]["reason"].append(f"token_subseq:{key}")
-                scores[mid]["shared"].append(_display_trigger(key))
+                scores[mid]["shared"].append(new_tokens[key])
         elif row["kind"] == "path_glob":
             if row["path_pattern"] in new_globs:
                 scores[mid]["overlap"] += 1
@@ -99,19 +102,6 @@ def find_overlapping_memory(
             "shared_triggers": best["shared"],
         }
     return None
-
-
-def _display_trigger(tokens_json: str) -> str:
-    """Render a token_subseq tokens_json (e.g. '["git", "push"]') as the
-    space-joined phrase the user would type (e.g. 'git push'). Falls back to the
-    raw string if it isn't valid JSON."""
-    try:
-        toks = json.loads(tokens_json)
-    except (ValueError, TypeError):
-        return tokens_json
-    if isinstance(toks, list):
-        return " ".join(str(t) for t in toks)
-    return tokens_json
 
 
 def update_existing_memory(
