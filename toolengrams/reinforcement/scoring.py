@@ -67,13 +67,14 @@ def is_gated(candidate: Candidate) -> bool:
     """
     if candidate.pinned:
         return False
-    judged = candidate.useful_count + candidate.noise_count
+    # block vs hint differ only in two numbers: a block needs a far higher
+    # warm-up and a far lower floor before it can gate at all.
     if candidate.kind == "block":
-        if judged < env_int(envvars.BLOCK_GATE_WARMUP, BLOCK_GATE_WARMUP):
-            return False
-        return q(candidate.useful_count, candidate.noise_count) < \
-            env_float(envvars.BLOCK_GATE_FLOOR, BLOCK_GATE_FLOOR)
-    if judged < env_int(envvars.GATE_WARMUP_N, WARMUP_N):
+        warmup = env_int(envvars.BLOCK_GATE_WARMUP, BLOCK_GATE_WARMUP)
+        floor = env_float(envvars.BLOCK_GATE_FLOOR, BLOCK_GATE_FLOOR)
+    else:
+        warmup = env_int(envvars.GATE_WARMUP_N, WARMUP_N)
+        floor = env_float(envvars.GATE_THRESHOLD, GATE_THRESHOLD)
+    if candidate.useful_count + candidate.noise_count < warmup:
         return False
-    return q(candidate.useful_count, candidate.noise_count) < \
-        env_float(envvars.GATE_THRESHOLD, GATE_THRESHOLD)
+    return q(candidate.useful_count, candidate.noise_count) < floor
