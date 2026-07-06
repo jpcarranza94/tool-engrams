@@ -69,11 +69,14 @@ engram remember "<body>" --kind <block|hint> --scope <global|project> \
 
 | kind | Surfaces at | Effect | Use when |
 |------|------------|--------|----------|
-| **block** | PreToolUse (before every matching call) | Denies the call; the agent sees the body and retries with fixed args. | the agent would make the SAME mistake with high confidence. Clear corrections: wrong column, wrong flag, wrong path, wrong state name. |
-| **hint** | PostToolUseFailure (after a matching call fails) | Injects context, non-blocking. | The agent MIGHT make the mistake. Workarounds, non-obvious flags, conditional "if this fails, try X". |
+| **block** | PreToolUse — before EVERY matching call | Denies the call; the agent sees the body and retries with fixed args. Always fires (gate-exempt). | the agent would make the SAME mistake with high confidence. Clear corrections: wrong column, wrong flag, wrong path, wrong state name. |
+| **hint** | PreToolUse — before EVERY matching call (and re-surfaced when a matching call fails) | Injects the body as context, non-blocking. Suppressed once its quality score falls below the gate. | The agent MIGHT make the mistake. Workarounds, non-obvious flags, "if this fails, try X". |
 
-**Default to block for clear corrections.** Use hint when the failure mode is
-conditional or the fix depends on context.
+**Both kinds fire on EVERY call whose command matches the trigger — a hint is NOT
+conditional on failure.** A broad or common-command trigger therefore sprays the
+body on every matching call = noise; a hint costs nearly what a block costs, minus
+the deny. Save a hint only if its body is worth showing on *every* matching call.
+**Default to block for clear corrections**; hint for conditional workarounds.
 
 ## Triggers (command-bound)
 
