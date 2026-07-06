@@ -171,6 +171,17 @@ def test_resolve_marks_all_rows_done(temp_db):
     assert all(r["status"] == "done" and r["resolved_ts"] == 9000 for r in rows)
 
 
+def test_resolve_reclose_is_idempotent(temp_db):
+    """Re-closing an already-done title is a harmless no-op re-stamp (docstring
+    claim): still matches every row and they stay `done`."""
+    _record(temp_db, "2026-06-01")
+    runs.insert_recommendations(temp_db, "2026-06-01", [_rec("dupe issue")], now_ts=100)
+    assert runs.resolve_recommendation(temp_db, "dupe issue", now_ts=200) == 1
+    assert runs.resolve_recommendation(temp_db, "dupe issue", now_ts=300) == 1
+    rows = runs.recommendations_across_runs(temp_db, 10)
+    assert all(r["status"] == "done" for r in rows)
+
+
 def test_resolve_is_casefolded(temp_db):
     _record(temp_db, "2026-06-01")
     runs.insert_recommendations(temp_db, "2026-06-01", [_rec("Path Glob Noise")], now_ts=1)

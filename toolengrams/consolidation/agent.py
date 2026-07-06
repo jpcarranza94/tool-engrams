@@ -290,7 +290,11 @@ def _get_memory_summary(db_path: Path) -> str:
             "resolve each in your Task 6 output (reuse the EXACT title):"
         )
         for r in backlog:
-            detail = f" — {r['detail']}" if r["detail"] else ""
+            # Cap agent-authored detail like the quarantines section ([:200]) so a
+            # verbose backlog can't crowd out the transcripts — the one enriched
+            # section not routed through _bounded_section (every title must show
+            # for Task 6 re-affirmation, so we trim each row rather than the list).
+            detail = f" — {r['detail'][:200]}" if r["detail"] else ""
             lines.append(f"  ({r['severity']}) \"{r['title']}\"{detail}")
 
     conn.close()

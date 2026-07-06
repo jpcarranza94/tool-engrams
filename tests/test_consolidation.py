@@ -401,6 +401,24 @@ def _set_counters(conn, mid, *, useful, noise):
     conn.commit()
 
 
+def test_append_bounded_truncates_past_budget():
+    # The per-section budget guard (MAX_SUMMARY_SECTION_CHARS) keeps one enriched
+    # section from crowding the transcripts out of the agent's context.
+    lines: list = []
+    items = ["x" * 100 for _ in range(10)]
+    agent._append_bounded(lines, items, lambda s: s, budget=250)
+    assert lines[0] == items[0]                       # always shows >=1 item
+    rendered = [ln for ln in lines if ln == items[0]]
+    assert len(rendered) < len(items)                 # stopped before the end
+    assert lines[-1] == "  ... (8 more omitted for budget)"
+
+
+def test_append_bounded_shows_all_within_budget():
+    lines: list = []
+    agent._append_bounded(lines, ["a", "b", "c"], lambda s: s, budget=1000)
+    assert lines == ["a", "b", "c"]                    # no omitted marker
+
+
 def test_summary_flags_narrow_or_archive_candidate(temp_db):
     good = _insert_mem(temp_db, "solid", created_ago_days=1, surface_count=5)
     _set_counters(temp_db, good, useful=5, noise=0)

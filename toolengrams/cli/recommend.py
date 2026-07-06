@@ -32,14 +32,17 @@ def main(argv: list[str] | None = None) -> int:
 
     with db.session() as conn:
         if args.close is not None:
+            # Titles are stripped at insert (report_parse.extract_recommendations),
+            # so strip the hand-typed arg too or a padded --close never matches.
+            title = args.close.strip()
             now_ts = int(time.time())
             with db.transaction(conn):
-                updated = runs.resolve_recommendation(conn, args.close, now_ts=now_ts)
+                updated = runs.resolve_recommendation(conn, title, now_ts=now_ts)
             if updated == 0:
-                print(json.dumps({"action": "not_found", "title": args.close}))
+                print(json.dumps({"action": "not_found", "title": title}))
                 return 1
             print(json.dumps({
-                "action": "closed", "title": args.close,
+                "action": "closed", "title": title,
                 "rows_updated": updated, "resolved_ts": now_ts,
             }))
             return 0
