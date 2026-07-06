@@ -4,8 +4,9 @@ The nightly consolidation agent emits durable, cross-run advisories
 (`consolidation_recommendations`). This is the maintainer's side of that loop:
 
 - `--list` prints the standing OPEN backlog (one row per title, newest-status,
-  critical excluded) — the same view the agent is shown so a human can see what
-  is still outstanding.
+  critical excluded) across ALL runs — wider than the agent's bounded context
+  window, so a human sees every still-outstanding item, including ones that aged
+  out of the agent's view.
 - `--close "<title>"` marks every stored row with that (casefolded) title `done`.
 
 Why a CLI close at all: `severity='critical'` (code-bug / data-safety) items are
@@ -25,6 +26,7 @@ import time
 
 from .. import db
 from ..consolidation import runs
+from ..utils import is_consolidation_child
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -32,6 +34,14 @@ def main(argv: list[str] | None = None) -> int:
 
     with db.session() as conn:
         if args.close is not None:
+            # Maintainer-only boundary, enforced in code (not just the prompt):
+            # the nightly consolidation agent runs with the full engram verb set,
+            # so refuse --close under it. Otherwise the agent could silently close
+            # a critical (code-bug/data-safety) rec that only a human can verify.
+            if is_consolidation_child():
+                print(json.dumps({"action": "forbidden", "reason": "agent_context",
+                                  "title": args.close}))
+                return 1
             # Titles are stripped at insert (report_parse.extract_recommendations),
             # so strip the hand-typed arg too or a padded --close never matches.
             title = args.close.strip()
@@ -47,8 +57,10 @@ def main(argv: list[str] | None = None) -> int:
             }))
             return 0
 
-        # Default (and explicit --list): show the open backlog.
-        rows = runs.open_recommendations(conn, runs.OPEN_BACKLOG_RUN_WINDOW)
+        # Default (and explicit --list): show the open backlog. Unlike the agent's
+        # bounded context view, the maintainer list spans ALL runs so an aged-out
+        # still-open rec stays visible (and closable).
+        rows = runs.open_recommendations(conn, runs.ALL_RUNS)
         out = [{"title": r["title"], "severity": r["severity"],
                 "detail": r["detail"], "run_date": r["run_date"],
                 "issue_url": r["issue_url"]} for r in rows]

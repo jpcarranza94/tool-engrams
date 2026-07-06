@@ -27,7 +27,7 @@ from ..prompts.consolidation import (
 from ..retrieval import session_state
 from ..watcher import runs_store
 from ..reinforcement.scoring import q
-from ..utils import env_int, prepend_engram_bin
+from ..utils import CONSOLIDATION_CHILD_ENV, env_int, prepend_engram_bin
 from ..target.interface import SessionFile
 from . import report_parse, runs
 
@@ -373,6 +373,9 @@ def run_consolidation_agent(
 
     env = prepend_engram_bin(os.environ.copy())
     env["ENGRAM_DB"] = str(db_path)
+    # Mark the automated-agent context so maintainer-only verbs (recommend
+    # --close) refuse under the agent even though its sandbox allows all verbs.
+    env[CONSOLIDATION_CHILD_ENV] = "1"
 
     timeout_sec = env_int(envvars.CONSOLIDATION_TIMEOUT, CONSOLIDATION_TIMEOUT_SEC)
     # engine.invoke never raises — process failures come back on the result.

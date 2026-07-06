@@ -23,6 +23,13 @@ from .. import db
 # shows every date an item was raised; this one dedupes to the standing backlog.
 OPEN_BACKLOG_RUN_WINDOW = 7
 
+# Unbounded run window for the human `engram recommend --list` path: a still-open
+# rec raised beyond OPEN_BACKLOG_RUN_WINDOW must stay discoverable to a maintainer
+# (the agent only re-emits titles it was shown, so an aged-out open title can
+# never re-enter the agent's window on its own). SQLite treats `LIMIT -1` as no
+# upper bound, so this widens open_recommendations to every recorded run.
+ALL_RUNS = -1
+
 # The recent-run-dates subselect shared by the two cross-run recommendation
 # reads (across-runs display + open backlog); interpolated into each query so
 # the bounding window can't drift between them.

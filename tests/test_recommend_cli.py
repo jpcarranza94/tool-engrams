@@ -78,3 +78,41 @@ def test_close_unknown_returns_1(temp_db, capsys):
     rc = recommend.main(["--close", "does not exist"])
     assert rc == 1
     assert json.loads(capsys.readouterr().out)["action"] == "not_found"
+
+
+def test_close_strips_padded_title(temp_db, capsys):
+    _seed(temp_db)
+    rc = recommend.main(["--close", "  noisy glob  "])
+    assert rc == 0
+    assert json.loads(capsys.readouterr().out)["rows_updated"] == 1
+
+
+def test_close_forbidden_under_agent_context(temp_db, capsys, monkeypatch):
+    # The nightly consolidation agent must not close a rec (only a maintainer
+    # can); the guard is code-enforced via the CONSOLIDATION_CHILD_ENV marker.
+    _seed(temp_db)
+    monkeypatch.setenv("ENGRAM_IN_CONSOLIDATION", "1")
+    rc = recommend.main(["--close", "noisy glob"])
+    assert rc == 1
+    out = json.loads(capsys.readouterr().out)
+    assert out["action"] == "forbidden"
+    assert out["reason"] == "agent_context"
+    # Untouched — still open in the backlog.
+    assert [r["title"] for r in runs.open_recommendations(temp_db, 10)] == ["noisy glob"]
+
+
+def test_list_spans_all_runs_beyond_agent_window(temp_db, capsys):
+    # An open rec raised in the oldest run, then MORE runs than the agent's
+    # bounded window (OPEN_BACKLOG_RUN_WINDOW=7) with no new recs.
+    _record(temp_db, "2026-06-01", started_ts=100)
+    runs.insert_recommendations(
+        temp_db, "2026-06-01", [_rec("aged open", severity="warn")], now_ts=100)
+    for i in range(2, 12):  # 10 newer, rec-less runs
+        _record(temp_db, f"2026-06-{i:02d}", started_ts=100 + i)
+    # The agent's bounded window ages it out...
+    assert runs.open_recommendations(temp_db, runs.OPEN_BACKLOG_RUN_WINDOW) == []
+    # ...but the maintainer --list (ALL_RUNS) still surfaces it.
+    rc = recommend.main(["--list"])
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert [r["title"] for r in out["open"]] == ["aged open"]
