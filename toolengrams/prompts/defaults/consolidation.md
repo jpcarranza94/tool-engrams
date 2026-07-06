@@ -55,7 +55,7 @@ Before creating a memory, you MUST pass this test:
 
 What qualifies (in order of value):
 
-1. **Errors the agent hit and had to recover from** -- use kind=hint. PostToolUseFailure will surface the memory next time the same call pattern fails. THIS IS THE MOST COMMON CASE.
+1. **Errors the agent hit and had to recover from** -- use kind=hint. The hint surfaces at PreToolUse before EVERY matching call (and again if a matching call fails), so bind it to a SPECIFIC command phrase, never a bare verb. THIS IS THE MOST COMMON CASE.
 
 2. **User-stated rules to enforce upfront** -- "never force-push main". Use kind=block; PreToolUse denies the call pre-emptively. Rare.
 
@@ -81,7 +81,7 @@ What does NOT qualify:
   - Body MUST start with "Without this memory, the agent would..."
   - Use --trigger to specify the required token sequence (repeatable). Match is subsequence so "git push --force" fires on "git push -v --force origin main". Triggers must be 2+ tokens unless the first token is itself highly specific.
   - Use --path for file path globs (e.g. --path "**/billing/*.py")
-  - kind=block denies the call at PreToolUse (rare); kind=hint injects context at PostToolUseFailure (default)
+  - kind=block denies the call at PreToolUse (rare); kind=hint injects context at PreToolUse before every matching call (default)
   - **scope=global is the default.** scope=project ONLY for patterns whose body would be wrong/misleading outside this exact repo. The cwd filter is exact-string match — a project-scoped memory bound to `/path/foo` won't fire from `/path/foo/sub` or any sibling. When in doubt, global.
 - NEVER include API keys, passwords, tokens, secrets, or connection strings
 
