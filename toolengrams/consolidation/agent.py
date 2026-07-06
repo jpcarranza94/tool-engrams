@@ -19,6 +19,7 @@ from pathlib import Path
 
 from .. import envvars, memory_store
 from ..engine import EngineRequest, SandboxSpec, get_engine
+from ..models import Trigger
 from ..prompts.consolidation import (
     build_consolidation_prompt,
     build_consolidation_retry_prompt,
@@ -28,7 +29,7 @@ from ..watcher import runs_store
 from ..reinforcement.scoring import q
 from ..utils import env_int, prepend_engram_bin
 from ..target.interface import SessionFile
-from . import report_parse
+from . import report_parse, runs
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -49,6 +50,90 @@ CONSOLIDATION_TIMEOUT_SEC = 1800  # 30 minutes
 # conservative default keeps freshly-formed memories — which legitimately haven't
 # hit their trigger yet — out of the bucket.
 COLD_MEMORY_DAYS = 30
+
+# Inventory/cold body snippets are truncated to this; the agent can
+# `engram recall --id N` for the full text.
+BODY_SNIPPET_CHARS = 500
+
+# Per-section character sub-budget for the enriched summary sections (WS4.4:
+# dup clusters, narrow-or-archive candidates, cold detail). MAX_TOTAL_BYTES is
+# the whole-session budget (10 MB) — far too coarse to keep any single section
+# from crowding the transcripts out of the agent's context, so each enriched
+# list caps itself and appends an "N more omitted" marker past the cap.
+MAX_SUMMARY_SECTION_CHARS = 6000
+
+# Recent-run window for the standing recommendation backlog injected into the
+# agent (WS5.1) — mirror the dashboard's cross-run window.
+RECENT_RUNS_FOR_BACKLOG = 7
+
+
+def _triggers_by_memory(conn) -> dict[int, list[Trigger]]:
+    """Map memory_id → its triggers, in one scan (no per-memory query)."""
+    by_mem: dict[int, list[Trigger]] = {}
+    for t in memory_store.all_triggers(conn):
+        by_mem.setdefault(t.memory_id, []).append(t)
+    return by_mem
+
+
+def _trigger_signature(t: Trigger) -> tuple | None:
+    """A hashable dedup key for one trigger: the token-SET (order-independent) for
+    a token_subseq trigger, or the exact pattern for a path_glob. None for a
+    trigger carrying neither (nothing to cluster on)."""
+    if t.kind == "token_subseq":
+        toks = t.tokens
+        return ("tokens", frozenset(toks)) if toks else None
+    if t.kind == "path_glob" and t.path_pattern:
+        return ("path", t.path_pattern)
+    return None
+
+
+def _signature_label(sig: tuple) -> str:
+    kind, val = sig
+    if kind == "tokens":
+        return "tokens {" + ", ".join(sorted(val)) + "}"
+    return f"path {val}"
+
+
+def _trigger_labels(triggers: list[Trigger]) -> str:
+    """Compact one-line rendering of a memory's triggers for the cold detail."""
+    parts = []
+    for t in triggers:
+        if t.kind == "token_subseq" and t.tokens:
+            parts.append("[" + " ".join(t.tokens) + "]")
+        elif t.kind == "path_glob" and t.path_pattern:
+            parts.append(f"path:{t.path_pattern}")
+    return ", ".join(parts) if parts else "(no triggers)"
+
+
+def _dup_clusters(memories: list, triggers_by_mem: dict[int, list[Trigger]]) -> list:
+    """Active memories that share an identical trigger signature (token-set or
+    path pattern), as `[(signature, [memories])]` for signatures owned by 2+
+    memories. These are FOLD-or-NARROW candidates, not automatic merges — the
+    agent decides whether the bodies are the same fact."""
+    sig_to_mems: dict[tuple, list] = {}
+    for m in memories:
+        seen: set[tuple] = set()
+        for t in triggers_by_mem.get(m.id, ()):
+            sig = _trigger_signature(t)
+            if sig is None or sig in seen:
+                continue
+            seen.add(sig)
+            sig_to_mems.setdefault(sig, []).append(m)
+    return [(sig, mems) for sig, mems in sig_to_mems.items() if len(mems) >= 2]
+
+
+def _append_bounded(lines: list, items: list, render, *,
+                    budget: int = MAX_SUMMARY_SECTION_CHARS) -> None:
+    """Append `render(item)` for each item until `budget` chars are used, then
+    append a single "N more omitted" marker. Always shows at least one item."""
+    used = 0
+    for shown, item in enumerate(items):
+        text = render(item)
+        if used + len(text) > budget and shown:
+            lines.append(f"  ... ({len(items) - shown} more omitted for budget)")
+            return
+        lines.append(text)
+        used += len(text)
 
 
 def _cold_memories(memories: list, cutoff_ts: int) -> list:
@@ -82,6 +167,10 @@ def _get_memory_summary(db_path: Path) -> str:
     # audit-worthy memories at the top of the agent's context so a truncated
     # reading still covers the work that matters.
     memories = memory_store.list_memories(conn, order="audit")
+    triggers_by_mem = _triggers_by_memory(conn)
+    # Per-memory helpful/unused/noise split from the raw judged surfaces — the
+    # memory row only carries useful/noise counters; `unused` lives only here.
+    dist = session_state.outcome_distribution(conn)
 
     lines = [f"Active memories ({len(memories)}) ordered audit-first (never-verified, then oldest-verified):"]
     for m in memories:
@@ -90,18 +179,58 @@ def _get_memory_summary(db_path: Path) -> str:
         if m.project_slug:
             scope_str = f"{scope_str}:{m.project_slug}"
         verified_str = f"verified={m.last_verified_ts}" if m.last_verified_ts else "verified=never"
+        # helpful == useful_count; noise == noise_count; unused is surfaces the
+        # agent saw but did not act on (does NOT count against q).
+        unused = dist.get(m.id, {}).get("unused", 0)
         lines.append(
             f"  [{m.id}] \"{m.name}\" kind={m.kind} "
             f"scope={scope_str} "
-            f"surfaces={m.surface_count} useful={m.useful_count} noise={m.noise_count} "
-            f"q={qv:.2f} created={m.created_ts} {verified_str}"
+            f"surfaces={m.surface_count} helpful={m.useful_count} unused={unused} "
+            f"noise={m.noise_count} q={qv:.2f} created={m.created_ts} {verified_str}"
         )
-        # Body truncated to 500 chars; agent can `engram recall --id N` for full text.
-        lines.append(f"       body: {m.body[:500]}")
+        lines.append(f"       body: {m.body[:BODY_SNIPPET_CHARS]}")
+
+    # Narrow-or-archive candidates: q<0.5 AND noise-dominant (more noise verdicts
+    # than helpful). The surfacing gate already suppresses these hints, so they're
+    # dead weight until fixed — prefer NARROWING the over-matching trigger (Task 2)
+    # over archiving unless the content itself is useless.
+    flagged = [m for m in memories
+               if q(m.useful_count, m.noise_count) < 0.5 and m.noise_count > m.useful_count]
+    if flagged:
+        lines.append(
+            f"\nNarrow-or-archive candidates ({len(flagged)}) — q<0.5 and noise-dominant. "
+            "The gate already suppresses these. Prefer trigger-narrowing over archiving "
+            "unless the body is useless:"
+        )
+        _append_bounded(
+            lines, flagged,
+            lambda m: (f"  [{m.id}] \"{m.name}\" q={q(m.useful_count, m.noise_count):.2f} "
+                       f"helpful={m.useful_count} noise={m.noise_count} "
+                       f"triggers: {_trigger_labels(triggers_by_mem.get(m.id, []))}"),
+        )
+
+    # Duplicate trigger clusters: active memories sharing an identical trigger
+    # token-set or path pattern. Fold ONLY when the bodies are the SAME fact;
+    # when they're distinct facts that happen to share a broad trigger, NARROW /
+    # scope the trigger instead (folding distinct facts loses knowledge).
+    clusters = _dup_clusters(memories, triggers_by_mem)
+    if clusters:
+        lines.append(
+            f"\nDuplicate trigger clusters ({len(clusters)}) — memories sharing an identical "
+            "trigger. Fold ONLY true same-fact duplicates (prefer the broader-reach "
+            "survivor per Task 2); if they are DISTINCT facts sharing a broad trigger, do "
+            "NOT fold — narrow/scope the shared trigger so each fires precisely:"
+        )
+        def _render_cluster(entry):
+            sig, mems = entry
+            members = "; ".join(f"[{m.id}] \"{m.name}\"" for m in mems)
+            return f"  shared {_signature_label(sig)} → {members}"
+        _append_bounded(lines, clusters, _render_cluster)
 
     # Cold (never-surfaced) memories — listed separately so the agent triages
-    # them instead of losing them among the inventory rows above (which carry the
-    # full kind/scope/created detail; here a bare id+name pointer suffices).
+    # them instead of losing them among the inventory rows above. Each carries its
+    # body snippet + trigger list inline so the agent can diagnose (trigger can't
+    # match vs. pattern doesn't recur) without an extra recall round-trip.
     # Clamp to >= 1: a 0/negative horizon would move the cutoff to now-or-future
     # and flag every just-created never-surfaced memory as cold — the exact
     # false-positive-archive failure mode the conservative default guards against.
@@ -114,7 +243,11 @@ def _get_memory_summary(db_path: Path) -> str:
             "trigger if it can't match the real command, `engram forget --delete` if the "
             "pattern won't recur, or leave genuinely-useful-but-rare facts alone:"
         )
-        lines.extend(f"  [{m.id}] \"{m.name}\"" for m in cold)
+        def _render_cold(m):
+            return (f"  [{m.id}] \"{m.name}\" triggers: "
+                    f"{_trigger_labels(triggers_by_mem.get(m.id, []))}\n"
+                    f"       body: {m.body[:BODY_SNIPPET_CHARS]}")
+        _append_bounded(lines, cold, _render_cold)
 
     quarantines = runs_store.recent_quarantines(conn, now - 48 * 3600)
     if quarantines:
@@ -132,6 +265,22 @@ def _get_memory_summary(db_path: Path) -> str:
             f"  memory={s['memory_id']} \"{s['name']}\" "
             f"session={s['session_id'][:12]}... hook={s['hook']}"
         )
+
+    # Standing recommendation backlog (WS5.1): the OPEN advisories you (or a prior
+    # run) already raised. Without this you re-raise recurring issues as fresh
+    # `open` rows nightly. Per Task 6, re-emit each title UNCHANGED with the SAME
+    # casefolded label — status `done` if THIS run resolved it, else `open`.
+    # (Critical / code-bug items are intentionally absent — those close only via
+    # `engram recommend --close`, since you can't verify a code fix shipped.)
+    backlog = runs.open_recommendations(conn, RECENT_RUNS_FOR_BACKLOG)
+    if backlog:
+        lines.append(
+            f"\nStanding recommendation backlog ({len(backlog)} open) — re-affirm or "
+            "resolve each in your Task 6 output (reuse the EXACT title):"
+        )
+        for r in backlog:
+            detail = f" — {r['detail']}" if r["detail"] else ""
+            lines.append(f"  ({r['severity']}) \"{r['title']}\"{detail}")
 
     conn.close()
     return "\n".join(lines)

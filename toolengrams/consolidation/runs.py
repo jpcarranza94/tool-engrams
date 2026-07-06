@@ -133,3 +133,70 @@ def recommendations_across_runs(
         "ORDER BY run_date DESC, created_ts DESC",
         (run_limit,),
     ).fetchall()
+
+
+def open_recommendations(
+    conn: sqlite3.Connection, run_limit: int
+) -> list[sqlite3.Row]:
+    """The standing OPEN backlog, one row per title, for the nightly agent (WS5.1).
+
+    The agent never saw its own prior advisories, so it re-raised recurring issues
+    as fresh `open` rows every night (24 open / 4 ever done). Injecting this
+    backlog lets Task 6 re-affirm-or-resolve instead of duplicate.
+
+    Semantics that matter:
+    - **Newest-status per title.** A title may have a row per run_date; we keep
+      only the *newest* row (created_ts DESC, id DESC) and return it if that row
+      is still `open`. So a prior run's `done` re-emission OR a manual
+      `engram recommend --close` (which stamps the existing rows `done`) drops the
+      title out of the backlog — the agent is never prompted to re-raise it, which
+      is what keeps a manual close STICKY (see resolve_recommendation).
+    - **Critical excluded.** `severity='critical'` is the code-bug / data-safety
+      tier: the agent cannot verify a maintainer's code fix actually shipped, so
+      showing it in the backlog would make the agent wrongly re-open it forever.
+      Those are closed ONLY via `engram recommend --close` (WS5.2).
+
+    Bounded by the same recent-runs window as the dashboard. Titles are compared
+    casefolded (LOWER) to match the cross-run dedup key.
+    """
+    return conn.execute(
+        "SELECT title, severity, status, detail, issue_url, run_date, "
+        "       created_ts, resolved_ts FROM ("
+        "  SELECT title, severity, status, detail, issue_url, run_date, "
+        "         created_ts, resolved_ts, "
+        "         ROW_NUMBER() OVER ("
+        "           PARTITION BY LOWER(title) "
+        "           ORDER BY created_ts DESC, id DESC) AS rn "
+        "  FROM consolidation_recommendations "
+        "  WHERE run_date IN ("
+        "      SELECT run_date FROM consolidation_runs "
+        "      ORDER BY started_ts DESC LIMIT ?)) "
+        "WHERE rn = 1 AND status = 'open' AND severity != 'critical' "
+        "ORDER BY created_ts DESC",
+        (run_limit,),
+    ).fetchall()
+
+
+def resolve_recommendation(
+    conn: sqlite3.Connection, title: str, *, now_ts: int
+) -> int:
+    """Mark every stored recommendation with this (casefolded) title `done` —
+    the manual-close path for `engram recommend --close` (WS5.2).
+
+    This is the first status write outside `insert_recommendations`. It stamps
+    `status='done'` + `resolved_ts` on ALL matching rows across every run_date, so
+    the title's newest row is `done` and `open_recommendations` immediately stops
+    surfacing it to the agent. That exclusion is what makes a manual close STICKY:
+    the agent only re-emits titles it was shown in the backlog, so a closed title
+    is never reflexively re-raised (a genuine fresh re-detection is still allowed —
+    that is a real recurrence, not a clobber). Returns rows updated (0 == no such
+    title). Idempotent: re-closing an already-done title is a harmless no-op
+    re-stamp.
+    """
+    cur = conn.execute(
+        "UPDATE consolidation_recommendations "
+        "SET status = 'done', resolved_ts = ? "
+        "WHERE LOWER(title) = LOWER(?)",
+        (now_ts, title),
+    )
+    return cur.rowcount or 0

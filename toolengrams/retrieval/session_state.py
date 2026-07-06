@@ -295,6 +295,26 @@ def recent_surfaces_with_memory(conn: sqlite3.Connection, limit: int) -> list[sq
     ).fetchall()
 
 
+def outcome_distribution(conn: sqlite3.Connection) -> dict[int, dict[str, int]]:
+    """Per-memory judged-surface outcome split for the consolidation summary
+    (WS4.4): `{memory_id: {"helpful": n, "unused": n, "noise": n}}`.
+
+    Reads the raw `session_surfaces` verdicts (the source of truth for the
+    three-way split — the memory row only carries `useful_count`/`noise_count`;
+    `unused` is tracked nowhere else). Only judged surfaces (outcome IS NOT NULL)
+    count; a memory with no judged surfaces is simply absent from the map. One
+    grouped scan, no N+1.
+    """
+    rows = conn.execute(
+        "SELECT memory_id, outcome, COUNT(*) AS c FROM session_surfaces "
+        "WHERE outcome IS NOT NULL GROUP BY memory_id, outcome"
+    ).fetchall()
+    dist: dict[int, dict[str, int]] = {}
+    for r in rows:
+        dist.setdefault(r["memory_id"], {})[r["outcome"]] = r["c"]
+    return dist
+
+
 def surfaces_for_memory(conn: sqlite3.Connection, memory_id: int,
                         limit: int) -> list[sqlite3.Row]:
     """A single memory's most recent surfaces (recall --id): session_id, hook,

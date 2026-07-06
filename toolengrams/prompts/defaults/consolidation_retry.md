@@ -12,6 +12,8 @@ Reply with ONLY the corrected JSON block — no prose, no commentary before or a
     "surfaces_neutral": <int>,
     "memories_created": <int>,
     "memories_pruned": <int>,
+    "memories_archived": <int>,
+    "memories_strengthened": <int>,
     "memories_verified": <int>,
     "total_active_after": <int>,
     "quality_score": <float 0.0-1.0>

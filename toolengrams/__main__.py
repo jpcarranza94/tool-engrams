@@ -30,6 +30,7 @@ from .cli import (
     rebuild_counters,
     rebuild_triggers,
     recall,
+    recommend,
     remember,
     resolve_slug,
     skip,
@@ -61,6 +62,7 @@ _SELF_PARSING = {
     "resolve-slug": resolve_slug.main,
     "pin": pin.main,
     "recall": recall.main,
+    "recommend": recommend.main,
     "consolidate": consolidate.main,
     "edit": edit.main,
     "quarantine": quarantine.main,
@@ -172,6 +174,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("pin", help="Pin/unpin a memory", add_help=False)
     sub.add_parser("recall", help="Browse and search the memory store", add_help=False)
     sub.add_parser("consolidate", help="Nightly consolidation — replay and prune", add_help=False)
+    sub.add_parser("recommend", help="List/close nightly consolidation recommendations", add_help=False)
     sub.add_parser("status", help="Memory health (human on tty, JSON when piped or --json)", add_help=False)
     sub.add_parser("doctor", help="Wiring + liveness diagnostics (hooks, PATH, claude version, DB, activity)", add_help=False)
     sub.add_parser("dashboard", help="Open HTML dashboard in browser")
