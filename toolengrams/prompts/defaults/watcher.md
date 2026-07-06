@@ -39,9 +39,13 @@ engram remember "<body>" --kind <block|hint> --scope <global|project> \
   `shared_triggers`) and the `guidance.recommended` field. Then choose ONE:
     - **Two DIFFERENT facts that happen to share a trigger** (the default, and
       what `guidance.recommended: "keep_both"` means) → keep BOTH: re-run the
-      SAME command with `--force` AND a NARROWER `--trigger` so they don't both
-      fire on every matching command. Two lessons both bound to `git push` or
-      `**/Makefile` must stay TWO memories, never fold into one muddled body.
+      SAME command with `--force` AND a NARROWER trigger so they don't both fire
+      on every matching command. Match the flag to the collision: for a token
+      collision narrow the `--trigger` to a longer phrase (e.g. `git push
+      --force` instead of just `git push`); for a path collision narrow the
+      `--path` to a directory-qualified glob (e.g. `**/billing/models.py`, never
+      a bare `**/models.py`). Two distinct lessons must stay TWO memories, never
+      fold into one muddled body.
     - **Truly the SAME fact** (only when `guidance.recommended: "fold"`) → fold
       counter-preservingly: re-run
       `engram remember --into <id> "<one body merging both>"` (with the same
