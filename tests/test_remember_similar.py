@@ -119,14 +119,26 @@ def test_into_without_name_keeps_target_name(temp_db, capsys):
     assert memory_store.get(temp_db, aid).name == "macos-timeout-a"
 
 
-def test_overlap_resave_without_name_keeps_existing_name(temp_db, capsys):
-    # The trigger-overlap auto-merge has the same trap: a re-save with the same
-    # trigger but no --name must keep the existing name.
+def test_overlap_resave_withholds_and_preserves_existing(temp_db, capsys):
+    # The trigger-overlap path no longer auto-merges (that silently overwrote
+    # memories): a re-save sharing a trigger is WITHHELD for review, and the
+    # existing memory's name and body are left untouched.
     aid = _seed_a(capsys)  # name: macos-timeout-a, trigger: "alpha beta"
+    before = memory_store.get(temp_db, aid)
     rc, out = _remember(
         [_BODY_A + " updated", "--scope", "global", "--trigger", "alpha beta"], capsys)
-    assert out["action"] == "updated"
-    assert memory_store.get(temp_db, aid).name == "macos-timeout-a"
+    assert rc == 0
+    assert out["action"] == "review_collision"
+    assert out["collision"]["id"] == aid
+    after = memory_store.get(temp_db, aid)
+    assert after.name == "macos-timeout-a"     # name untouched
+    assert after.body == before.body           # body untouched — no overwrite
+
+    # --force still lets an insistent caller create a distinct memory sharing it.
+    rc, out = _remember(
+        [_BODY_A + " forced", "--name", "macos-timeout-c", "--scope", "global",
+         "--trigger", "alpha beta", "--force"], capsys)
+    assert out["action"] == "inserted"
 
 
 def test_into_nonexistent_errors(temp_db, capsys):

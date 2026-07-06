@@ -36,7 +36,12 @@ def find_overlapping_memory(
 ) -> dict | None:
     """Find an existing non-archived memory that overlaps with the new one.
 
-    Returns {id, name, overlap_count, match_reason} or None.
+    Returns a dict describing the colliding memory or None. The return carries
+    enough to surface the collision for review WITHOUT a second lookup:
+    ``{id, name, kind, body, overlap_count, match_reason, shared_triggers}``.
+    ``shared_triggers`` is the list of exact trigger phrases (token subsequences
+    joined by spaces, or path globs) the two memories share — the caller shows
+    them so the agent can pick a NARROWER trigger for a keep-both split.
     """
     norm_name = normalize_name(name)
 
@@ -57,17 +62,20 @@ def find_overlapping_memory(
     for row in rows:
         mid = row["id"]
         if mid not in scores:
-            scores[mid] = {"id": mid, "name": row["name"], "overlap": 0, "reason": []}
+            scores[mid] = {"id": mid, "name": row["name"], "overlap": 0,
+                           "reason": [], "shared": []}
 
         if row["kind"] == "token_subseq":
             key = row["tokens_json"] or ""
             if key and key in new_tokens:
                 scores[mid]["overlap"] += 1
                 scores[mid]["reason"].append(f"token_subseq:{key}")
+                scores[mid]["shared"].append(_display_trigger(key))
         elif row["kind"] == "path_glob":
             if row["path_pattern"] in new_globs:
                 scores[mid]["overlap"] += 1
                 scores[mid]["reason"].append(f"path_glob:{row['path_pattern']}")
+                scores[mid]["shared"].append(row["path_pattern"])
 
     best = None
     for s in scores.values():
@@ -80,13 +88,30 @@ def find_overlapping_memory(
                 best = s
 
     if best:
+        victim = memory_store.get(conn, best["id"])
         return {
             "id": best["id"],
             "name": best["name"],
+            "kind": victim.kind if victim else None,
+            "body": victim.body if victim else "",
             "overlap_count": best["overlap"],
             "match_reason": ", ".join(best["reason"]),
+            "shared_triggers": best["shared"],
         }
     return None
+
+
+def _display_trigger(tokens_json: str) -> str:
+    """Render a token_subseq tokens_json (e.g. '["git", "push"]') as the
+    space-joined phrase the user would type (e.g. 'git push'). Falls back to the
+    raw string if it isn't valid JSON."""
+    try:
+        toks = json.loads(tokens_json)
+    except (ValueError, TypeError):
+        return tokens_json
+    if isinstance(toks, list):
+        return " ".join(str(t) for t in toks)
+    return tokens_json
 
 
 def update_existing_memory(

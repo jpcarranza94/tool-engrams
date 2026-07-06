@@ -33,12 +33,23 @@ engram remember "<body>" --kind <block|hint> --scope <global|project> \
 - Provide at least one `--trigger` OR one `--path`. `--trigger` is repeatable
   (alternatives); `--path` is repeatable.
 - Run one `engram remember` per memory. Most batches save ZERO memories.
-- If the CLI replies `action: "updated"` with an `existing_match` carrying
-  `previous_body`, your body just REPLACED that one. Read `previous_body`: if
-  it held still-valid guidance missing from yours, immediately re-run
-  `engram remember` once more with a single body that merges both — and pass the
-  SAME `--name` you used (a re-save without `--name` keeps the existing name, not
-  your body text). If your body already covers it, do nothing.
+- If the CLI replies `action: "review_collision"`, NOTHING was overwritten — a
+  NEW memory would share an exact trigger with an existing in-scope one. Read the
+  `collision` (it has the victim's `id`, `name`, `kind`, `body_preview`,
+  `shared_triggers`) and the `guidance.recommended` field. Then choose ONE:
+    - **Two DIFFERENT facts that happen to share a trigger** (the default, and
+      what `guidance.recommended: "keep_both"` means) → keep BOTH: re-run the
+      SAME command with `--force` AND a NARROWER `--trigger` so they don't both
+      fire on every matching command. Two lessons both bound to `git push` or
+      `**/Makefile` must stay TWO memories, never fold into one muddled body.
+    - **Truly the SAME fact** (only when `guidance.recommended: "fold"`) → fold
+      counter-preservingly: re-run
+      `engram remember --into <id> "<one body merging both>"` (with the same
+      `--name`/`--trigger`/`--kind`/`--scope`/`--project-cwd`). Keeps that
+      memory's id, counters, and surface history. ALWAYS pass `--name`.
+    - **Not worth saving after seeing the collision** → do nothing.
+  You cannot delete the old memory (formation is remember-only); "drop the old
+  fact" is expressible only as `--into <id>` to repurpose that memory in place.
 - If the CLI replies `action: "review_similar"`, NOTHING was saved yet — a
   near-duplicate may already cover this. Read the `candidates` (each has an
   `id`, `name`, `body_preview`, `similarity`). Then choose ONE:

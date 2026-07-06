@@ -73,3 +73,30 @@ choices.
   the name-keyed verbs, tracked separately).
 - `SIMILARITY_THRESHOLD = 0.6` is a tuning knob; too high lets near-dups through,
   too low blocks legitimately-distinct memories behind `--force`.
+
+## Update — the trigger-overlap path also withholds (`review_collision`)
+
+The original decision left the trigger-overlap path as a **silent auto-merge**:
+any new memory sharing even one exact trigger with an in-scope memory
+overwrote that memory's body/name/kind/triggers in place — no `--into`, no
+`--force`, no confirmation. This was real data-loss (a memory was destroyed when
+an unrelated fact happened to reuse its trigger), and asymmetric with the
+semantic gate above, which correctly withholds.
+
+The trigger-overlap gate now adopts the same withhold-and-surface contract:
+
+1. A collision returns `action: "review_collision"` (nothing written): the
+   colliding memory's `id`/`name`/`kind`/`body_preview`, the exact
+   `shared_triggers`, and a `guidance` object.
+2. **Safe default is keep-both + narrow**, not fold — two genuinely-different
+   facts that merely share a trigger (e.g. two lessons both bound to `git push`)
+   must not fold into one muddled body. `guidance.recommended` only leads with
+   `fold` when the new body and the colliding body are *also* semantic
+   near-duplicates (`find_similar` on the two bodies ≥ `SIMILARITY_THRESHOLD`).
+3. `--force` bypasses the collision gate (creates a distinct memory sharing the
+   trigger); `--into <id>` performs the explicit counter-preserving merge. Since
+   formation is remember-only, deleting the old memory is out of scope — "drop
+   old" is expressible only as `--into` repurpose.
+
+The formation prompt documents the `review_collision` response alongside
+`review_similar`.
