@@ -16,7 +16,11 @@ from .candidates import (
 from .dedup import find_overlapping_memory, update_existing_memory
 from .secrets import scan_for_secrets
 from .similar import find_similar, score_pair
-from .triggers import extras_to_candidates, insert_candidate_triggers
+from .triggers import (
+    extras_to_candidates,
+    insert_candidate_triggers,
+    is_persistable_trigger,
+)
 
 __all__ = [
     "CandidateKind",
@@ -27,6 +31,7 @@ __all__ = [
     "find_overlapping_memory",
     "find_similar",
     "insert_candidate_triggers",
+    "is_persistable_trigger",
     "scan_for_secrets",
     "score_pair",
     "update_existing_memory",

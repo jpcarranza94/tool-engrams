@@ -35,9 +35,11 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from typing import Any
 
 from .. import db, memory_store, pause
+from ..paths import engram_home
 from ..prompts.pretool import format_injection
 from ..reinforcement.scoring import is_gated
 from ..retrieval.rank import now, retrieve_candidates
@@ -105,8 +107,19 @@ def _run(payload: dict[str, Any], target) -> int:
             return 0
 
         # Surfacing gate: suppress hints that have proven more noise than signal
-        # (q < 0.5 after warm-up). block + pinned are exempt (see scoring.is_gated).
-        candidates = [c for c in candidates if not is_gated(c)]
+        # (q < 0.5 after warm-up), and heavily-observed net-negative blocks
+        # (judged >= BLOCK_GATE_WARMUP and q < BLOCK_GATE_FLOOR). Only pinned is
+        # unconditionally exempt (see scoring.is_gated). Gating a block withholds
+        # a safety DENY, so audit-log it — the suppression of a safety control
+        # must never be silent (the only durable trace an operator gets).
+        kept = []
+        for c in candidates:
+            if is_gated(c):
+                if c.kind == "block":
+                    _audit_block_suppressed(c)
+                continue
+            kept.append(c)
+        candidates = kept
 
         # Same-session suppression (ADR-0006): a hint never surfaces into the
         # session that formed it — the session already lived the episode, and a
@@ -168,3 +181,25 @@ def _run(payload: dict[str, Any], target) -> int:
 def _emit(obj: dict[str, Any]) -> None:
     sys.stdout.write(json.dumps(obj))
     sys.stdout.write("\n")
+
+
+def _audit_block_suppressed(c) -> None:
+    """Append one line to the engram log when the surfacing gate suppresses a
+    `block` — a withheld safety DENY must leave a durable trace.
+
+    Writes straight to <engram home>/watcher.log rather than importing
+    watcher.log._log: that would drag the whole watcher/engine import chain onto
+    the PreToolUse hot path. Fail-open — never raises into the hook.
+    """
+    try:
+        line = (
+            f"pretool: block '{c.name}' (memory_id={c.memory_id}) SUPPRESSED by "
+            f"surfacing gate (useful={c.useful_count} noise={c.noise_count}) — "
+            f"DENY not enforced this call"
+        )
+        path = engram_home() / "watcher.log"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a") as f:
+            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {line}\n")
+    except Exception:
+        pass

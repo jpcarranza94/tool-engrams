@@ -49,14 +49,18 @@ def test_add_token_trigger(temp_db, capsys):
 
 
 def test_add_path_trigger_with_access_mode(temp_db, capsys):
-    """--access-mode tags added path globs; the default Dockerfile glob stays write."""
+    """--access-mode tags added path globs; the default Dockerfile glob stays write.
+
+    Uses a directory-qualified glob: the specificity gate refuses broad
+    extension-only globs like `**/*.py` even via the `engram trigger` lever.
+    """
     mid = _mem_with_trigger(temp_db)
-    rc = trigger.main([str(mid), "--add-path", "**/*.py", "--access-mode", "any"])
+    rc = trigger.main([str(mid), "--add-path", "**/billing/*.py", "--access-mode", "any"])
     assert rc == 0
     out = json.loads(capsys.readouterr().out)
     assert out["action"] == "updated"
     modes = {t.path_pattern: t.access_mode for t in _triggers(temp_db, mid)}
-    assert modes["**/*.py"] == "any"
+    assert modes["**/billing/*.py"] == "any"
     assert modes["**/Dockerfile"] == "write"
 
 

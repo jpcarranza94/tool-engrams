@@ -15,6 +15,10 @@ from __future__ import annotations
 # Surfacing gate (reinforcement/scoring.py).
 GATE_THRESHOLD = "ENGRAM_GATE_THRESHOLD"
 GATE_WARMUP_N = "ENGRAM_GATE_WARMUP_N"
+# Block-kind gate: a high warm-up + very low floor so only a strongly
+# net-negative, heavily-observed block is suppressed (never auto-demoted).
+BLOCK_GATE_WARMUP = "ENGRAM_BLOCK_GATE_WARMUP"
+BLOCK_GATE_FLOOR = "ENGRAM_BLOCK_GATE_FLOOR"
 
 # Formation near-duplicate gate (cli/remember.py).
 SIMILARITY_THRESHOLD = "ENGRAM_SIMILARITY_THRESHOLD"

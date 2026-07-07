@@ -56,6 +56,8 @@ SPEC: list[tuple[str, str, type]] = [
     ("watcher.max_form_retries", envvars.MAX_FORM_RETRIES, int),
     ("gate.threshold", envvars.GATE_THRESHOLD, float),
     ("gate.warmup_n", envvars.GATE_WARMUP_N, int),
+    ("gate.block_warmup_n", envvars.BLOCK_GATE_WARMUP, int),
+    ("gate.block_floor", envvars.BLOCK_GATE_FLOOR, float),
     ("formation.similarity_threshold", envvars.SIMILARITY_THRESHOLD, float),
     ("consolidation.catchup_lookback_days", envvars.CATCHUP_LOOKBACK_DAYS, int),
     ("consolidation.surfaces_ttl_days", envvars.SURFACES_TTL_DAYS, int),

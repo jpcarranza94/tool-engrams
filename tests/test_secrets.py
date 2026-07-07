@@ -100,7 +100,9 @@ def test_remember_rejects_body_with_api_key(temp_db, monkeypatch, capsys):
 def test_remember_rejects_connection_string(temp_db, monkeypatch, capsys):
     rc = remember.main([
         "Connect with `psql postgresql://admin:password123@db.prod.com:5432/app`",
-        "--trigger", "psql",
+        # Two-token trigger: a bare `psql` is now refused (subcommand tool), which
+        # would trip the no_triggers gate before the secrets gate we're testing.
+        "--trigger", "psql -h",
         "--kind", "hint",
     ])
     assert rc == 1

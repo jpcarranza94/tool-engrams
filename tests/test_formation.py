@@ -193,7 +193,8 @@ def test_insert_candidate_triggers_writes_rows(temp_db):
 
     candidates = [
         FormationCandidate(kind="token_subseq", tokens=("git", "push"), source="backtick"),
-        FormationCandidate(kind="path_glob", path_pattern="**/*.py", source="path"),
+        # Directory-qualified glob (not extension-only) passes the specificity gate.
+        FormationCandidate(kind="path_glob", path_pattern="**/billing/handlers.py", source="path"),
     ]
     n = insert_candidate_triggers(temp_db, mid, candidates)
     assert n == 2
@@ -207,4 +208,4 @@ def test_insert_candidate_triggers_writes_rows(temp_db):
     assert rows[0]["first_token"] == "git"
     assert json.loads(rows[0]["tokens_json"]) == ["git", "push"]
     assert rows[1]["kind"] == "path_glob"
-    assert rows[1]["path_pattern"] == "**/*.py"
+    assert rows[1]["path_pattern"] == "**/billing/handlers.py"

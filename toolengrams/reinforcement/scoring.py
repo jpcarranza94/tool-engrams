@@ -22,6 +22,13 @@ GATE_THRESHOLD = 0.5  # q below this ⟺ noise > helpful; the prior's mean, not 
 WARMUP_N = 3          # don't gate until this many verdicts, so one unlucky early
                       # 'noise' can't kill a young memory.
 
+# Block-kind gate (much stricter than the hint gate). A `block` DENIES calls, so
+# a rare-but-correct safety rule must keep firing even with thin visible
+# follow-through — hence a far higher warm-up and a floor well below the 0.5 hint
+# threshold. Only a strongly net-negative, heavily-observed block is suppressed.
+BLOCK_GATE_WARMUP = 12   # need this many verdicts before a block can gate at all.
+BLOCK_GATE_FLOOR = 0.35  # and only when q has fallen below this (≈net-negative).
+
 
 def q(useful_count: int, noise_count: int) -> float:
     """Noise-aware, Laplace-smoothed quality ratio in (0, 1).
@@ -48,15 +55,26 @@ def final_score(candidate: Candidate) -> float:
 def is_gated(candidate: Candidate) -> bool:
     """True if the surfacing gate should suppress this candidate.
 
-    A `hint` that has proven more noise than signal (`q < 0.5`) after a warm-up
-    of `WARMUP_N` verdicts. `block` and `pinned` memories are exempt — a safety
-    rule that's rarely visibly-heeded must still fire. The gate is a hint-only
-    quality valve, distinct from the sort+cap that only orders what does surface.
+    Two gates, one valve. A `hint` is suppressed once it's proven more noise
+    than signal (`q < GATE_THRESHOLD`) after a warm-up of `WARMUP_N` verdicts. A
+    `block` is far harder to gate: because it DENIES calls, a rare-but-correct
+    safety rule must keep firing even when it rarely shows visible follow-through
+    — so a block gates only past a much higher warm-up (`BLOCK_GATE_WARMUP`) AND
+    a much lower floor (`BLOCK_GATE_FLOOR`), catching only a strongly
+    net-negative, heavily-observed block. Gating a block SUPPRESSES it (it is
+    never auto-demoted to a hint). `pinned` memories are always exempt. The gate
+    is a quality valve, distinct from the sort+cap that only orders what surfaces.
     """
-    if candidate.kind == "block" or candidate.pinned:
+    if candidate.pinned:
         return False
-    judged = candidate.useful_count + candidate.noise_count
-    if judged < env_int(envvars.GATE_WARMUP_N, WARMUP_N):
+    # block vs hint differ only in two numbers: a block needs a far higher
+    # warm-up and a far lower floor before it can gate at all.
+    if candidate.kind == "block":
+        warmup = env_int(envvars.BLOCK_GATE_WARMUP, BLOCK_GATE_WARMUP)
+        floor = env_float(envvars.BLOCK_GATE_FLOOR, BLOCK_GATE_FLOOR)
+    else:
+        warmup = env_int(envvars.GATE_WARMUP_N, WARMUP_N)
+        floor = env_float(envvars.GATE_THRESHOLD, GATE_THRESHOLD)
+    if candidate.useful_count + candidate.noise_count < warmup:
         return False
-    return q(candidate.useful_count, candidate.noise_count) < \
-        env_float(envvars.GATE_THRESHOLD, GATE_THRESHOLD)
+    return q(candidate.useful_count, candidate.noise_count) < floor

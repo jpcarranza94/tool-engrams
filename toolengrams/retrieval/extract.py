@@ -20,15 +20,6 @@ from typing import Any
 
 from ..models import AccessMode, ExtractedTriggerHint
 
-# Known CLI first tokens we care about for second-token extraction during
-# memory formation (see formation/candidates.py). Retrieval itself doesn't
-# branch on this — it just subsequence-matches whatever tokens were stored.
-_SUBCOMMAND_TOOLS = {
-    "git", "gh", "jira", "docker", "aws", "kubectl", "bq", "psql",
-    "npm", "yarn", "pnpm", "cargo", "pip", "brew", "make", "terraform",
-    "ansible", "systemctl", "journalctl", "ssh", "scp", "rsync",
-}
-
 # Match ~/... or /abs/paths inside a Bash command string.
 _PATH_RE = re.compile(r"(?<!\S)(~(?:/[^\s;|&><]*)?|/[^\s;|&><]+)")
 

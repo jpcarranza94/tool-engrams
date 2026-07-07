@@ -71,6 +71,31 @@ def test_gate_warmup_env_override(monkeypatch):
     assert scoring.is_gated(c) is True
 
 
+# ---------- block-gate warmup / floor (WS3.2) ----------
+
+
+def test_block_gate_warmup_env_override(monkeypatch):
+    # A block at q ≈ 0.31 with judged = 14: gated at the default warm-up (12)...
+    c = _cand(4, 10, kind="block")
+    for env in ("ENGRAM_BLOCK_GATE_WARMUP", "ENGRAM_BLOCK_GATE_FLOOR"):
+        monkeypatch.delenv(env, raising=False)
+    assert scoring.is_gated(c) is True
+    # ...but exempt once the warm-up bar is raised above its judged count.
+    monkeypatch.setenv("ENGRAM_BLOCK_GATE_WARMUP", "20")
+    assert scoring.is_gated(c) is False
+
+
+def test_block_gate_floor_env_override(monkeypatch):
+    # q(8,12) = 9/22 ≈ 0.409, judged = 20 ≥ warm-up. Above the 0.35 default floor
+    # → not gated; raise the floor above 0.409 → gated.
+    c = _cand(8, 12, kind="block")
+    monkeypatch.delenv("ENGRAM_BLOCK_GATE_WARMUP", raising=False)
+    monkeypatch.setenv("ENGRAM_BLOCK_GATE_FLOOR", "0.35")
+    assert scoring.is_gated(c) is False
+    monkeypatch.setenv("ENGRAM_BLOCK_GATE_FLOOR", "0.5")
+    assert scoring.is_gated(c) is True
+
+
 # ---------- catch-up lookback ----------
 
 

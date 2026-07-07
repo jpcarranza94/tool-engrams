@@ -16,7 +16,11 @@ from typing import Any
 
 from .. import db, memory_store
 from .candidates import FormationCandidate
-from .triggers import extras_to_candidates, insert_candidate_triggers
+from .triggers import (
+    extras_to_candidates,
+    insert_candidate_triggers,
+    is_persistable_trigger,
+)
 
 # If an existing memory shares this many triggers with the new one,
 # update instead of insert.
@@ -127,11 +131,18 @@ def update_existing_memory(
             kind=kind, pinned=pinned, created_ts=now_ts,
         )
         memory_store.set_origin_session(conn, existing_id, origin_session_id)
-        # Only replace triggers when the caller supplied some. A merge (`remember
-        # --into <id>`) whose body extracts no triggers must KEEP the target's
-        # existing triggers, not wipe them into a never-surfacing memory.
-        if candidates or extra_triggers:
+        # Only replace triggers when the caller supplied some that will actually
+        # PERSIST. A merge (`remember --into <id>`) whose body extracts no
+        # triggers — or only broad ones that insert_candidate_triggers silently
+        # drops — must KEEP the target's existing triggers, not wipe them into a
+        # never-surfacing memory. Gate on persistable candidates, not raw ones.
+        # block/pinned keep broad safety triggers (see is_persistable_trigger).
+        exempt = kind == "block" or pinned
+        persistable = [c for c in candidates
+                       if is_persistable_trigger(c, exempt_broad=exempt)]
+        persistable += [c for c in extras_to_candidates(extra_triggers)
+                        if is_persistable_trigger(c, exempt_broad=exempt)]
+        if persistable:
             memory_store.delete_triggers_for(conn, existing_id)
-            insert_candidate_triggers(conn, existing_id, candidates)
-            insert_candidate_triggers(conn, existing_id, extras_to_candidates(extra_triggers))
+            insert_candidate_triggers(conn, existing_id, persistable, exempt_broad=exempt)
     return existing_id

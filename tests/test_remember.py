@@ -36,7 +36,9 @@ def test_positional_text_inserts_memory(temp_db, monkeypatch, capsys):
 
 
 def test_stdin_body_when_text_is_dash(temp_db, monkeypatch, capsys):
-    payload = _run(["-"], monkeypatch, stdin="body via stdin `psql -h replica`\n", capsys=capsys)
+    # Use a two-token command: a bare `psql` reduces to a single subcommand-tool
+    # token, which the specificity gate now refuses (would be trigger-less).
+    payload = _run(["-"], monkeypatch, stdin="body via stdin `git status`\n", capsys=capsys)
     assert payload["action"] == "inserted"
     rows = _rows(temp_db, "SELECT body FROM memories")
     assert rows[0]["body"].startswith("body via stdin")
@@ -50,8 +52,9 @@ def test_empty_body_returns_exit_2(temp_db, monkeypatch, capsys):
 
 
 def test_path_access_mode_applied_to_explicit_path(temp_db, monkeypatch, capsys):
+    # Directory-qualified glob (the specificity gate refuses extension-only ones).
     payload = _run(
-        ["--path", "**/*.py", "--access-mode", "read", "body about python files"],
+        ["--path", "**/billing/models.py", "--access-mode", "read", "body about billing"],
         monkeypatch, capsys=capsys,
     )
     assert payload["action"] == "inserted"
@@ -59,11 +62,11 @@ def test_path_access_mode_applied_to_explicit_path(temp_db, monkeypatch, capsys)
              for r in _rows(temp_db,
                             "SELECT path_pattern, access_mode FROM triggers "
                             "WHERE kind='path_glob'")}
-    assert modes["**/*.py"] == "read"
+    assert modes["**/billing/models.py"] == "read"
 
 
 def test_path_access_mode_defaults_to_write(temp_db, monkeypatch, capsys):
-    _run(["--path", "**/*.py", "body"], monkeypatch, capsys=capsys)
+    _run(["--path", "**/billing/models.py", "body"], monkeypatch, capsys=capsys)
     row = _rows(temp_db, "SELECT access_mode FROM triggers WHERE kind='path_glob'")[0]
     assert row["access_mode"] == "write"
 
@@ -78,14 +81,14 @@ def test_access_mode_applies_to_body_extracted_paths(temp_db, monkeypatch, capsy
 
 
 def test_name_synthesized_from_first_line(temp_db, monkeypatch, capsys):
-    body = "First line is the synthesized name\nSecond line has more context `git`."
+    body = "First line is the synthesized name\nSecond line has more context `git push`."
     payload = _run([body], monkeypatch, capsys=capsys)
     assert payload["memory"]["name"] == "First line is the synthesized name"
 
 
 def test_name_override_respected(temp_db, monkeypatch, capsys):
     payload = _run(
-        ["--name", "custom name", "body with `git`"],
+        ["--name", "custom name", "body with `git push`"],
         monkeypatch,
         capsys=capsys,
     )
@@ -174,7 +177,7 @@ def test_dry_run_does_not_insert(temp_db, monkeypatch, capsys):
 
 def test_scope_global_stores_null_project_slug(temp_db, monkeypatch, capsys):
     payload = _run(
-        ["--scope", "global", "body with `git`"],
+        ["--scope", "global", "body with `git push`"],
         monkeypatch,
         capsys=capsys,
     )
@@ -327,16 +330,18 @@ def test_dedup_collision_folds_when_victim_outside_similar_window(
 def test_dedup_collision_on_path_glob(temp_db, monkeypatch, capsys):
     """Trigger collision also fires for path_glob triggers, and the shared glob is
     surfaced in shared_triggers (the token_subseq path isn't the only one gated)."""
-    p1 = _run(["--path", "**/Makefile", "always use tabs, never spaces, in the Makefile"],
+    # Directory-qualified glob: a bare `**/Makefile` is refused by the WS3.3
+    # specificity gate (common basename), so use one that survives to reach dedup.
+    p1 = _run(["--path", "**/infra/Makefile", "always use tabs, never spaces, in the Makefile"],
               monkeypatch, capsys=capsys)
     assert p1["action"] == "inserted"
     mid = p1["memory"]["id"]
 
-    p2 = _run(["--path", "**/Makefile", "run make check before every commit"],
+    p2 = _run(["--path", "**/infra/Makefile", "run make check before every commit"],
               monkeypatch, capsys=capsys)
     assert p2["action"] == "review_collision"
     assert p2["collision"]["id"] == mid
-    assert "**/Makefile" in p2["collision"]["shared_triggers"]
+    assert "**/infra/Makefile" in p2["collision"]["shared_triggers"]
 
     rows = _rows(temp_db, "SELECT COUNT(*) AS c FROM memories WHERE archived_ts IS NULL")
     assert rows[0]["c"] == 1                            # withheld, nothing written
