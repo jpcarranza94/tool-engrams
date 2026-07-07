@@ -36,7 +36,9 @@ def test_positional_text_inserts_memory(temp_db, monkeypatch, capsys):
 
 
 def test_stdin_body_when_text_is_dash(temp_db, monkeypatch, capsys):
-    payload = _run(["-"], monkeypatch, stdin="body via stdin `psql -h replica`\n", capsys=capsys)
+    # Use a two-token command: a bare `psql` reduces to a single subcommand-tool
+    # token, which the specificity gate now refuses (would be trigger-less).
+    payload = _run(["-"], monkeypatch, stdin="body via stdin `git status`\n", capsys=capsys)
     assert payload["action"] == "inserted"
     rows = _rows(temp_db, "SELECT body FROM memories")
     assert rows[0]["body"].startswith("body via stdin")
@@ -79,14 +81,14 @@ def test_access_mode_applies_to_body_extracted_paths(temp_db, monkeypatch, capsy
 
 
 def test_name_synthesized_from_first_line(temp_db, monkeypatch, capsys):
-    body = "First line is the synthesized name\nSecond line has more context `git`."
+    body = "First line is the synthesized name\nSecond line has more context `git push`."
     payload = _run([body], monkeypatch, capsys=capsys)
     assert payload["memory"]["name"] == "First line is the synthesized name"
 
 
 def test_name_override_respected(temp_db, monkeypatch, capsys):
     payload = _run(
-        ["--name", "custom name", "body with `git`"],
+        ["--name", "custom name", "body with `git push`"],
         monkeypatch,
         capsys=capsys,
     )
@@ -175,7 +177,7 @@ def test_dry_run_does_not_insert(temp_db, monkeypatch, capsys):
 
 def test_scope_global_stores_null_project_slug(temp_db, monkeypatch, capsys):
     payload = _run(
-        ["--scope", "global", "body with `git`"],
+        ["--scope", "global", "body with `git push`"],
         monkeypatch,
         capsys=capsys,
     )

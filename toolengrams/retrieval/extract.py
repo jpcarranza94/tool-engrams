@@ -20,18 +20,6 @@ from typing import Any
 
 from ..models import AccessMode, ExtractedTriggerHint
 
-# Known CLI first tokens that take a subcommand. Two consumers, both in
-# formation: candidates.py prefers the more specific two-token trigger for
-# these, and triggers.py REFUSES a bare single-token trigger for one (a
-# subcommand tool without its subcommand — `git`, `gh`, `jira` — fires on
-# everything). Retrieval itself doesn't branch on this — it just
-# subsequence-matches whatever tokens were stored.
-_SUBCOMMAND_TOOLS = {
-    "git", "gh", "jira", "docker", "aws", "kubectl", "bq", "psql",
-    "npm", "yarn", "pnpm", "cargo", "pip", "brew", "make", "terraform",
-    "ansible", "systemctl", "journalctl", "ssh", "scp", "rsync", "gcloud",
-}
-
 # Match ~/... or /abs/paths inside a Bash command string.
 _PATH_RE = re.compile(r"(?<!\S)(~(?:/[^\s;|&><]*)?|/[^\s;|&><]+)")
 

@@ -84,3 +84,32 @@ def test_edit_refuses_re_extract_that_orphans(temp_db, capsys):
     assert rc == 1
     assert json.loads(capsys.readouterr().out)["error"] == "no_triggers"
     assert len(memory_store.triggers_for(temp_db, mid)) == 1  # untouched
+
+
+def test_edit_hint_re_extract_all_broad_body_refuses(temp_db, capsys):
+    """A hint whose re-extract yields only too-broad triggers must refuse, not
+    wipe the working triggers — the same guarantee as the zero-triggers case."""
+    mid = _seed(temp_db)  # hint with ["gh","pr","merge"]
+    rc = edit.main([str(mid), "--body", "Always sanity-check before `git`.",
+                    "--re-extract-triggers"])
+    assert rc == 1
+    assert json.loads(capsys.readouterr().out)["error"] == "no_triggers"
+    firsts = {t.first_token for t in memory_store.triggers_for(temp_db, mid)}
+    assert firsts == {"gh"}  # untouched
+
+
+def test_edit_block_re_extract_keeps_broad_glob(temp_db, capsys):
+    """A block may legitimately re-extract to a broad safety trigger; the
+    specificity refusal is waived for block/pinned (exempt_broad)."""
+    mid = memory_store.insert_memory(
+        temp_db, name="pem-guard", description="d", body="never read keys",
+        kind="block", scope="global", project_slug=None, pinned=False,
+        created_ts=int(time.time()),
+    )
+    memory_store.add_token_trigger(temp_db, mid, ["cat", "id_rsa"])
+    rc = edit.main([str(mid), "--body", "Never read files matching **/*.pem keys.",
+                    "--re-extract-triggers"])
+    assert rc == 0
+    globs = {t.path_pattern for t in memory_store.triggers_for(temp_db, mid)
+             if t.kind == "path_glob"}
+    assert "**/*.pem" in globs

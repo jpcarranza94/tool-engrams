@@ -19,7 +19,12 @@ import json
 import sys
 
 from .. import db, memory_store
-from ..formation import extract_candidates, insert_candidate_triggers, scan_for_secrets
+from ..formation import (
+    extract_candidates,
+    insert_candidate_triggers,
+    is_persistable_trigger,
+    scan_for_secrets,
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -51,15 +56,25 @@ def main(argv: list[str] | None = None) -> int:
             return 1
 
         new_body = args.body if args.body is not None else mem.body
-        # Validate BEFORE mutating: a re-extract that finds no triggers would
-        # orphan the memory (it could never surface again).
-        if args.re_extract_triggers and not extract_candidates(new_body):
+        # Validate BEFORE mutating: compute the triggers that would actually
+        # PERSIST (broad/malformed candidates are dropped by insert). If a
+        # re-extract would leave none, refuse up front — never delete the
+        # memory's working triggers only to replace them with nothing (the
+        # memory would be orphaned and could never surface again). block/pinned
+        # keep broad safety triggers (see is_persistable_trigger).
+        exempt = mem.kind == "block" or mem.pinned
+        new_candidates = [
+            c for c in extract_candidates(new_body)
+            if is_persistable_trigger(c, exempt_broad=exempt)
+        ]
+        if args.re_extract_triggers and not new_candidates:
             print(json.dumps({
                 "error": "no_triggers",
-                "message": ("--re-extract-triggers found no triggers in the new "
-                            "body; refusing (the memory would never surface). "
-                            "Include backticked commands or paths, or edit "
-                            "without --re-extract-triggers."),
+                "message": ("--re-extract-triggers found no usable triggers in the "
+                            "new body (none bindable, or all too broad to persist); "
+                            "refusing (the memory would never surface). Include a "
+                            "specific backticked command or a directory-qualified "
+                            "path, or edit without --re-extract-triggers."),
             }))
             return 1
         with db.transaction(conn):
@@ -70,7 +85,9 @@ def main(argv: list[str] | None = None) -> int:
             retriggered = 0
             if args.re_extract_triggers:
                 memory_store.delete_triggers_for(conn, mem.id)
-                insert_candidate_triggers(conn, mem.id, extract_candidates(new_body))
+                insert_candidate_triggers(
+                    conn, mem.id, new_candidates, exempt_broad=exempt,
+                )
                 retriggered = memory_store.count_triggers_for(conn, mem.id)
 
         updated = memory_store.get(conn, mem.id)

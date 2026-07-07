@@ -74,11 +74,15 @@ def main(argv: list[str] | None = None) -> int:
             }))
             return 1
 
+        # block/pinned memories may bind broad safety triggers (`**/*.pem`, a
+        # bare `git`); a hint must stay specific (see is_persistable_trigger).
+        exempt = mem.kind == "block" or mem.pinned
         try:
             with db.transaction(conn):
                 for tid in removes:
                     memory_store.delete_trigger(conn, tid)
-                added = insert_candidate_triggers(conn, args.memory_id, add_candidates)
+                added = insert_candidate_triggers(
+                    conn, args.memory_id, add_candidates, exempt_broad=exempt)
                 remaining = memory_store.count_triggers_for(conn, args.memory_id)
                 if remaining == 0:
                     raise _WouldOrphan()

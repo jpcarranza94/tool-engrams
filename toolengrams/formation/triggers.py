@@ -18,8 +18,7 @@ import sys
 from typing import Any, Iterable
 
 from .. import memory_store
-from ..retrieval.extract import _SUBCOMMAND_TOOLS
-from .candidates import FormationCandidate
+from .candidates import _SUBCOMMAND_TOOLS, FormationCandidate
 
 # A valid Bash first_token shape: letter/underscore start, then word chars,
 # dots, or hyphens. Excludes anything that can never be a shell command head:
@@ -107,16 +106,54 @@ def path_glob_is_specific_enough(pattern: str) -> bool:
     return True
 
 
+def is_persistable_trigger(
+    candidate: FormationCandidate, *, exempt_broad: bool = False
+) -> bool:
+    """True iff `insert_candidate_triggers` would actually persist this candidate.
+
+    The dry predicate mirror of the insert loop's drop rules, so callers can
+    tell *before* mutating whether a candidate survives (without writing). Used
+    by cli/remember.py and dedup.py to avoid two failure modes the insert loop's
+    silent drops would otherwise cause: authoring a NEW memory with zero surviving
+    triggers (a permanent orphan reported as `inserted`), and — on the merge/fold
+    path — wiping a target's good triggers to replace them with nothing.
+
+    `exempt_broad` (set for `block`/`pinned` memories) waives only the
+    *specificity* refusals — a safety block legitimately needs a broad trigger
+    (`**/*.pem`, a bare `git`). The *structural* refusals (empty, malformed
+    first_token) still apply: a trigger that can never match is dropped for any
+    kind. Mirrors the same flag on `insert_candidate_triggers`.
+    """
+    if candidate.kind == "token_subseq":
+        tokens = tuple(candidate.tokens)
+        if not tokens:
+            return False
+        if not first_token_looks_like_cli(tokens[0]):
+            return False
+        return exempt_broad or token_trigger_is_specific_enough(tokens)
+    if candidate.kind == "path_glob":
+        if not candidate.path_pattern:
+            return False
+        return exempt_broad or path_glob_is_specific_enough(candidate.path_pattern)
+    return False
+
+
 def insert_candidate_triggers(
     conn: sqlite3.Connection,
     memory_id: int,
     candidates: Iterable[FormationCandidate],
+    *,
+    exempt_broad: bool = False,
 ) -> int:
     """Write candidates as rows in the triggers table. Returns the insert count.
 
     Drops candidates whose first_token is structurally impossible (see
-    `first_token_looks_like_cli`). Emits one stderr line per drop so the
-    watcher or user can spot bad output.
+    `first_token_looks_like_cli`) and — unless `exempt_broad` — those too broad
+    to bind (single-token subcommand tools, broad globs). Emits one stderr line
+    per drop so the watcher or user can spot bad output. `exempt_broad` is set
+    for `block`/`pinned` memories, whose safety triggers may legitimately be
+    broad (`**/*.pem`); it waives only the specificity drops, never the
+    structural ones (a malformed trigger can never match regardless of kind).
     """
     n = 0
     for c in candidates:
@@ -132,7 +169,7 @@ def insert_candidate_triggers(
                     file=sys.stderr,
                 )
                 continue
-            if not token_trigger_is_specific_enough(tokens):
+            if not exempt_broad and not token_trigger_is_specific_enough(tokens):
                 print(
                     f"engram: rejected trigger for memory {memory_id} — "
                     f"single-token trigger {tokens[0]!r} is too broad; {tokens[0]!r} "
@@ -145,7 +182,7 @@ def insert_candidate_triggers(
         elif c.kind == "path_glob":
             if not c.path_pattern:
                 continue
-            if not path_glob_is_specific_enough(c.path_pattern):
+            if not exempt_broad and not path_glob_is_specific_enough(c.path_pattern):
                 print(
                     f"engram: rejected trigger for memory {memory_id} — "
                     f"path glob {c.path_pattern!r} is too broad to bind a memory; "

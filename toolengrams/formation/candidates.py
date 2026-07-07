@@ -25,9 +25,20 @@ from typing import Iterable, Literal
 
 from .. import memory_store
 from ..models import DEFAULT_PATH_ACCESS_MODE, AccessMode
-from ..retrieval.extract import _SUBCOMMAND_TOOLS, _tokenize_bash
+from ..retrieval.extract import _tokenize_bash
 
 CandidateKind = Literal["token_subseq", "path_glob"]
+
+# Known CLI first tokens that take a subcommand. Owned by formation, its only
+# consumer: candidates.py prefers the more specific two-token trigger for these,
+# and triggers.py REFUSES a bare single-token trigger for one (a subcommand tool
+# without its subcommand — `git`, `gh`, `jira` — fires on everything). Retrieval
+# doesn't branch on this; it just subsequence-matches whatever tokens were stored.
+_SUBCOMMAND_TOOLS = {
+    "git", "gh", "jira", "docker", "aws", "kubectl", "bq", "psql",
+    "npm", "yarn", "pnpm", "cargo", "pip", "brew", "make", "terraform",
+    "ansible", "systemctl", "journalctl", "ssh", "scp", "rsync", "gcloud",
+}
 
 # Backticked shell snippet. Single-line only — we don't try to parse fenced blocks.
 _BACKTICK_RE = re.compile(r"`([^`\n]+)`")

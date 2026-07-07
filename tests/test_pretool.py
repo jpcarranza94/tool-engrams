@@ -120,6 +120,34 @@ def test_pretool_block_memory_denies_and_injects_context(temp_db, monkeypatch):
     assert "force-with-lease" in hso["additionalContext"]
 
 
+def test_pretool_gated_block_is_suppressed_and_audited(temp_db, tmp_path, monkeypatch):
+    """A heavily-observed net-negative block (judged=12, q=1/14 < 0.35 floor) is
+    gate-suppressed: it does NOT deny, and its suppression is audit-logged to
+    watcher.log so a withheld safety DENY is never silent (WS3.2 + S2)."""
+    monkeypatch.setenv("ENGRAM_HOME", str(tmp_path))
+    mid = _seed_token_memory(
+        temp_db, "flaky force-push block", "Use --force-with-lease instead.",
+        ["git", "push", "--force"], kind="block",
+    )
+    temp_db.execute(
+        "UPDATE memories SET noise_count = 12, useful_count = 0 WHERE id = ?", (mid,))
+
+    payload = {
+        "session_id": "sess-gate",
+        "cwd": "/tmp/test-projects/myapp",
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": {"command": "git push --force origin main"},
+        "tool_use_id": "tu-gate",
+    }
+    result = _run_pretool(payload, monkeypatch)
+
+    # Suppressed: it was the only match, so the hook emits nothing — no deny.
+    assert result == {}
+    log = (tmp_path / "watcher.log").read_text()
+    assert "SUPPRESSED" in log and f"memory_id={mid}" in log
+
+
 def test_pretool_default_seed_never_denies_git_commit(temp_db, monkeypatch):
     """The default seed set is hint-only — a plain git commit must not be
     denied by freshly seeded demo memories (first-run safety)."""

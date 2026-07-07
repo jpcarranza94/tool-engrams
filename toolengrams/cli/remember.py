@@ -30,6 +30,7 @@ from ..formation import (
     find_overlapping_memory,
     find_similar,
     insert_candidate_triggers,
+    is_persistable_trigger,
     scan_for_secrets,
     update_existing_memory,
 )
@@ -68,10 +69,14 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({
             "error": "no_triggers",
             "message": (
-                "No tool-call triggers could be extracted from the body. "
-                "Include backticked commands (e.g. `git push`, `docker compose up`) "
-                "or file paths so the memory has something to bind to. "
-                "A memory without triggers will never surface."
+                "No usable tool-call triggers could be extracted from the body. "
+                "Either nothing bindable was found, or every candidate was too "
+                "broad to persist: a bare subcommand-tool name (`git`, `gh`, "
+                "`jira` — needs 2+ words like `git push`) or a broad path glob "
+                "(`**/*.py`, `**/settings.json` — qualify with a directory, e.g. "
+                "`**/billing/models.py`). Include a specific backticked command "
+                "or a directory-qualified path so the memory has something to "
+                "bind to. A memory without triggers will never surface."
             ),
             "body_preview": body[:200],
         }))
@@ -260,15 +265,29 @@ def _resolve_triggers(
         if c.kind == "path_glob":
             c.access_mode = args.access_mode
 
-    all_triggers = candidates + [
-        FormationCandidate(
-            kind=t["kind"],
-            tokens=tuple(t.get("tokens") or ()),
-            path_pattern=t.get("path_pattern"),
-            source="extra",
+    # Drop candidates too broad to persist BEFORE anyone gates on them:
+    # insert_candidate_triggers silently drops them, so an unfiltered list would
+    # (a) let a memory whose ONLY trigger is broad be authored trigger-less (a
+    # permanent orphan reported as `inserted`), and (b) make update_existing_memory
+    # wipe a target's good triggers to replace them with nothing. Filtering here
+    # makes the `no_triggers` gate and the merge `if candidates` check honest.
+    # block/pinned memories keep broad safety triggers (see is_persistable_trigger).
+    exempt = args.kind == "block" or args.pinned
+    candidates = [c for c in candidates
+                  if is_persistable_trigger(c, exempt_broad=exempt)]
+    extra_candidates = [
+        c for c in (
+            FormationCandidate(
+                kind=t["kind"],
+                tokens=tuple(t.get("tokens") or ()),
+                path_pattern=t.get("path_pattern"),
+                source="extra",
+            )
+            for t in extra_triggers
         )
-        for t in extra_triggers
+        if is_persistable_trigger(c, exempt_broad=exempt)
     ]
+    all_triggers = candidates + extra_candidates
     return candidates, all_triggers
 
 
@@ -313,7 +332,9 @@ def _build_parser() -> argparse.ArgumentParser:
                               "--trigger 'git push -f'"))
     parser.add_argument("--path", action="append", default=None,
                         metavar="GLOB",
-                        help="Path glob to bind to (repeatable). e.g. --path '**/*.py'")
+                        help=("Path glob to bind to (repeatable). Qualify with a "
+                              "directory — broad globs like '**/*.py' are refused. "
+                              "e.g. --path '**/billing/models.py'"))
     parser.add_argument("--access-mode", choices=("write", "read", "any"),
                         default=DEFAULT_PATH_ACCESS_MODE,
                         help=("Access intent for path triggers (default write): "
@@ -322,7 +343,7 @@ def _build_parser() -> argparse.ArgumentParser:
                               "to --path globs and paths extracted from the body."))
     parser.add_argument("--extra-trigger", action="append", default=None,
                         metavar="SPEC",
-                        help="token_subseq:git,push | path_glob:**/*.py")
+                        help="token_subseq:git,push | path_glob:**/billing/models.py")
     parser.add_argument("--dry-run", action="store_true",
                         help="Extract and report candidates; do not insert.")
     parser.add_argument("--into", type=int, default=None, metavar="ID",
@@ -441,14 +462,17 @@ def _insert(
     origin_session_id: str | None = None,
 ) -> int:
     now_ts = int(time.time())
+    exempt = kind == "block" or pinned
     with db.transaction(conn):
         memory_id = memory_store.insert_memory(
             conn, name=name, description=description, body=body, kind=kind,
             scope=scope, project_slug=project_slug, pinned=pinned, created_ts=now_ts,
             origin_session_id=origin_session_id,
         )
-        insert_candidate_triggers(conn, memory_id, candidates)
-        insert_candidate_triggers(conn, memory_id, extras_to_candidates(extra_triggers))
+        insert_candidate_triggers(conn, memory_id, candidates, exempt_broad=exempt)
+        insert_candidate_triggers(
+            conn, memory_id, extras_to_candidates(extra_triggers), exempt_broad=exempt,
+        )
     return memory_id
 
 

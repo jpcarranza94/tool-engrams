@@ -9,9 +9,25 @@ from toolengrams.formation.candidates import FormationCandidate
 from toolengrams.formation.triggers import (
     first_token_looks_like_cli,
     insert_candidate_triggers,
+    is_persistable_trigger,
     path_glob_is_specific_enough,
     token_trigger_is_specific_enough,
 )
+
+
+def test_exempt_broad_waives_specificity_not_structural():
+    # exempt_broad (block/pinned) keeps broad-but-valid triggers...
+    broad_token = FormationCandidate(kind="token_subseq", tokens=("git",))
+    broad_glob = FormationCandidate(kind="path_glob", path_pattern="**/*.pem")
+    assert not is_persistable_trigger(broad_token)
+    assert not is_persistable_trigger(broad_glob)
+    assert is_persistable_trigger(broad_token, exempt_broad=True)
+    assert is_persistable_trigger(broad_glob, exempt_broad=True)
+    # ...but never a structurally-malformed one (can't match for any kind).
+    malformed = FormationCandidate(kind="token_subseq", tokens=("/abs/path",))
+    empty = FormationCandidate(kind="token_subseq", tokens=())
+    assert not is_persistable_trigger(malformed, exempt_broad=True)
+    assert not is_persistable_trigger(empty, exempt_broad=True)
 
 
 def _seed_memory(conn) -> int:
