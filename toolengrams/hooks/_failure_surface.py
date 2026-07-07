@@ -14,7 +14,7 @@ from ..retrieval.session_state import (
     get_session_turn,
     log_surfaces,
 )
-from ..utils import is_watcher_child, slugify_cwd
+from ..utils import is_watcher_child, project_slug_for_cwd
 from ..watcher import tick
 from ._skip import max_memories_per_call, surface_notice
 
@@ -47,7 +47,9 @@ def surface_failure_hints(
     session_id = payload.get("session_id") or ""
     tool_use_id = payload.get("tool_use_id")
     cwd = payload.get("cwd") or ""
-    project_slug = slugify_cwd(cwd) if cwd else None
+    # Hot path: string-only worktree collapse (use_git=False), mirroring
+    # pretool.py so a harness-worktree memory surfaces on failure too.
+    project_slug = project_slug_for_cwd(cwd) if cwd else None
 
     hint = target.extract_hints(tool_name, tool_input)
     if not hint.tokens and not hint.paths:

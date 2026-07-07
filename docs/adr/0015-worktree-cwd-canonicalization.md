@@ -45,9 +45,11 @@ Call sites use `project_slug_for_cwd(cwd, use_git=…)`:
 
 - **Formation** (`_resolve_project_slug`) runs in the background watcher →
   `use_git=True` (affords the git lookup; collapses both worktree kinds).
-- **Matching** (`pretool.py`, PreToolUse hot path) → `use_git=False` (a substring
-  check, no subprocess), so a harness worktree still resolves to the same slug
-  formation used without breaking the single-digit-ms latency budget.
+- **Matching** (`pretool.py` PreToolUse, and `_failure_surface.py` — the shared
+  failure-moment match seam behind `post_tool_failure.py` / Codex `post_tool.py`)
+  → `use_git=False` (a substring check, no subprocess), so a harness worktree
+  still resolves to the same slug formation used without breaking the
+  single-digit-ms latency budget.
 
 ## Alternatives considered
 

@@ -111,12 +111,10 @@ def canonical_project_cwd(cwd: str, *, use_git: bool = False) -> str:
         out = subprocess.run(
             ["git", "-C", cwd, "rev-parse", "--path-format=absolute",
              "--git-dir", "--git-common-dir"],
-            capture_output=True, text=True, timeout=3,
+            capture_output=True, text=True, timeout=3, check=True,
         )
     except (OSError, subprocess.SubprocessError):
-        return cwd
-    if out.returncode != 0:
-        return cwd
+        return cwd  # not a repo / git missing / non-zero exit → leave cwd as-is
     lines = out.stdout.splitlines()
     if len(lines) < 2:
         return cwd
@@ -124,9 +122,7 @@ def canonical_project_cwd(cwd: str, *, use_git: bool = False) -> str:
     # In the main worktree (or a subdir of it) --git-dir == --git-common-dir. They
     # diverge ONLY inside a linked worktree, where --git-common-dir points at the
     # main repo's `.git` — its parent is the main worktree root.
-    if not common_dir or git_dir == common_dir:
-        return cwd
-    if common_dir.endswith("/.git"):
+    if common_dir and git_dir != common_dir and common_dir.endswith("/.git"):
         return os.path.dirname(common_dir)
     return cwd
 
