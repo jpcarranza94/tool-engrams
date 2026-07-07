@@ -50,7 +50,7 @@ from ..retrieval.session_state import (
     log_surfaces,
 )
 from ..target import get_target
-from ..utils import is_watcher_child, slugify_cwd
+from ..utils import is_watcher_child, project_slug_for_cwd
 from ._skip import max_memories_per_call, surface_notice
 
 
@@ -90,7 +90,10 @@ def _run(payload: dict[str, Any], target) -> int:
     session_id = payload.get("session_id") or ""
     tool_use_id = payload.get("tool_use_id")
     cwd = payload.get("cwd") or ""
-    project_slug = slugify_cwd(cwd) if cwd else None
+    # Hot path: string-only worktree collapse (use_git=False) keeps this to a
+    # substring check — no subprocess — so a harness worktree still resolves to
+    # the same project slug formation used, without breaking the latency budget.
+    project_slug = project_slug_for_cwd(cwd) if cwd else None
 
     hint = target.extract_hints(tool_name, tool_input)
     if not hint.tokens and not hint.paths:
