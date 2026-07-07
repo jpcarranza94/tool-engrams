@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -71,6 +72,76 @@ def prepend_engram_bin(env: dict[str, str]) -> dict[str, str]:
 def slugify_cwd(cwd: str) -> str:
     """Match Claude Code's project-slug convention: `/` → `-`."""
     return cwd.replace("/", "-")
+
+
+# A Claude Code harness worktree lives at `<repo>/.claude/worktrees/agent-<id>`
+# (Agent isolation:'worktree'). Everything from this marker on is ephemeral, so a
+# project memory bound to it dies when the worktree is removed. Pure-string, so
+# it is safe to collapse on the PreToolUse hot path.
+_HARNESS_WORKTREE_MARKER = "/.claude/worktrees/"
+
+# A linked worktree's `--git-common-dir` is the main repo's `.git`; its parent is
+# the main worktree root. A layout whose common-dir isn't literally `.../.git`
+# (bare repo, `$GIT_DIR` override) is left uncollapsed (fail-safe).
+_DOTGIT_SUFFIX = "/.git"
+
+
+def canonical_project_cwd(cwd: str, *, use_git: bool) -> str:
+    """Collapse a git *worktree* cwd to its stable main-repo root.
+
+    Project-scoped memories bind to ``slugify_cwd(cwd)`` under an EXACT-match cwd
+    filter (see rank.py). A worktree cwd is ephemeral: the memory never fires from
+    the canonical repo and vanishes when the worktree is removed. Collapsing a
+    worktree cwd to its main worktree root fixes both.
+
+    A NORMAL checkout — or any subdirectory of one — is returned UNCHANGED, so the
+    existing exact-cwd project scoping is preserved; only worktree paths move.
+
+    - Always (pure string, hot-path safe): a Claude Code harness worktree segment
+      ``<repo>/.claude/worktrees/agent-<id>[/...]`` collapses to ``<repo>``.
+    - ``use_git=True`` (formation only — NEVER the PreToolUse hot path): a
+      user-created *linked* worktree (a sibling directory) collapses to its main
+      worktree root, detected via ``git rev-parse``. The main worktree and its
+      subdirs are left untouched.
+
+    Fail-open: returns ``cwd`` unchanged on anything unexpected (not a repo, git
+    missing/erroring, worktree already deleted).
+    """
+    # `> 0`, not `!= -1`: a marker at index 0 would mean the repo root is `/`,
+    # and `cwd[:0]` is an empty slug — leave that pathological path untouched.
+    marker = cwd.find(_HARNESS_WORKTREE_MARKER)
+    if marker > 0:
+        return cwd[:marker]
+    if not use_git:
+        return cwd
+    try:
+        out = subprocess.run(
+            ["git", "-C", cwd, "rev-parse", "--path-format=absolute",
+             "--git-dir", "--git-common-dir"],
+            capture_output=True, text=True, timeout=3, check=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return cwd  # not a repo / git missing / non-zero exit → leave cwd as-is
+    lines = out.stdout.splitlines()
+    if len(lines) < 2:
+        return cwd
+    git_dir, common_dir = lines[0].strip(), lines[1].strip()
+    # In the main worktree (or a subdir of it) --git-dir == --git-common-dir. They
+    # diverge ONLY inside a linked worktree, where --git-common-dir points at the
+    # main repo's `.git` — its parent is the main worktree root.
+    if common_dir and git_dir != common_dir and common_dir.endswith(_DOTGIT_SUFFIX):
+        return os.path.dirname(common_dir)
+    return cwd
+
+
+def project_slug_for_cwd(cwd: str, *, use_git: bool) -> str:
+    """``slugify_cwd`` of the canonical repo root of ``cwd`` (worktree-aware).
+
+    ``use_git`` is required (no default) so every caller states intent: pass
+    ``True`` off the hot path (formation — the write seam, where under-scoping
+    permanently orphans a memory), ``False`` on it (matching).
+    """
+    return slugify_cwd(canonical_project_cwd(cwd, use_git=use_git))
 
 
 def safe_filename_id(name: str) -> str:

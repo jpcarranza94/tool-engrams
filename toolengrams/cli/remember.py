@@ -36,7 +36,7 @@ from ..formation import (
     update_existing_memory,
 )
 from .. import envvars
-from ..utils import env_float, slugify_cwd
+from ..utils import env_float, project_slug_for_cwd
 from ..watcher import runs_store
 
 VALID_KINDS = {"block", "hint"}
@@ -374,7 +374,9 @@ def _resolve_project_slug(
     if slug_override:
         return slug_override
     cwd = cwd_override or os.getcwd()
-    return slugify_cwd(cwd)
+    # Formation runs in the background watcher (not the hot path), so it can afford
+    # the git lookup that collapses a user-created linked worktree to its main repo.
+    return project_slug_for_cwd(cwd, use_git=True)
 
 
 # ---------- triggers ----------

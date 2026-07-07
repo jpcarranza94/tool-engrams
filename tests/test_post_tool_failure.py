@@ -8,6 +8,7 @@ import sys
 import time
 
 from toolengrams.hooks import post_tool_failure
+from toolengrams.utils import slugify_cwd
 
 
 def _run(payload: dict, monkeypatch) -> dict:
@@ -80,6 +81,36 @@ def test_hint_memory_surfaces_on_tool_failure(temp_db, monkeypatch):
     # PostToolUseFailure cannot block — no permissionDecision field.
     assert "permissionDecision" not in hso
     assert "column `label`" in hso["additionalContext"]
+
+
+def test_project_hint_surfaces_on_failure_from_harness_worktree(temp_db, monkeypatch):
+    """The failure-moment match seam (_failure_surface) must also canonicalize a
+    harness-worktree cwd to the repo slug, so a project-scoped hint surfaces on a
+    failed call made from inside the worktree."""
+    repo = "/Users/dev/projects/myrepo"
+    now_ts = int(time.time())
+    cur = temp_db.execute(
+        "INSERT INTO memories (name, description, body, kind, scope, project_slug, created_ts) "
+        "VALUES ('repo-ergdb-col','','Use column `label`, not `name`.','hint','project',?,?)",
+        (slugify_cwd(repo), now_ts),
+    )
+    temp_db.execute(
+        "INSERT INTO triggers (memory_id, kind, first_token, tokens_json) "
+        "VALUES (?, 'token_subseq', 'ergdb', ?)",
+        (cur.lastrowid, json.dumps(["ergdb", "-c"])),
+    )
+    payload = {
+        "session_id": "sess-ptf-wt",
+        "cwd": f"{repo}/.claude/worktrees/agent-xyz",
+        "hook_event_name": "PostToolUseFailure",
+        "tool_name": "Bash",
+        "tool_input": {"command": "ergdb -c 'SELECT name FROM core_statustype'"},
+        "tool_use_id": "tu-ptf-wt",
+        "error": "Exit code 1",
+        "is_interrupt": False,
+    }
+    result = _run(payload, monkeypatch)
+    assert "column `label`" in result["hookSpecificOutput"]["additionalContext"]
 
 
 def test_block_memory_does_not_surface_on_failure(temp_db, monkeypatch):
