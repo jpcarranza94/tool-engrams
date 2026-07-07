@@ -36,6 +36,13 @@ def jaccard(a: set[str], b: set[str]) -> float:
     return len(a & b) / len(a | b)
 
 
+def score_pair(name_a: str, body_a: str, name_b: str, body_b: str) -> float:
+    """Token-Jaccard similarity between two (name, body) memories — the same
+    metric find_similar ranks by, for callers that already hold both texts and
+    don't need an FTS search to find the other side."""
+    return jaccard(_tokens(f"{name_a} {body_a}"), _tokens(f"{name_b} {body_b}"))
+
+
 def find_similar(
     conn: sqlite3.Connection,
     name: str,

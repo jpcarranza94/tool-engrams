@@ -40,15 +40,23 @@ def find_overlapping_memory(
 ) -> dict | None:
     """Find an existing non-archived memory that overlaps with the new one.
 
-    Returns {id, name, overlap_count, match_reason} or None.
+    Returns a dict describing the colliding memory or None. The return carries
+    enough to surface the collision for review WITHOUT a second lookup:
+    ``{id, name, kind, body, overlap_count, match_reason, shared_triggers}``.
+    ``shared_triggers`` is the list of exact trigger phrases (token subsequences
+    joined by spaces, or path globs) the two memories share — the caller shows
+    them so the agent can pick a NARROWER trigger for a keep-both split.
     """
     norm_name = normalize_name(name)
 
-    new_tokens: set[str] = set()   # serialized tokens_json strings
+    # Map each new token trigger's serialized tokens_json (the overlap key) to
+    # its display phrase, so a match can surface the phrase the user would type
+    # without re-parsing the JSON back out.
+    new_tokens: dict[str, str] = {}   # tokens_json -> space-joined phrase
     new_globs: set[str] = set()
     for c in candidates:
         if c.kind == "token_subseq" and c.tokens:
-            new_tokens.add(json.dumps(list(c.tokens)))
+            new_tokens[json.dumps(list(c.tokens))] = " ".join(c.tokens)
         elif c.kind == "path_glob" and c.path_pattern:
             new_globs.add(c.path_pattern)
 
@@ -61,17 +69,20 @@ def find_overlapping_memory(
     for row in rows:
         mid = row["id"]
         if mid not in scores:
-            scores[mid] = {"id": mid, "name": row["name"], "overlap": 0, "reason": []}
+            scores[mid] = {"id": mid, "name": row["name"], "overlap": 0,
+                           "reason": [], "shared": []}
 
         if row["kind"] == "token_subseq":
             key = row["tokens_json"] or ""
             if key and key in new_tokens:
                 scores[mid]["overlap"] += 1
                 scores[mid]["reason"].append(f"token_subseq:{key}")
+                scores[mid]["shared"].append(new_tokens[key])
         elif row["kind"] == "path_glob":
             if row["path_pattern"] in new_globs:
                 scores[mid]["overlap"] += 1
                 scores[mid]["reason"].append(f"path_glob:{row['path_pattern']}")
+                scores[mid]["shared"].append(row["path_pattern"])
 
     best = None
     for s in scores.values():
@@ -84,11 +95,15 @@ def find_overlapping_memory(
                 best = s
 
     if best:
+        victim = memory_store.get(conn, best["id"])
         return {
             "id": best["id"],
             "name": best["name"],
+            "kind": victim.kind if victim else None,
+            "body": victim.body if victim else "",
             "overlap_count": best["overlap"],
             "match_reason": ", ".join(best["reason"]),
+            "shared_triggers": best["shared"],
         }
     return None
 

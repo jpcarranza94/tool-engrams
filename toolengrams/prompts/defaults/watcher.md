@@ -33,12 +33,27 @@ engram remember "<body>" --kind <block|hint> --scope <global|project> \
 - Provide at least one `--trigger` OR one `--path`. `--trigger` is repeatable
   (alternatives); `--path` is repeatable.
 - Run one `engram remember` per memory. Most batches save ZERO memories.
-- If the CLI replies `action: "updated"` with an `existing_match` carrying
-  `previous_body`, your body just REPLACED that one. Read `previous_body`: if
-  it held still-valid guidance missing from yours, immediately re-run
-  `engram remember` once more with a single body that merges both — and pass the
-  SAME `--name` you used (a re-save without `--name` keeps the existing name, not
-  your body text). If your body already covers it, do nothing.
+- If the CLI replies `action: "review_collision"`, NOTHING was overwritten — a
+  NEW memory would share an exact trigger with an existing in-scope one. Read the
+  `collision` (it has the victim's `id`, `name`, `kind`, `body_preview`,
+  `shared_triggers`) and the `guidance.recommended` field. Then choose ONE:
+    - **Two DIFFERENT facts that happen to share a trigger** (the default, and
+      what `guidance.recommended: "keep_both"` means) → keep BOTH: re-run the
+      SAME command with `--force` AND a NARROWER trigger so they don't both fire
+      on every matching command. Match the flag to the collision: for a token
+      collision narrow the `--trigger` to a longer phrase (e.g. `git push
+      --force` instead of just `git push`); for a path collision narrow the
+      `--path` to a directory-qualified glob (e.g. `**/billing/models.py`, never
+      a bare `**/models.py`). Two distinct lessons must stay TWO memories, never
+      fold into one muddled body.
+    - **Truly the SAME fact** (only when `guidance.recommended: "fold"`) → fold
+      counter-preservingly: re-run
+      `engram remember --into <id> "<one body merging both>"` (with the same
+      `--name`/`--trigger`/`--kind`/`--scope`/`--project-cwd`). Keeps that
+      memory's id, counters, and surface history. ALWAYS pass `--name`.
+    - **Not worth saving after seeing the collision** → do nothing.
+  You cannot delete the old memory (formation is remember-only); "drop the old
+  fact" is expressible only as `--into <id>` to repurpose that memory in place.
 - If the CLI replies `action: "review_similar"`, NOTHING was saved yet — a
   near-duplicate may already cover this. Read the `candidates` (each has an
   `id`, `name`, `body_preview`, `similarity`). Then choose ONE:
@@ -69,11 +84,14 @@ engram remember "<body>" --kind <block|hint> --scope <global|project> \
 
 | kind | Surfaces at | Effect | Use when |
 |------|------------|--------|----------|
-| **block** | PreToolUse (before every matching call) | Denies the call; the agent sees the body and retries with fixed args. | the agent would make the SAME mistake with high confidence. Clear corrections: wrong column, wrong flag, wrong path, wrong state name. |
-| **hint** | PostToolUseFailure (after a matching call fails) | Injects context, non-blocking. | The agent MIGHT make the mistake. Workarounds, non-obvious flags, conditional "if this fails, try X". |
+| **block** | PreToolUse — before EVERY matching call | Denies the call; the agent sees the body and retries with fixed args. Always fires (gate-exempt). | the agent would make the SAME mistake with high confidence. Clear corrections: wrong column, wrong flag, wrong path, wrong state name. |
+| **hint** | PreToolUse — before EVERY matching call (and re-surfaced when a matching call fails) | Injects the body as context, non-blocking. Suppressed once its quality score falls below the gate. | The agent MIGHT make the mistake. Workarounds, non-obvious flags, "if this fails, try X". |
 
-**Default to block for clear corrections.** Use hint when the failure mode is
-conditional or the fix depends on context.
+**Both kinds fire on EVERY call whose command matches the trigger — a hint is NOT
+conditional on failure.** A broad or common-command trigger therefore sprays the
+body on every matching call = noise; a hint costs nearly what a block costs, minus
+the deny. Save a hint only if its body is worth showing on *every* matching call.
+**Default to block for clear corrections**; hint for conditional workarounds.
 
 ## Triggers (command-bound)
 

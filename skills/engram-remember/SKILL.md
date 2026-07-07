@@ -65,7 +65,12 @@ If neither `--trigger` nor `--path` is provided, triggers are auto-extracted fro
 
 ## Dedup
 
-If an existing memory already has overlapping triggers, the body is updated instead of creating a duplicate. The output then carries `existing_match.previous_body` — the body you just replaced. Read it: if it held still-valid guidance missing from yours, re-run `engram remember` once with a single merged body.
+If a new memory would share an exact trigger with an existing in-scope memory, the save is **withheld** (nothing is written) and the CLI returns `action: "review_collision"` — never a silent overwrite. The payload carries the colliding memory's `id`/`name`/`kind`/`body_preview`, the `shared_triggers`, and a `guidance` object recommending `keep_both` or `fold`. Resolve it one of two ways:
+
+- **Two different facts that just happen to share a trigger** (the default) → keep both: re-run the same command with `--force` AND a narrower `--trigger` so the two memories don't both fire on every matching command.
+- **Truly the same fact** → fold counter-preservingly: `engram remember --into <id> "<one merged body>"` (keeps that memory's id, counters, and surface history).
+
+A separate `action: "review_similar"` gate catches same-idea/different-trigger near-duplicates; `--force` bypasses both gates.
 
 ## Correcting an existing memory
 
