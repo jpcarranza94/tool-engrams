@@ -188,10 +188,17 @@ def _consolidate_date(conn, target: date, *, force: bool) -> dict:
         sessions_scanned=len(sessions),
         episodes_evaluated=metrics.get("surfaces_evaluated", 0),
         memories_weakened=metrics.get("memories_pruned", 0),
-        # NOTE: archived + discovered both map to memories_created (preserved
-        # from the original recorder — the agent reports one "created" count).
-        memories_archived=metrics.get("memories_created", 0),
+        # `memories_archived` is a DISTINCT count from the agent envelope (WS4.1):
+        # the real number of memories the agent archived this run. It used to be
+        # mislabeled `memories_created`, so "archived" secretly tracked discovery
+        # and real prunes hid in `memories_weakened`. `memories_discovered` stays
+        # = memories_created (new memories the agent formed).
+        memories_archived=metrics.get("memories_archived", 0),
         memories_discovered=metrics.get("memories_created", 0),
+        # `memories_strengthened` = counter-preserving repairs this run (WS4.3):
+        # `engram trigger` narrows + `engram edit` body repairs + `engram verify`.
+        # Was hardcoded 0 (no path bumped it); now read from the envelope.
+        memories_strengthened=metrics.get("memories_strengthened", 0),
         report=result.report,
         quality_score=metrics.get("quality_score"),
         surfaces_helpful=metrics.get("surfaces_helpful", 0),

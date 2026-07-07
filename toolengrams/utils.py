@@ -13,10 +13,22 @@ from pathlib import Path
 # hooks (the May-2026 recursive-spawn burst), this still stops the recursion.
 WATCHER_CHILD_ENV = "ENGRAM_IN_WATCHER"
 
+# Env var set on the nightly consolidation agent's engine child (agent.py). The
+# agent is the one automated context trusted with the full `engram` verb set, so
+# unlike the watcher it is NOT verb-restricted — this marker lets a maintainer-
+# only verb (`recommend --close`) refuse to run under the agent even though the
+# sandbox would allow it.
+CONSOLIDATION_CHILD_ENV = "ENGRAM_IN_CONSOLIDATION"
+
 
 def is_watcher_child() -> bool:
     """True if this process was spawned by (or inside) the watcher subprocess."""
     return os.environ.get(WATCHER_CHILD_ENV) == "1"
+
+
+def is_consolidation_child() -> bool:
+    """True if this process is running inside the nightly consolidation agent."""
+    return os.environ.get(CONSOLIDATION_CHILD_ENV) == "1"
 
 
 def env_int(name: str, default: int) -> int:

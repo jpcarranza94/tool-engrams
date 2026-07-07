@@ -12,8 +12,9 @@ from types import SimpleNamespace
 
 from toolengrams import memory_store
 from toolengrams.cli import consolidate
-from toolengrams.consolidation import agent
+from toolengrams.consolidation import agent, runs
 from toolengrams.engine import EngineResult
+from toolengrams.retrieval import session_state
 from toolengrams.target.claude_code.collect import collect_sessions
 from toolengrams.target.interface import SessionFile
 
@@ -385,3 +386,108 @@ def test_cold_memories_uses_strict_cutoff(temp_db):
     # created exactly at the cutoff is excluded (strict <); one second later, in
     assert agent._cold_memories([m], m.created_ts) == []
     assert [x.id for x in agent._cold_memories([m], m.created_ts + 1)] == [mid]
+
+
+# ---------- enriched memory summary (WS4.4 / WS5.1) ----------
+
+
+def _summary(temp_db):
+    return agent._get_memory_summary(Path(os.environ["ENGRAM_DB"]))
+
+
+def _set_counters(conn, mid, *, useful, noise):
+    conn.execute("UPDATE memories SET useful_count=?, noise_count=?, surface_count=? "
+                 "WHERE id=?", (useful, noise, useful + noise, mid))
+    conn.commit()
+
+
+def test_append_bounded_truncates_past_budget():
+    # The per-section budget guard (MAX_SUMMARY_SECTION_CHARS) keeps one enriched
+    # section from crowding the transcripts out of the agent's context.
+    lines: list = []
+    items = ["x" * 100 for _ in range(10)]
+    agent._append_bounded(lines, items, lambda s: s, budget=250)
+    assert lines[0] == items[0]                       # always shows >=1 item
+    rendered = [ln for ln in lines if ln == items[0]]
+    assert len(rendered) < len(items)                 # stopped before the end
+    assert lines[-1] == "  ... (8 more omitted for budget)"
+
+
+def test_append_bounded_shows_all_within_budget():
+    lines: list = []
+    agent._append_bounded(lines, ["a", "b", "c"], lambda s: s, budget=1000)
+    assert lines == ["a", "b", "c"]                    # no omitted marker
+
+
+def test_summary_flags_narrow_or_archive_candidate(temp_db):
+    good = _insert_mem(temp_db, "solid", created_ago_days=1, surface_count=5)
+    _set_counters(temp_db, good, useful=5, noise=0)
+    bad = _insert_mem(temp_db, "over-matcher", created_ago_days=1)
+    _set_counters(temp_db, bad, useful=1, noise=6)   # q<0.5, noise-dominant
+    memory_store.add_token_trigger(temp_db, bad, ["docker", "build"])
+    temp_db.commit()
+
+    summary = _summary(temp_db)
+    section = summary.split("Narrow-or-archive candidates", 1)
+    assert len(section) == 2, "flagged section missing"
+    assert f'[{bad}] "over-matcher"' in section[1]
+    assert f'[{good}]' not in section[1]         # healthy memory not flagged
+    assert "[docker build]" in section[1]         # trigger rendered for triage
+
+
+def test_summary_dup_clusters_group_shared_trigger(temp_db):
+    a = _insert_mem(temp_db, "mem-a", created_ago_days=1, surface_count=1)
+    b = _insert_mem(temp_db, "mem-b", created_ago_days=1, surface_count=1)
+    c = _insert_mem(temp_db, "mem-c", created_ago_days=1, surface_count=1)
+    memory_store.add_token_trigger(temp_db, a, ["git", "push"])
+    memory_store.add_token_trigger(temp_db, b, ["git", "push"])   # dup of a
+    memory_store.add_token_trigger(temp_db, c, ["npm", "test"])   # alone
+    temp_db.commit()
+
+    summary = _summary(temp_db)
+    section = summary.split("Duplicate trigger clusters", 1)
+    assert len(section) == 2, "dup-cluster section missing"
+    assert "tokens {git, push}" in section[1]
+    assert f'[{a}] "mem-a"' in section[1] and f'[{b}] "mem-b"' in section[1]
+    assert "npm" not in section[1]                # unshared trigger not a cluster
+
+
+def test_summary_inventory_shows_unused_split(temp_db):
+    mid = _insert_mem(temp_db, "situational", created_ago_days=1, surface_count=2)
+    session_state.log_surfaces(temp_db, "sess-1", [mid], None, "PreToolUse", 1,
+                               int(time.time()))
+    temp_db.execute("UPDATE session_surfaces SET outcome='unused' WHERE memory_id=?", (mid,))
+    temp_db.commit()
+
+    summary = _summary(temp_db)
+    assert "unused=1" in summary
+
+
+def test_summary_cold_includes_body_and_triggers(temp_db):
+    mid = _insert_mem(temp_db, "cold-detailed", created_ago_days=40)
+    memory_store.add_path_trigger(temp_db, mid, "infra/**/Dockerfile")
+    temp_db.commit()
+
+    summary = _summary(temp_db)
+    cold = summary.split("Cold — never surfaced", 1)[1]
+    assert "path:infra/**/Dockerfile" in cold      # trigger list inline
+    assert "body of cold-detailed" in cold          # body snippet inline
+
+
+def test_summary_injects_open_recommendation_backlog(temp_db):
+    runs.record_run(
+        temp_db, run_date="2026-07-01", started_ts=1, completed_ts=2,
+        sessions_scanned=1, episodes_evaluated=0, memories_weakened=0,
+        memories_archived=0, memories_discovered=0, report="r", quality_score=0.5,
+        surfaces_helpful=0, surfaces_noise=0, memories_verified=0)
+    runs.insert_recommendations(
+        temp_db, "2026-07-01",
+        [{"title": "path-glob read noise", "severity": "warn", "status": "open",
+          "detail": "keeps recurring", "issue_url": None}],
+        now_ts=1000)
+
+    summary = _summary(temp_db)
+    section = summary.split("Standing recommendation backlog", 1)
+    assert len(section) == 2, "backlog section missing"
+    assert '"path-glob read noise"' in section[1]
+    assert "keeps recurring" in section[1]

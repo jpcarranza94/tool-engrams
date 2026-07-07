@@ -29,8 +29,15 @@ Use Grep to find "PreToolUse", "PostToolUseFailure", and "[memory:" in the JSONL
 
 ### 2. Prune bad memories
 
+The **Current Memory State** above pre-computes three triage sections so you don't have to derive them by hand — use them as your starting worklist:
+- **Narrow-or-archive candidates** — memories with `q<0.5` AND noise-dominant (more `noise` than `helpful` verdicts). The kind matters here (two-gate model): for a **hint**, the surfacing gate already suppresses it at `q<0.5` after warm-up, so it's dead weight until fixed. A **block** is NOT suppressed at the same `q` — its gate only kicks in at roughly `q<0.35` AND ~12+ verdicts, so a noise-dominant block in the `0.35 ≤ q < 0.5` band keeps FIRING and actively DENYING calls. That makes a bad block HIGHER priority to narrow/repair/demote than a hint at the same `q`. Each row shows its triggers; prefer **trigger-narrowing** over archiving unless the body itself is useless.
+- **Duplicate trigger clusters** — active memories sharing an identical trigger token-set or path pattern. Fold ONLY when the bodies are the SAME fact (keep the broader-reach survivor). When they are DISTINCT facts that merely share a broad trigger, do NOT fold — **narrow/scope the shared trigger** so each fires precisely. Folding distinct facts loses knowledge.
+- **Cold** — never-surfaced memories past the cold horizon, each with its body snippet + trigger list inline so you can diagnose (trigger can't match the real command vs. pattern simply doesn't recur) without an extra `engram recall`.
+
+Each per-memory inventory row also shows the full `helpful=/unused=/noise=` split: `unused` (relevant-but-not-acted-on) does NOT count against `q`, so a high `unused` with low `noise` is a content/value signal, not a trigger-noise signal.
+
 This is equally important as discovery. Look for:
-- **Low-quality memories** -- the per-memory quality is `q = (useful_count + 1) / (useful_count + noise_count + 2)` (shown as `q=` in the inventory). `q < 0.5` means more `noise` verdicts than `helpful` — the surfacing gate already suppresses these hints, so they're prime prune/fix candidates. Note: `surface_count` is telemetry only now (times shown), NOT a quality signal — a high surface_count with low `useful_count` is no longer "noise" by itself, because `unused` surfaces (relevant-but-not-acted-on) don't count against the memory. **The one exception is `surface_count == 0`:** a never-fired memory has no quality signal at all — its `q` is just the 0.5 prior, so don't read 0.5 as "fine." Old never-fired memories are flagged below.
+- **Low-quality memories** -- the per-memory quality is `q = (useful_count + 1) / (useful_count + noise_count + 2)` (shown as `q=` in the inventory). `q < 0.5` means more `noise` verdicts than `helpful` — the surfacing gate already suppresses these hints, so they're prime prune/fix candidates. That suppression is HINT-only: a noise-dominant **block** keeps denying calls until roughly `q<0.35` AND ~12+ verdicts, so fix a bad block more urgently than a hint at the same `q`. Note: `surface_count` is telemetry only now (times shown), NOT a quality signal — a high surface_count with low `useful_count` is no longer "noise" by itself, because `unused` surfaces (relevant-but-not-acted-on) don't count against the memory. **The one exception is `surface_count == 0`:** a never-fired memory has no quality signal at all — its `q` is just the 0.5 prior, so don't read 0.5 as "fine." Old never-fired memories are flagged below.
 - **Cold memories (never surfaced, old enough to have had the chance).** The inventory lists these under a **Cold** heading. Diagnose the cause before deleting — the two need opposite actions: (a) the trigger can't match how the command is actually typed (inspect with `engram trigger <id> --list`; if the content is still valuable, **narrow/repair the trigger in place** per the Trigger-narrowing bullet below — preserves history); (b) the pattern just doesn't recur for this user (`engram forget --delete "<name>"`, reversible via `--restore`). Leave genuinely-useful-but-rare facts (a yearly migration, a rare recovery step) alone — cold ≠ worthless.
 - **The noise/unused split tells you WHAT to fix.** Query the distribution since the last run: `SELECT memory_id, outcome, COUNT(*) FROM session_surfaces WHERE outcome IS NOT NULL GROUP BY memory_id, outcome`. A pile of `noise` means the **trigger over-matched** — the content may be fine, so prefer **trigger-narrowing** (see below) over archiving. A pile of `unused` means the memory keeps surfacing on relevant calls but the agent never acts on it — that's a content/value problem, a stronger archive signal.
 - **Trigger-narrowing (prefer this over archiving a noisy memory).** When `noise` dominates because a trigger is too broad — a `**/Dockerfile` path-glob that fires on every Dockerfile read, a one-word command trigger, a redundant path on a memory that already has a precise command trigger — narrow the trigger instead of deleting the knowledge: `Bash(engram trigger <memory_id> --remove <trigger_id> --add-path "infra/**/Dockerfile")` (use `engram trigger <memory_id> --list` to see ids). This preserves the memory's `useful_count` / `noise_count` history, which `forget`+`remember` would reset. Only archive when the *content* itself is useless.
@@ -121,6 +128,8 @@ Your final response MUST end with a structured JSON block in exactly this format
     "surfaces_neutral": <int>,
     "memories_created": <int>,
     "memories_pruned": <int>,
+    "memories_archived": <int>,
+    "memories_strengthened": <int>,
     "memories_verified": <int>,
     "total_active_after": <int>,
     "quality_score": <float 0.0-1.0>
@@ -138,12 +147,24 @@ Your final response MUST end with a structured JSON block in exactly this format
 
 Where `quality_score` = surfaces_helpful / max(surfaces_evaluated, 1). This is the key metric we track across days to measure system health.
 
+The memory-action counters are DISTINCT — report each as its own count (they used to be conflated):
+- `memories_created` — new memories you formed with `engram remember`.
+- `memories_archived` — memories you took OUT of circulation (`engram forget --delete` / confirmed quarantines). Count each archived memory once.
+- `memories_pruned` — same as archived for now (kept for back-compat); if unsure, mirror `memories_archived`.
+- `memories_strengthened` — counter-PRESERVING repairs: `engram trigger` narrows + `engram edit` body repairs + `engram verify` re-affirmations. Every fix that kept a memory's id and reinforcement history counts here.
+- `memories_verified` — the subset of the above that were `engram verify` (a body confirmed still accurate).
+
 **`recommendations`** are durable, system-level observations worth tracking ACROSS runs — not a log of the per-memory edits you already made today. Emit one when you notice something the maintainer should watch or act on: a noise pattern that keeps recurring, a trigger class that over-matches, a structural gap, a memory that should exist but you lacked evidence to create. Omit the key (or use `[]`) when there's nothing durable to flag — most days have few or none.
 
 - `title` is the **dedup key**: the dashboard groups recommendations across runs by title (casefolded). Reuse the EXACT same title when re-raising a recurring issue so it shows once with every date it appeared, not as N near-duplicates. Keep it short and canonical (e.g. `"path-glob read-vs-write noise"`), not a sentence.
 - `severity`: `info` (FYI / trend), `warn` (degrading, worth attention), `critical` (actively harming quality). Defaults to `info` if you pick anything else.
 - `status`: `open` (default) for an unresolved issue; `done` only if THIS run's actions fully resolved it (e.g. you narrowed the offending trigger).
 - `detail` is optional context. Do NOT put secrets, full memory bodies, or per-run counts here — those live in the prose report above.
+
+**Close the loop on the standing backlog.** The **Current Memory State** lists a **Standing recommendation backlog** — the OPEN advisories you (or a prior run) already raised. Do NOT re-raise these as brand-new items. Instead, for EACH backlog title, emit exactly one recommendation reusing the SAME casefolded title:
+- If THIS run's actions fully resolved it → re-emit it with `status: "done"`.
+- If it's still unresolved → re-emit it UNCHANGED with `status: "open"`.
+Only add a genuinely NEW title for an issue not already in the backlog. (Critical / code-bug / data-safety items never appear in the backlog — a maintainer closes those out-of-band via `engram recommend --close`, because you can't verify a code fix shipped. Don't invent or re-open them.)
 
 Before the JSON block, include a human-readable report with:
 - Sessions reviewed and what kind of work happened

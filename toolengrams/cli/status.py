@@ -78,6 +78,7 @@ def _format_human(result: dict) -> str:
         lines.append(f"  nightly     last run {last.get('run_date', '?')}: "
                      f"{last.get('sessions_scanned', 0)} sessions scanned, "
                      f"{last.get('memories_archived', 0)} archived, "
+                     f"{last.get('memories_strengthened', 0)} strengthened, "
                      f"{last.get('memories_discovered', 0)} discovered ({schedule})")
     else:
         lines.append(f"  nightly     never run ({schedule})")

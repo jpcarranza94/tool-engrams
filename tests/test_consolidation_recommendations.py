@@ -94,3 +94,111 @@ def test_across_runs_respects_run_window(temp_db):
     # Only the 2 most recent runs are in window.
     dates = {r["run_date"] for r in runs.recommendations_across_runs(temp_db, run_limit=2)}
     assert dates == {"2026-06-03", "2026-06-02"}
+
+
+# ---------- open_recommendations (WS5.1 backlog) ----------
+
+
+def _titles_open(conn, run_limit=10):
+    return [r["title"] for r in runs.open_recommendations(conn, run_limit)]
+
+
+def test_open_backlog_lists_open_non_critical(temp_db):
+    _record(temp_db, "2026-06-01")
+    runs.insert_recommendations(
+        temp_db, "2026-06-01",
+        [_rec("noisy glob", severity="warn"),
+         _rec("info trend", severity="info")],
+        now_ts=1000,
+    )
+    assert set(_titles_open(temp_db)) == {"noisy glob", "info trend"}
+
+
+def test_open_backlog_excludes_done(temp_db):
+    _record(temp_db, "2026-06-01")
+    runs.insert_recommendations(
+        temp_db, "2026-06-01",
+        [_rec("resolved item", status="done"), _rec("still open")],
+        now_ts=1000,
+    )
+    assert _titles_open(temp_db) == ["still open"]
+
+
+def test_open_backlog_excludes_critical(temp_db):
+    """Critical (code-bug / data-safety) recs are maintainer-owned — the agent
+    can't verify a code fix shipped, so they never enter the injected backlog."""
+    _record(temp_db, "2026-06-01")
+    runs.insert_recommendations(
+        temp_db, "2026-06-01",
+        [_rec("code bug", severity="critical"), _rec("mem noise", severity="warn")],
+        now_ts=1000,
+    )
+    assert _titles_open(temp_db) == ["mem noise"]
+
+
+def test_open_backlog_newest_status_wins_per_title(temp_db):
+    """A title re-emitted `done` on a later run drops out of the backlog even
+    though an earlier run left it open (newest-status per casefolded title)."""
+    _record(temp_db, "2026-06-01", started_ts=100)
+    _record(temp_db, "2026-06-02", started_ts=200)
+    runs.insert_recommendations(temp_db, "2026-06-01", [_rec("Recurring")], now_ts=100)
+    runs.insert_recommendations(
+        temp_db, "2026-06-02", [_rec("recurring", status="done")], now_ts=200)
+    assert _titles_open(temp_db) == []
+
+
+def test_open_backlog_respects_run_window(temp_db):
+    _record(temp_db, "2026-06-01", started_ts=100)
+    _record(temp_db, "2026-06-02", started_ts=200)
+    _record(temp_db, "2026-06-03", started_ts=300)
+    for d, ts in [("2026-06-01", 100), ("2026-06-02", 200), ("2026-06-03", 300)]:
+        runs.insert_recommendations(temp_db, d, [_rec(f"r-{d}")], now_ts=ts)
+    titles = set(_titles_open(temp_db, run_limit=2))
+    assert titles == {"r-2026-06-03", "r-2026-06-02"}
+
+
+# ---------- resolve_recommendation (WS5.2 manual close) ----------
+
+
+def test_resolve_marks_all_rows_done(temp_db):
+    _record(temp_db, "2026-06-01", started_ts=100)
+    _record(temp_db, "2026-06-02", started_ts=200)
+    runs.insert_recommendations(temp_db, "2026-06-01", [_rec("dupe issue")], now_ts=100)
+    runs.insert_recommendations(temp_db, "2026-06-02", [_rec("dupe issue")], now_ts=200)
+    updated = runs.resolve_recommendation(temp_db, "dupe issue", now_ts=9000)
+    assert updated == 2
+    rows = runs.recommendations_across_runs(temp_db, 10)
+    assert all(r["status"] == "done" and r["resolved_ts"] == 9000 for r in rows)
+
+
+def test_resolve_reclose_is_idempotent(temp_db):
+    """Re-closing an already-done title is a harmless no-op re-stamp (docstring
+    claim): still matches every row and they stay `done`."""
+    _record(temp_db, "2026-06-01")
+    runs.insert_recommendations(temp_db, "2026-06-01", [_rec("dupe issue")], now_ts=100)
+    assert runs.resolve_recommendation(temp_db, "dupe issue", now_ts=200) == 1
+    assert runs.resolve_recommendation(temp_db, "dupe issue", now_ts=300) == 1
+    rows = runs.recommendations_across_runs(temp_db, 10)
+    assert all(r["status"] == "done" for r in rows)
+
+
+def test_resolve_is_casefolded(temp_db):
+    _record(temp_db, "2026-06-01")
+    runs.insert_recommendations(temp_db, "2026-06-01", [_rec("Path Glob Noise")], now_ts=1)
+    assert runs.resolve_recommendation(temp_db, "path glob noise", now_ts=2) == 1
+
+
+def test_resolve_unknown_title_returns_zero(temp_db):
+    _record(temp_db, "2026-06-01")
+    runs.insert_recommendations(temp_db, "2026-06-01", [_rec("x")], now_ts=1)
+    assert runs.resolve_recommendation(temp_db, "nonexistent", now_ts=2) == 0
+
+
+def test_manual_close_is_sticky_against_backlog(temp_db):
+    """A manual close drops the title from the OPEN backlog, so the agent is
+    never re-prompted to raise it — the stickiness mechanism (WS5.2)."""
+    _record(temp_db, "2026-06-01")
+    runs.insert_recommendations(temp_db, "2026-06-01", [_rec("close me", severity="warn")], now_ts=1)
+    assert "close me" in _titles_open(temp_db)
+    runs.resolve_recommendation(temp_db, "close me", now_ts=2)
+    assert "close me" not in _titles_open(temp_db)

@@ -44,10 +44,12 @@ def test_format_human_paused_via_env():
         "memories": {"active": 0, "archived": 0, "total_surfaces": 0, "total_useful": 0},
         "triggers": {},
         "last_consolidation": {"run_date": "2026-06-09", "sessions_scanned": 17,
-                               "memories_archived": 1, "memories_discovered": 1},
+                               "memories_archived": 1, "memories_discovered": 1,
+                               "memories_strengthened": 4},
         "schedule_installed": True,
     }
     text = status._format_human(result)
     assert "PAUSED via ENGRAM_DISABLED=1" in text
     assert "last run 2026-06-09: 17 sessions scanned" in text
+    assert "4 strengthened" in text
     assert "scheduled nightly" in text

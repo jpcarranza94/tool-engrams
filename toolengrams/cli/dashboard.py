@@ -149,17 +149,12 @@ def _group_recommendations(rows) -> list[dict]:
 
 def _build_html(conn: sqlite3.Connection) -> str:
     memories = memory_store.list_memories(conn, include_archived=True, order="dashboard")
-    triggers = memory_store.all_triggers(conn)
+    triggers_by_mem = memory_store.triggers_by_memory(conn)
 
     surfaces = session_state.recent_surfaces_with_memory(conn, limit=50)
     consolidations = consolidation_runs.recent_runs(conn, limit=10)
     recommendations = _group_recommendations(
         consolidation_runs.recommendations_across_runs(conn, run_limit=10))
-
-    # Group triggers by memory_id.
-    triggers_by_mem: dict[int, list] = {}
-    for t in triggers:
-        triggers_by_mem.setdefault(t.memory_id, []).append(t)
 
     # Stats.
     active = [m for m in memories if m.archived_ts is None]
@@ -262,9 +257,10 @@ def _build_html(conn: sqlite3.Connection) -> str:
             <td class="num">{c['surfaces_noise'] or 0}</td>
             <td class="num"><span class="usefulness {qs_class}">{qs_display}</span></td>
             <td class="num">{c['memories_discovered'] or 0}</td>
+            <td class="num">{c['memories_strengthened'] or 0}</td>
             <td class="num">{c['memories_archived'] or 0}</td>
         </tr>
-        <tr class="consol-detail"><td colspan="8">{_render_report(report)}</td></tr>""")
+        <tr class="consol-detail"><td colspan="9">{_render_report(report)}</td></tr>""")
 
     # Recommendation rows — one per recurring advisory, deduped across runs.
     rec_rows = []
@@ -418,7 +414,7 @@ td {{ padding: 10px 12px; border-top: 1px solid #21262d; vertical-align: top; fo
 
 <div class="tab-panel" id="consolidation">
 <table>
-<tr><th>Date</th><th>Sessions</th><th>Evaluated</th><th>Helpful</th><th>Noise</th><th>Quality</th><th>Created</th><th>Pruned</th></tr>
+<tr><th>Date</th><th>Sessions</th><th>Evaluated</th><th>Helpful</th><th>Noise</th><th>Quality</th><th>Created</th><th>Strengthened</th><th>Archived</th></tr>
 {"".join(consol_rows) or '<tr><td colspan="8" class="empty">No consolidation runs</td></tr>'}
 </table>
 </div>
