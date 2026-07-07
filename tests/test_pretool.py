@@ -13,6 +13,25 @@ import sys
 import time
 
 from toolengrams.hooks import pretool
+from toolengrams.utils import slugify_cwd
+
+
+def _seed_project_token_memory(conn, name: str, body: str, tokens: list[str],
+                               project_slug: str, *, kind: str = "hint") -> int:
+    """Insert a scope='project' memory bound to a specific project_slug."""
+    now_ts = int(time.time())
+    cur = conn.execute(
+        "INSERT INTO memories (name, description, body, kind, scope, project_slug, created_ts) "
+        "VALUES (?, '', ?, ?, 'project', ?, ?)",
+        (name, body, kind, project_slug, now_ts),
+    )
+    mid = cur.lastrowid
+    conn.execute(
+        "INSERT INTO triggers (memory_id, kind, first_token, tokens_json) "
+        "VALUES (?, 'token_subseq', ?, ?)",
+        (mid, tokens[0], json.dumps(tokens)),
+    )
+    return mid
 
 
 def _run_pretool(payload: dict, monkeypatch) -> dict:
@@ -99,6 +118,47 @@ def test_pretool_hint_memory_injects_without_permission_decision(temp_db, monkey
     hso = result["hookSpecificOutput"]
     assert "permissionDecision" not in hso
     assert "replica" in hso["additionalContext"].lower()
+
+
+def test_pretool_project_memory_matches_from_harness_worktree(temp_db, monkeypatch):
+    """A project-scoped memory (bound to the repo slug) must still surface when
+    the tool call runs from inside that repo's harness worktree — pretool
+    canonicalizes the ephemeral worktree cwd to the repo slug (worktree-cwd fix)."""
+    repo = "/Users/dev/projects/myrepo"
+    _seed_project_token_memory(
+        temp_db, "repo-test-cmd", "In this repo, run tests with REUSE_DB=1.",
+        ["make", "test"], slugify_cwd(repo),
+    )
+    payload = {
+        "session_id": "sess-wt",
+        "cwd": f"{repo}/.claude/worktrees/agent-xyz",
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": {"command": "make test"},
+        "tool_use_id": "tu-wt",
+    }
+    result = _run_pretool(payload, monkeypatch)
+    assert "REUSE_DB" in result["hookSpecificOutput"]["additionalContext"]
+
+
+def test_pretool_project_memory_not_matched_from_other_repo_worktree(temp_db, monkeypatch):
+    """Control: the same project memory must NOT surface from a DIFFERENT repo's
+    worktree — canonicalization maps to that other repo's slug, not myrepo's."""
+    repo = "/Users/dev/projects/myrepo"
+    _seed_project_token_memory(
+        temp_db, "repo-test-cmd", "In this repo, run tests with REUSE_DB=1.",
+        ["make", "test"], slugify_cwd(repo),
+    )
+    payload = {
+        "session_id": "sess-other",
+        "cwd": "/Users/dev/projects/otherrepo/.claude/worktrees/agent-xyz",
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": {"command": "make test"},
+        "tool_use_id": "tu-other",
+    }
+    result = _run_pretool(payload, monkeypatch)
+    assert result == {}
 
 
 def test_pretool_block_memory_denies_and_injects_context(temp_db, monkeypatch):

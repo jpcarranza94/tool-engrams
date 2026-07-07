@@ -80,8 +80,13 @@ def slugify_cwd(cwd: str) -> str:
 # it is safe to collapse on the PreToolUse hot path.
 _HARNESS_WORKTREE_MARKER = "/.claude/worktrees/"
 
+# A linked worktree's `--git-common-dir` is the main repo's `.git`; its parent is
+# the main worktree root. A layout whose common-dir isn't literally `.../.git`
+# (bare repo, `$GIT_DIR` override) is left uncollapsed (fail-safe).
+_DOTGIT_SUFFIX = "/.git"
 
-def canonical_project_cwd(cwd: str, *, use_git: bool = False) -> str:
+
+def canonical_project_cwd(cwd: str, *, use_git: bool) -> str:
     """Collapse a git *worktree* cwd to its stable main-repo root.
 
     Project-scoped memories bind to ``slugify_cwd(cwd)`` under an EXACT-match cwd
@@ -102,8 +107,10 @@ def canonical_project_cwd(cwd: str, *, use_git: bool = False) -> str:
     Fail-open: returns ``cwd`` unchanged on anything unexpected (not a repo, git
     missing/erroring, worktree already deleted).
     """
+    # `> 0`, not `!= -1`: a marker at index 0 would mean the repo root is `/`,
+    # and `cwd[:0]` is an empty slug — leave that pathological path untouched.
     marker = cwd.find(_HARNESS_WORKTREE_MARKER)
-    if marker != -1:
+    if marker > 0:
         return cwd[:marker]
     if not use_git:
         return cwd
@@ -122,15 +129,17 @@ def canonical_project_cwd(cwd: str, *, use_git: bool = False) -> str:
     # In the main worktree (or a subdir of it) --git-dir == --git-common-dir. They
     # diverge ONLY inside a linked worktree, where --git-common-dir points at the
     # main repo's `.git` — its parent is the main worktree root.
-    if common_dir and git_dir != common_dir and common_dir.endswith("/.git"):
+    if common_dir and git_dir != common_dir and common_dir.endswith(_DOTGIT_SUFFIX):
         return os.path.dirname(common_dir)
     return cwd
 
 
-def project_slug_for_cwd(cwd: str, *, use_git: bool = False) -> str:
+def project_slug_for_cwd(cwd: str, *, use_git: bool) -> str:
     """``slugify_cwd`` of the canonical repo root of ``cwd`` (worktree-aware).
 
-    Use ``use_git=True`` off the hot path (formation), ``False`` on it (matching).
+    ``use_git`` is required (no default) so every caller states intent: pass
+    ``True`` off the hot path (formation — the write seam, where under-scoping
+    permanently orphans a memory), ``False`` on it (matching).
     """
     return slugify_cwd(canonical_project_cwd(cwd, use_git=use_git))
 

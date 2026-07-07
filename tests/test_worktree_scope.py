@@ -7,6 +7,7 @@ behavior, and that NORMAL checkouts/subdirs are left untouched.
 """
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -22,9 +23,15 @@ from toolengrams.utils import (
 REPO = "/Users/dev/projects/tool-engrams"
 
 
+# Isolate the fixture's git from the dev/CI global config — a global
+# commit.gpgsign=true or core.hooksPath would otherwise fail `git commit`.
+_GIT_ENV = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_CONFIG_SYSTEM": os.devnull}
+
+
 def _git(cwd, *args):
     subprocess.run(["git", "-C", str(cwd), *args], check=True,
-                   capture_output=True, text=True)
+                   capture_output=True, text=True, env=_GIT_ENV)
 
 
 # ---------- harness worktree: pure string, works on the hot path too ----------
@@ -49,7 +56,7 @@ def test_non_worktree_cwd_unchanged_cheap():
 
 def test_project_slug_for_cwd_collapses_harness_worktree():
     wt = f"{REPO}/.claude/worktrees/agent-x"
-    assert project_slug_for_cwd(wt) == slugify_cwd(REPO)
+    assert project_slug_for_cwd(wt, use_git=False) == slugify_cwd(REPO)
 
 
 def test_empty_cwd_is_noop():

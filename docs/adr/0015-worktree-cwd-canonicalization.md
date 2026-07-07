@@ -78,3 +78,14 @@ Call sites use `project_slug_for_cwd(cwd, use_git=…)`:
 - **Pre-existing** stranded memories are not repaired by this go-forward change
   (a removed sibling worktree's path can't be resolved back to its repo). Left as
   a consolidation/cleanup follow-up.
+- The **linked-worktree** collapse (`use_git=True`) is fail-safe but has silent
+  no-op edges — all degrade to the raw slug (status-quo binding), never a crash,
+  and the harness-worktree string path is unaffected:
+  - Requires git **≥ 2.31** (`git rev-parse --path-format`); older git errors →
+    fail-open.
+  - A **bare** main repo (common-dir not ending in `/.git`) is not collapsed.
+  - `git rev-parse` returns a realpath, so a repo under a **symlinked ancestor**
+    can bind a sibling-worktree memory to the resolved path while the match seam
+    (raw cwd) uses the symlinked path — a formation/match slug desync. Narrow
+    (normal `/Users/...` checkouts aren't symlinked); harness worktrees are
+    git-free and unaffected.

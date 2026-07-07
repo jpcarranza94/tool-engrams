@@ -49,7 +49,7 @@ def surface_failure_hints(
     cwd = payload.get("cwd") or ""
     # Hot path: string-only worktree collapse (use_git=False), mirroring
     # pretool.py so a harness-worktree memory surfaces on failure too.
-    project_slug = project_slug_for_cwd(cwd) if cwd else None
+    project_slug = project_slug_for_cwd(cwd, use_git=False) if cwd else None
 
     hint = target.extract_hints(tool_name, tool_input)
     if not hint.tokens and not hint.paths:

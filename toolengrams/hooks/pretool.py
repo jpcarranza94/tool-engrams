@@ -93,7 +93,7 @@ def _run(payload: dict[str, Any], target) -> int:
     # Hot path: string-only worktree collapse (use_git=False) keeps this to a
     # substring check — no subprocess — so a harness worktree still resolves to
     # the same project slug formation used, without breaking the latency budget.
-    project_slug = project_slug_for_cwd(cwd) if cwd else None
+    project_slug = project_slug_for_cwd(cwd, use_git=False) if cwd else None
 
     hint = target.extract_hints(tool_name, tool_input)
     if not hint.tokens and not hint.paths:
