@@ -41,9 +41,10 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-from .. import db, envvars, pause
+from .. import db, envvars, memory_store, pause
 from ..prompts.eval import build_eval_prompt
 from ..prompts.watcher import build_watcher_prompt
+from ..reinforcement.scoring import GATE_THRESHOLD, WARMUP_N, q
 from ..retrieval import session_state
 from ..utils import (
     WATCHER_CHILD_ENV,
@@ -299,6 +300,10 @@ FEEDBACK_MAX_GOOD = 2
 # fresh trigger a chance to fire before flagging it as dead.
 _FEEDBACK_COLD_AGE_SEC = 2 * 86400
 
+# Parses the target adapter's canonical `format_delta` command vocabulary
+# (`TOOL (<tool>): <text>`). If that delta format ever changes, this regex AND
+# the `"TOOL (" in delta` activity check in _formation_decision must change with
+# it — they read the same lines.
 _TOOL_LINE_RE = re.compile(r"^TOOL \([^)]+\):\s*(.+)$", re.MULTILINE)
 
 
@@ -362,30 +367,48 @@ def _formation_feedback_section(cwd: str) -> str:
     track record to check before saving another memory in the same shape.
     Scoped to FEEDBACK_WINDOW_DAYS and to memories visible from `cwd` (global +
     this project); bounded to FEEDBACK_MAX_BAD worst (noisy first, then cold)
-    and FEEDBACK_MAX_GOOD good, so a long history can't grow the prompt."""
+    and FEEDBACK_MAX_GOOD good, so a long history can't grow the prompt.
+
+    Classification reuses the canonical q-metric surfacing gate
+    (reinforcement/scoring), matching consolidation: NOISY when q has fallen
+    below the gate AND noise outweighs helpful; GOOD when helpful outweighs
+    noise past the same warm-up the gate uses. COLD is q-inexpressible (a
+    never-fired trigger has no verdicts) so it stays a surface/age check."""
     now = int(time.time())
     since_ts = now - FEEDBACK_WINDOW_DAYS * 86400
     try:
         project_slug = project_slug_for_cwd(cwd, use_git=True)
         with db.session() as conn:
-            rows = runs_store.recent_created_outcomes(conn, since_ts, project_slug)
+            ids = runs_store.recent_created_memory_ids(conn, since_ts)
+            rows = memory_store.save_outcomes(conn, ids, project_slug)
     except Exception:
         return ""
     if not rows:
         return ""
 
+    # Single pass: format each row's display line at classification time (the
+    # displayed text stays raw counts — only the bucket is q-derived).
     noisy, cold, good = [], [], []
     for r in rows:
         useful = r["useful_count"] or 0
         noise = r["noise_count"] or 0
         surfaces = r["surface_count"] or 0
         created = r["created_ts"] or now
-        if noise >= max(2, useful):
-            noisy.append(r)
+        if q(useful, noise) < GATE_THRESHOLD and noise > useful:
+            noisy.append(
+                f"- '{r['name']}' — {surfaces} surfaces, {useful} helpful, "
+                f"{noise} noise → trigger over-matched; don't repeat this shape."
+            )
         elif surfaces == 0 and created < now - _FEEDBACK_COLD_AGE_SEC:
-            cold.append(r)
-        elif useful >= 3 and useful > noise:
-            good.append(r)
+            age_days = max(0, (now - created) // 86400)
+            cold.append(
+                f"- '{r['name']}' — 0 surfaces in {age_days}d → trigger never "
+                "fired; bind to a real command."
+            )
+        elif useful > noise and useful >= WARMUP_N:
+            good.append(
+                f"- '{r['name']}' — {useful} helpful, {noise} noise."
+            )
 
     bad = (noisy + cold)[:FEEDBACK_MAX_BAD]
     good = good[:FEEDBACK_MAX_GOOD]
@@ -393,28 +416,10 @@ def _formation_feedback_section(cwd: str) -> str:
         return ""
 
     lines = ["\n\n--- How your recent saves fared (learn from this) ---"]
-    for r in bad:
-        useful = r["useful_count"] or 0
-        noise = r["noise_count"] or 0
-        surfaces = r["surface_count"] or 0
-        if noise >= max(2, useful):
-            lines.append(
-                f"- '{r['name']}' — {surfaces} surfaces, {useful} helpful, "
-                f"{noise} noise → trigger over-matched; don't repeat this shape."
-            )
-        else:
-            age_days = max(0, (now - (r["created_ts"] or now)) // 86400)
-            lines.append(
-                f"- '{r['name']}' — 0 surfaces in {age_days}d → trigger never "
-                "fired; bind to a real command."
-            )
+    lines += bad
     if good:
         lines.append("Good (keep doing this):")
-        for r in good:
-            lines.append(
-                f"- '{r['name']}' — {r['useful_count']} helpful, "
-                f"{r['noise_count']} noise."
-            )
+        lines += good
     return "\n".join(lines)
 
 

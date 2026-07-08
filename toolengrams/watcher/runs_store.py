@@ -151,28 +151,22 @@ def session_created_memories(conn: sqlite3.Connection,
     ).fetchall()
 
 
-def recent_created_outcomes(conn: sqlite3.Connection, since_ts: int,
-                            project_slug: str) -> list[sqlite3.Row]:
-    """Memories the formation role created/updated (any work session) since
-    `since_ts` that are STILL ACTIVE — the closed-loop "how did your recent
-    saves fare" feedback fed back into the next formation tick. Scoped to
-    memories visible from the caller's cwd (global, or exactly this project) so
-    the feedback matches what formation is actually allowed to (re)create here.
-    Distinct by memory_id (a `--into` merge can log more than one 'created'
-    event for the same memory), newest-created first."""
-    return conn.execute(
-        "SELECT e.memory_id, m.name, m.surface_count, m.useful_count, "
-        "  m.noise_count, m.created_ts, m.scope, m.project_slug "
-        "FROM watcher_run_events e "
-        "JOIN watcher_runs r ON r.id = e.run_id "
-        "JOIN memories m ON m.id = e.memory_id "
+def recent_created_memory_ids(conn: sqlite3.Connection,
+                              since_ts: int) -> list[int]:
+    """Distinct ids of memories the formation role created/updated (any work
+    session) since `since_ts` — the id half of the closed-loop "how did your
+    recent saves fare" feedback. Touches only this seam's own tables; the
+    caller pairs these ids with `memory_store.save_outcomes` for the scoped
+    outcome fields (a `--into` merge can log more than one 'created' event for
+    one memory, hence DISTINCT)."""
+    rows = conn.execute(
+        "SELECT DISTINCT e.memory_id "
+        "FROM watcher_run_events e JOIN watcher_runs r ON r.id = e.run_id "
         "WHERE r.role = 'formation' AND e.kind = 'created' AND e.ts >= ? "
-        "  AND m.archived_ts IS NULL "
-        "  AND (m.scope = 'global' OR m.project_slug = ?) "
-        "GROUP BY e.memory_id "
-        "ORDER BY m.created_ts DESC",
-        (since_ts, project_slug),
+        "  AND e.memory_id IS NOT NULL",
+        (since_ts,),
     ).fetchall()
+    return [r["memory_id"] for r in rows]
 
 
 def prev_window_start(conn: sqlite3.Connection, work_session_id: str,

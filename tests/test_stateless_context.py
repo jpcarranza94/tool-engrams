@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import time
 
+from toolengrams import memory_store
 from toolengrams.utils import project_slug_for_cwd
 from toolengrams.watcher import runs_store, tick
 
@@ -157,46 +158,43 @@ def _seed_created(conn, memory_id, memory_name, *, session="s", ts=None):
     )
 
 
-def test_recent_created_outcomes_filters_window_scope_and_archived(temp_db):
+def test_recent_created_memory_ids_windows_and_dedups(temp_db):
+    """The runs_store half touches only its own tables: distinct ids of formation
+    'created' events inside the lookback window (a `--into` merge logs two events
+    for one id → one id back; an out-of-window save drops out)."""
     now = int(time.time())
     in_window = now - 3 * 86400
     out_of_window = now - 20 * 86400
 
-    keep_global = _seed_memory(temp_db, "keep-global", scope="global",
-                               created_ts=in_window)
-    _seed_created(temp_db, keep_global, "keep-global", ts=in_window)
+    recent = _seed_memory(temp_db, "recent", created_ts=in_window)
+    _seed_created(temp_db, recent, "recent", ts=in_window)
 
-    keep_project = _seed_memory(temp_db, "keep-project", scope="project",
-                                project_slug="-my-project", created_ts=in_window)
-    _seed_created(temp_db, keep_project, "keep-project", ts=in_window)
+    merged = _seed_memory(temp_db, "merged-twice", created_ts=in_window)
+    _seed_created(temp_db, merged, "merged-twice", ts=in_window)
+    _seed_created(temp_db, merged, "merged-twice", ts=in_window + 5)  # later --into
 
-    other_project = _seed_memory(temp_db, "other-project", scope="project",
-                                 project_slug="-other-project", created_ts=in_window)
-    _seed_created(temp_db, other_project, "other-project", ts=in_window)
-
-    stale = _seed_memory(temp_db, "stale", scope="global", created_ts=out_of_window)
+    stale = _seed_memory(temp_db, "stale", created_ts=out_of_window)
     _seed_created(temp_db, stale, "stale", ts=out_of_window)
 
-    archived = _seed_memory(temp_db, "archived", scope="global",
-                            created_ts=in_window, archived_ts=now)
-    _seed_created(temp_db, archived, "archived", ts=in_window)
-
-    rows = runs_store.recent_created_outcomes(
-        temp_db, since_ts=now - 10 * 86400, project_slug="-my-project")
-    names = {r["name"] for r in rows}
-    assert names == {"keep-global", "keep-project"}
+    ids = runs_store.recent_created_memory_ids(temp_db, since_ts=now - 10 * 86400)
+    assert sorted(ids) == sorted([recent, merged])   # deduped, stale excluded
 
 
-def test_recent_created_outcomes_dedups_by_memory_id(temp_db):
+def test_save_outcomes_filters_scope_and_archived(temp_db):
+    """The memory_store half applies the scope + non-archived filter over a set
+    of ids (empty id list → no query)."""
     now = int(time.time())
-    mid = _seed_memory(temp_db, "merged-twice", created_ts=now)
-    _seed_created(temp_db, mid, "merged-twice", ts=now - 100)
-    _seed_created(temp_db, mid, "merged-twice", ts=now - 50)   # a later --into merge
+    keep_global = _seed_memory(temp_db, "keep-global", scope="global")
+    keep_project = _seed_memory(temp_db, "keep-project", scope="project",
+                                project_slug="-my-project")
+    other_project = _seed_memory(temp_db, "other-project", scope="project",
+                                 project_slug="-other-project")
+    archived = _seed_memory(temp_db, "archived", scope="global", archived_ts=now)
+    ids = [keep_global, keep_project, other_project, archived]
 
-    rows = runs_store.recent_created_outcomes(
-        temp_db, since_ts=now - 86400, project_slug="-nope")
-    assert len(rows) == 1
-    assert rows[0]["memory_id"] == mid
+    rows = memory_store.save_outcomes(temp_db, ids, project_slug="-my-project")
+    assert {r["name"] for r in rows} == {"keep-global", "keep-project"}
+    assert memory_store.save_outcomes(temp_db, [], project_slug="-my-project") == []
 
 
 def test_formation_feedback_section_classifies_and_bounds(temp_db, tmp_path):
