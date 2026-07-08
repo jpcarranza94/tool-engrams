@@ -40,6 +40,19 @@ def q(useful_count: int, noise_count: int) -> float:
     return (useful_count + 1.0) / (useful_count + noise_count + 2.0)
 
 
+def gate_threshold() -> float:
+    """The EFFECTIVE hint surfacing-gate q floor — the config/env-hydrated value,
+    read at call time (default GATE_THRESHOLD). Single source of the number so a
+    configured `gate.threshold` reaches every caller, not just is_gated."""
+    return env_float(envvars.GATE_THRESHOLD, GATE_THRESHOLD)
+
+
+def gate_warmup_n() -> int:
+    """The EFFECTIVE hint surfacing-gate warm-up (min verdicts before the gate
+    can act) — config/env-hydrated, read at call time (default WARMUP_N)."""
+    return env_int(envvars.GATE_WARMUP_N, WARMUP_N)
+
+
 def final_score(candidate: Candidate) -> float:
     """Rank weight: quality plus the pin boost. No recency, no structural term.
 
@@ -73,8 +86,8 @@ def is_gated(candidate: Candidate) -> bool:
         warmup = env_int(envvars.BLOCK_GATE_WARMUP, BLOCK_GATE_WARMUP)
         floor = env_float(envvars.BLOCK_GATE_FLOOR, BLOCK_GATE_FLOOR)
     else:
-        warmup = env_int(envvars.GATE_WARMUP_N, WARMUP_N)
-        floor = env_float(envvars.GATE_THRESHOLD, GATE_THRESHOLD)
+        warmup = gate_warmup_n()
+        floor = gate_threshold()
     if candidate.useful_count + candidate.noise_count < warmup:
         return False
     return q(candidate.useful_count, candidate.noise_count) < floor

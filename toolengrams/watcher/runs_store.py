@@ -151,20 +151,29 @@ def session_created_memories(conn: sqlite3.Connection,
     ).fetchall()
 
 
+# Cap on the id list `recent_created_memory_ids` returns. Its caller feeds these
+# into a `WHERE id IN (...)` — bounded here so a large install can't exceed
+# SQLite's default 999-variable limit on that query (<3.32) and silently
+# fail-open. 500 newest is far more than the feedback section ever displays.
+RECENT_CREATED_ID_LIMIT = 500
+
+
 def recent_created_memory_ids(conn: sqlite3.Connection,
                               since_ts: int) -> list[int]:
-    """Distinct ids of memories the formation role created/updated (any work
-    session) since `since_ts` — the id half of the closed-loop "how did your
-    recent saves fare" feedback. Touches only this seam's own tables; the
-    caller pairs these ids with `memory_store.save_outcomes` for the scoped
-    outcome fields (a `--into` merge can log more than one 'created' event for
-    one memory, hence DISTINCT)."""
+    """Ids of memories the formation role created/updated (any work session)
+    since `since_ts` — the id half of the closed-loop "how did your recent saves
+    fare" feedback. Touches only this seam's own tables; the caller pairs these
+    ids with `memory_store.outcomes_for_ids` for the scoped outcome fields.
+    Deduped by memory_id via MAX(ts) (a `--into` merge logs more than one
+    'created' event for one memory), newest-created first, capped at
+    RECENT_CREATED_ID_LIMIT so the caller's `IN (...)` stays bounded."""
     rows = conn.execute(
-        "SELECT DISTINCT e.memory_id "
+        "SELECT e.memory_id, MAX(e.ts) AS ts "
         "FROM watcher_run_events e JOIN watcher_runs r ON r.id = e.run_id "
         "WHERE r.role = 'formation' AND e.kind = 'created' AND e.ts >= ? "
-        "  AND e.memory_id IS NOT NULL",
-        (since_ts,),
+        "  AND e.memory_id IS NOT NULL "
+        "GROUP BY e.memory_id ORDER BY ts DESC LIMIT ?",
+        (since_ts, RECENT_CREATED_ID_LIMIT),
     ).fetchall()
     return [r["memory_id"] for r in rows]
 

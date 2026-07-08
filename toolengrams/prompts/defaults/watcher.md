@@ -103,11 +103,11 @@ the deny. Save a hint only if its body is worth showing on *every* matching call
   `"jira issue move"` (no ticket id) so it fires on any ticket.
 - `--flag=value` is split automatically — write the bare flag.
 - URL hosts are peeled automatically — write the host bare (no scheme).
-- If a "Real commands this window" list is present, every `--trigger`'s tokens
-  must appear, in order, inside one of those real commands. NEVER mint a
-  trigger from a tool name (`ScheduleWakeup`), a skill name (`jira-create`), or
-  a ticket id (`SYS-6899`) — none of those are commands, so they can never
-  match at PreToolUse.
+- If a "Commands seen this window" list is present, every `--trigger`'s tokens
+  must appear, in order, inside one of those commands. NEVER mint a trigger
+  from a tool name (`ScheduleWakeup`), a skill name (`jira-create`), or a
+  ticket id (`SYS-6899`) — none of those are commands, so they can never match
+  at PreToolUse.
 
 ## Path memories (file-bound)
 
