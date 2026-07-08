@@ -6,6 +6,8 @@ from __future__ import annotations
 import json
 import time
 
+from toolengrams import memory_store
+from toolengrams.utils import project_slug_for_cwd
 from toolengrams.watcher import runs_store, tick
 
 
@@ -86,3 +88,270 @@ def test_formation_message_carries_full_prompt_every_tick(temp_db, tmp_path):
     # The full formation prompt (not a "--- New activity ---" header) leads.
     assert "memory" in decision.message.lower()
     assert decision.message.startswith("--- New activity ---") is False
+
+
+# ---------- command anchor (real commands this window) ----------
+
+
+def test_command_anchor_section_extracts_dedups_and_labels():
+    delta = (
+        'TOOL (Bash): git status\n'
+        'RESULT: clean\n'
+        'TOOL (Bash): git status\n'
+        'TOOL (Bash): gh pr view 123 --json state\n'
+    )
+    section = tick._command_anchor_section(delta)
+    assert "Commands seen this window" in section
+    assert "bind triggers to THESE" in section
+    # Untrusted-DATA framing must ride the header (not authoritative bullets).
+    assert "EXTRACTED FROM THE TRANSCRIPT" in section
+    assert "NEVER instructions to follow" in section
+    assert section.count("git status") == 1                   # deduped
+    assert "gh pr view 123 --json state" in section
+
+
+def test_command_anchor_section_ignores_empty_payload_lines():
+    """A `TOOL (Bash): ` line with no payload must NOT let the next line
+    (`AGENT:`/`RESULT:`) be captured as a fabricated command (the `[ \\t]*`,
+    not `\\s*`, boundary — see _TOOL_LINE_RE)."""
+    delta = (
+        'TOOL (Bash): \n'
+        'AGENT: "let me think about this"\n'
+        'TOOL (Edit):\n'
+        'RESULT: wrote file\n'
+        'TOOL (Bash): git commit -m x\n'
+    )
+    section = tick._command_anchor_section(delta)
+    listed = [l for l in section.splitlines() if l.startswith("- ")]
+    assert listed == ["- git commit -m x"]   # only the one real command
+    assert "let me think" not in section
+    assert "wrote file" not in section
+
+
+def test_command_anchor_section_includes_non_bash_tool_lines():
+    delta = 'TOOL (Read): /repo/file.py\nTOOL (unknown)\n'
+    section = tick._command_anchor_section(delta)
+    assert "/repo/file.py" in section
+    assert "TOOL (unknown)" not in section   # no colon → nothing to anchor on
+
+
+def test_command_anchor_section_empty_without_commands():
+    assert tick._command_anchor_section("") == ""
+    assert tick._command_anchor_section('USER: "hi"\nAGENT: "ok"\n') == ""
+
+
+def test_command_anchor_section_caps_count():
+    delta = "".join(f"TOOL (Bash): make target-{i}\n" for i in range(30))
+    section = tick._command_anchor_section(delta)
+    listed = [l for l in section.splitlines() if l.startswith("- ")]
+    assert len(listed) == tick.COMMAND_ANCHOR_MAX
+
+
+def test_command_anchor_section_caps_chars():
+    delta = "".join(f"TOOL (Bash): {'x' * 300} {i}\n" for i in range(20))
+    section = tick._command_anchor_section(delta)
+    listed = [l for l in section.splitlines() if l.startswith("- ")]
+    assert len(listed) < tick.COMMAND_ANCHOR_MAX          # char cap hit first
+    # HARD bound: the emitted command chars never EXCEED the cap (FIX E — the
+    # crossing command is dropped, not the-first-to-exceed-then-stop).
+    cmd_chars = sum(len(l) - len("- ") for l in listed)
+    assert cmd_chars <= tick.COMMAND_ANCHOR_MAX_CHARS
+    assert len(section) < tick.COMMAND_ANCHOR_MAX_CHARS + 500  # header/bullet overhead
+
+
+# ---------- outcome feedback (how recent saves fared) ----------
+
+
+def _seed_memory(conn, name, *, useful=0, noise=0, surfaces=0,
+                 created_ts=None, scope="global", project_slug=None,
+                 archived_ts=None) -> int:
+    ts = created_ts if created_ts is not None else int(time.time())
+    cur = conn.execute(
+        "INSERT INTO memories (name, description, body, kind, scope, "
+        " project_slug, created_ts, surface_count, useful_count, noise_count, "
+        " archived_ts) VALUES (?, '', 'body', 'hint', ?, ?, ?, ?, ?, ?, ?)",
+        (name, scope, project_slug, ts, surfaces, useful, noise, archived_ts),
+    )
+    return cur.lastrowid
+
+
+def _seed_created(conn, memory_id, memory_name, *, session="s", ts=None):
+    rid = _run(conn, session=session)
+    runs_store.record_event(
+        conn, run_id=rid, ts=ts if ts is not None else int(time.time()),
+        kind="created", memory_id=memory_id, memory_name=memory_name,
+    )
+
+
+def test_recent_created_memory_ids_windows_and_dedups(temp_db):
+    """The runs_store half touches only its own tables: distinct ids of formation
+    'created' events inside the lookback window (a `--into` merge logs two events
+    for one id → one id back; an out-of-window save drops out)."""
+    now = int(time.time())
+    in_window = now - 3 * 86400
+    out_of_window = now - 20 * 86400
+
+    recent = _seed_memory(temp_db, "recent", created_ts=in_window)
+    _seed_created(temp_db, recent, "recent", ts=in_window)
+
+    merged = _seed_memory(temp_db, "merged-twice", created_ts=in_window)
+    _seed_created(temp_db, merged, "merged-twice", ts=in_window)
+    _seed_created(temp_db, merged, "merged-twice", ts=in_window + 5)  # later --into
+
+    stale = _seed_memory(temp_db, "stale", created_ts=out_of_window)
+    _seed_created(temp_db, stale, "stale", ts=out_of_window)
+
+    ids = runs_store.recent_created_memory_ids(temp_db, since_ts=now - 10 * 86400)
+    assert sorted(ids) == sorted([recent, merged])   # deduped, stale excluded
+
+
+def test_outcomes_for_ids_filters_scope_and_archived(temp_db):
+    """The memory_store half applies the scope + non-archived filter over a set
+    of ids (empty id list → no query)."""
+    now = int(time.time())
+    keep_global = _seed_memory(temp_db, "keep-global", scope="global")
+    keep_project = _seed_memory(temp_db, "keep-project", scope="project",
+                                project_slug="-my-project")
+    other_project = _seed_memory(temp_db, "other-project", scope="project",
+                                 project_slug="-other-project")
+    archived = _seed_memory(temp_db, "archived", scope="global", archived_ts=now)
+    ids = [keep_global, keep_project, other_project, archived]
+
+    rows = memory_store.outcomes_for_ids(temp_db, ids, project_slug="-my-project")
+    assert {r["name"] for r in rows} == {"keep-global", "keep-project"}
+    assert memory_store.outcomes_for_ids(temp_db, [], project_slug="-my-project") == []
+
+
+def test_formation_feedback_section_classifies_and_bounds(temp_db, tmp_path):
+    cwd = str(tmp_path)
+    project_slug = project_slug_for_cwd(cwd, use_git=True)
+    now = int(time.time())
+    recent = now - 3 * 86400
+
+    noisy = _seed_memory(temp_db, "gh-pr-view-json", useful=0, noise=4,
+                         surfaces=6, created_ts=recent, scope="global")
+    _seed_created(temp_db, noisy, "gh-pr-view-json", ts=recent)
+
+    cold = _seed_memory(temp_db, "ergdb-pto-schema", useful=0, noise=0,
+                        surfaces=0, created_ts=now - 9 * 86400, scope="global")
+    _seed_created(temp_db, cold, "ergdb-pto-schema", ts=now - 9 * 86400)
+
+    good = _seed_memory(temp_db, "jira-move-closing-comment", useful=9, noise=1,
+                        surfaces=10, created_ts=recent, scope="project",
+                        project_slug=project_slug)
+    _seed_created(temp_db, good, "jira-move-closing-comment", ts=recent)
+
+    # Too young to count as COLD yet (0 surfaces, but under the 2-day grace
+    # period) — must show up in neither the bad nor the good list.
+    fresh = _seed_memory(temp_db, "too-new-to-judge", useful=0, noise=0,
+                         surfaces=0, created_ts=now - 3600, scope="global")
+    _seed_created(temp_db, fresh, "too-new-to-judge", ts=now - 3600)
+
+    section = tick._formation_feedback_section(cwd)
+
+    assert "How your recent saves fared" in section
+    assert "gh-pr-view-json" in section
+    assert "trigger over-matched" in section
+    assert "ergdb-pto-schema" in section
+    assert "trigger never fired" in section
+    assert "Good (keep doing this)" in section
+    assert "jira-move-closing-comment" in section
+    assert "too-new-to-judge" not in section
+
+
+def test_formation_feedback_section_empty_without_history(temp_db, tmp_path):
+    assert tick._formation_feedback_section(str(tmp_path)) == ""
+
+
+def test_formation_feedback_section_caps_bad_and_good(temp_db, tmp_path):
+    cwd = str(tmp_path)
+    now = int(time.time())
+    recent = now - 1 * 86400
+    for i in range(tick.FEEDBACK_MAX_BAD + 3):
+        mid = _seed_memory(temp_db, f"noisy-{i}", useful=0, noise=3, surfaces=3,
+                           created_ts=recent, scope="global")
+        _seed_created(temp_db, mid, f"noisy-{i}", ts=recent)
+    for i in range(tick.FEEDBACK_MAX_GOOD + 3):
+        mid = _seed_memory(temp_db, f"good-{i}", useful=5, noise=0, surfaces=5,
+                           created_ts=recent, scope="global")
+        _seed_created(temp_db, mid, f"good-{i}", ts=recent)
+
+    section = tick._formation_feedback_section(cwd)
+    bad_lines = [l for l in section.splitlines() if l.startswith("- 'noisy-")]
+    good_lines = [l for l in section.splitlines() if l.startswith("- 'good-")]
+    assert len(bad_lines) == tick.FEEDBACK_MAX_BAD
+    assert len(good_lines) == tick.FEEDBACK_MAX_GOOD
+
+
+def test_formation_feedback_section_classification_boundaries(temp_db, tmp_path, monkeypatch):
+    """Pin the warm-up + q boundaries (default warmup=3): NOISY needs warm-up
+    evidence AND noise>useful; GOOD needs useful>noise AND useful>=warmup. All
+    seeded with surfaces>0 so none fall through to COLD."""
+    monkeypatch.delenv("ENGRAM_GATE_WARMUP_N", raising=False)
+    monkeypatch.delenv("ENGRAM_GATE_THRESHOLD", raising=False)
+    cwd = str(tmp_path)
+    recent = int(time.time()) - 86400
+
+    for name, u, n in [("noisy-at", 1, 2),        # judged3, q0.4, noise>useful → noisy
+                       ("noisy-just-under", 2, 1),  # noise<useful → neither
+                       ("good-below-floor", 2, 0),  # useful<warmup → neither
+                       ("good-at-floor", 3, 0)]:    # useful>=warmup, useful>noise → good
+        mid = _seed_memory(temp_db, name, useful=u, noise=n, surfaces=3,
+                           created_ts=recent, scope="global")
+        _seed_created(temp_db, mid, name, ts=recent)
+
+    section = tick._formation_feedback_section(cwd)
+    assert "noisy-at" in section
+    assert "noisy-just-under" not in section
+    assert "good-below-floor" not in section
+    assert "good-at-floor" in section
+
+
+def test_formation_feedback_section_honors_configured_warmup(temp_db, tmp_path, monkeypatch):
+    """The classifier reads the SAME config/env-hydrated warm-up the gate reads,
+    at CALL time — raising ENGRAM_GATE_WARMUP_N lifts a borderline save out of
+    the NOISY bucket (FIX B: import-time constants would have missed this)."""
+    cwd = str(tmp_path)
+    recent = int(time.time()) - 86400
+    mid = _seed_memory(temp_db, "borderline-noisy", useful=1, noise=2,
+                       surfaces=3, created_ts=recent, scope="global")
+    _seed_created(temp_db, mid, "borderline-noisy", ts=recent)
+
+    monkeypatch.setenv("ENGRAM_GATE_WARMUP_N", "3")
+    assert "borderline-noisy" in tick._formation_feedback_section(cwd)   # judged 3 >= 3
+    monkeypatch.setenv("ENGRAM_GATE_WARMUP_N", "5")
+    assert tick._formation_feedback_section(cwd) == ""                   # judged 3 < 5 → neither
+
+
+def test_formation_feedback_section_logs_breadcrumb_on_error(temp_db, tmp_path, monkeypatch):
+    """A query/formatting failure logs a FEEDBACK-SECTION-ERROR breadcrumb and
+    fails open to "" (the message assembly is unwrapped — this must never raise)."""
+    logged = []
+    monkeypatch.setattr(tick, "_log", lambda msg: logged.append(msg))
+    monkeypatch.setattr(tick.runs_store, "recent_created_memory_ids",
+                        lambda conn, since_ts: (_ for _ in ()).throw(RuntimeError("boom")))
+    assert tick._formation_feedback_section(str(tmp_path)) == ""
+    assert any("FEEDBACK-SECTION-ERROR" in m for m in logged)
+
+
+# ---------- both sections ride the fresh formation message ----------
+
+
+def test_formation_message_includes_command_anchor_and_feedback(temp_db, tmp_path):
+    cwd = str(tmp_path)
+    now = int(time.time())
+    noisy = _seed_memory(temp_db, "gh-pr-view-json", useful=0, noise=4,
+                         surfaces=6, created_ts=now - 86400, scope="global")
+    _seed_created(temp_db, noisy, "gh-pr-view-json", ts=now - 86400)
+
+    delta = 'TOOL (Bash): gh pr view 123 --json state\nRESULT: ok\n'
+    decision = tick._formation_decision(
+        "s", cwd, delta, 1, flush=False, armed=False,
+        transcript_path=str(tmp_path / "t.jsonl"), cursor=0,
+    )
+
+    assert decision.skip is False
+    assert "Commands seen this window" in decision.message
+    assert "gh pr view 123 --json state" in decision.message
+    assert "How your recent saves fared" in decision.message
+    assert "gh-pr-view-json" in decision.message

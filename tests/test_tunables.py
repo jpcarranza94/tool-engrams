@@ -71,6 +71,22 @@ def test_gate_warmup_env_override(monkeypatch):
     assert scoring.is_gated(c) is True
 
 
+def test_gate_threshold_helper_reads_config_at_call_time(monkeypatch):
+    """The effective-value helpers other callers reuse (e.g. the formation
+    feedback classifier) read env/config at CALL time, not import time."""
+    monkeypatch.delenv("ENGRAM_GATE_THRESHOLD", raising=False)
+    assert scoring.gate_threshold() == scoring.GATE_THRESHOLD
+    monkeypatch.setenv("ENGRAM_GATE_THRESHOLD", "0.55")
+    assert scoring.gate_threshold() == 0.55
+
+
+def test_gate_warmup_helper_reads_config_at_call_time(monkeypatch):
+    monkeypatch.delenv("ENGRAM_GATE_WARMUP_N", raising=False)
+    assert scoring.gate_warmup_n() == scoring.WARMUP_N
+    monkeypatch.setenv("ENGRAM_GATE_WARMUP_N", "7")
+    assert scoring.gate_warmup_n() == 7
+
+
 # ---------- block-gate warmup / floor (WS3.2) ----------
 
 

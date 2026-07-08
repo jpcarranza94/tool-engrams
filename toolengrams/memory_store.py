@@ -325,6 +325,28 @@ def overlap_rows(conn: sqlite3.Connection, project_slug: str | None) -> list[sql
     ).fetchall()
 
 
+def outcomes_for_ids(conn: sqlite3.Connection, memory_ids: Sequence[int],
+                     project_slug: str | None) -> list[sqlite3.Row]:
+    """Outcome fields for a set of memory ids, scope-filtered and non-archived —
+    the formation outcome-feedback loop's "how did these saves fare" read (a pure
+    READ, despite the ids coming from the watcher run log). Only ids visible from
+    the caller's cwd (global, or exactly this project) come back, newest-created
+    first. Empty id list → no query, `[]`. Returns raw rows (id, name,
+    surface_count, useful_count, noise_count, created_ts, scope, project_slug)."""
+    if not memory_ids:
+        return []
+    placeholders = ",".join("?" * len(memory_ids))
+    return conn.execute(
+        "SELECT id, name, surface_count, useful_count, noise_count, "
+        "       created_ts, scope, project_slug "
+        f"FROM memories WHERE id IN ({placeholders}) "
+        "  AND archived_ts IS NULL "
+        "  AND (scope = 'global' OR project_slug = ?) "
+        "ORDER BY created_ts DESC",
+        (*memory_ids, project_slug),
+    ).fetchall()
+
+
 # ---------- memory writes ----------
 
 

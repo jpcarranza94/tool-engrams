@@ -107,6 +107,9 @@ def canonical_project_cwd(cwd: str, *, use_git: bool) -> str:
     Fail-open: returns ``cwd`` unchanged on anything unexpected (not a repo, git
     missing/erroring, worktree already deleted).
     """
+    if not cwd:
+        return cwd  # nothing to canonicalize; never shell out `git -C ""`, which
+        #             would silently run in the ambient process cwd.
     # `> 0`, not `!= -1`: a marker at index 0 would mean the repo root is `/`,
     # and `cwd[:0]` is an empty slug — leave that pathological path untouched.
     marker = cwd.find(_HARNESS_WORKTREE_MARKER)
