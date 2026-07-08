@@ -32,6 +32,12 @@ def _bash_line(cmd: str) -> str:
     }) + "\n"
 
 
+def _user_line(text: str) -> str:
+    return json.dumps(
+        {"type": "message", "message": {"role": "user", "content": text}}
+    ) + "\n"
+
+
 def test_run_watcher_session_writes_delta_file_and_grants_scoped_read(monkeypatch):
     captured = {}
 
@@ -167,11 +173,19 @@ def test_sandbox_created_user_only_and_symlink_rejected(tmp_path, monkeypatch):
 
 
 def test_tick_routes_activity_through_delta_not_inline(temp_db, tmp_path, monkeypatch):
+    """The bulk of the activity (chat prose, tool results) is routed through
+    ./delta.txt, not duplicated wholesale in the message — only the bounded
+    command-anchor (a handful of literal `TOOL (...): ...` commands, see
+    tick._command_anchor_section) is intentionally echoed into the message so
+    formation can bind triggers to real commands without re-deriving them."""
     # A command that does NOT appear in the prompt's own examples, so we can tell
     # the delta apart from the prompt text.
     cmd = "zqxfrobnicate --wibble /tmp/quux"
+    # Chat prose has no TOOL (...) prefix, so it's never anchor-worthy — it
+    # must stay file-only regardless of the command anchor.
+    prose = "please dont leak this chat prose zzyyxx123"
     transcript = tmp_path / "t.jsonl"
-    transcript.write_text(_bash_line(cmd))
+    transcript.write_text(_bash_line(cmd) + _user_line(prose))
     seen = {}
 
     def runner(role, message, run_id=None, delta="", **kw):
@@ -188,5 +202,6 @@ def test_tick_routes_activity_through_delta_not_inline(temp_db, tmp_path, monkey
     tick.run_tick("s", str(transcript), "/cwd")
 
     assert "zqxfrobnicate" in seen["delta"]          # activity → delta (→ file)
-    assert "zqxfrobnicate" not in seen["message"]    # not inlined in the prompt
+    assert prose not in seen["message"]              # chat prose stays file-only
     assert "delta.txt" in seen["message"]            # prompt points at the file
+    assert "zqxfrobnicate" in seen["message"]        # ...except the bounded command anchor

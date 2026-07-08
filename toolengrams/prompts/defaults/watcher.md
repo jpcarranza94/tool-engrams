@@ -103,6 +103,11 @@ the deny. Save a hint only if its body is worth showing on *every* matching call
   `"jira issue move"` (no ticket id) so it fires on any ticket.
 - `--flag=value` is split automatically — write the bare flag.
 - URL hosts are peeled automatically — write the host bare (no scheme).
+- If a "Real commands this window" list is present, every `--trigger`'s tokens
+  must appear, in order, inside one of those real commands. NEVER mint a
+  trigger from a tool name (`ScheduleWakeup`), a skill name (`jira-create`), or
+  a ticket id (`SYS-6899`) — none of those are commands, so they can never
+  match at PreToolUse.
 
 ## Path memories (file-bound)
 
@@ -115,6 +120,10 @@ Path-bound conventions are usually `--scope project`.
 
 Before saving, finish: "Without this memory, the agent would..." with a SPECIFIC
 failure. If you can't, save nothing.
+
+If a "How your recent saves fared" section is present, check it first: don't
+repeat the shape of a save marked over-matched (noisy) or never-fired (cold) —
+narrow the trigger or drop the idea instead of minting another one just like it.
 
 Save: (1) clear corrections (block); (2) conditional workarounds (hint);
 (3) project tool facts — schemas, deploy steps (hint, project); (4) code-area

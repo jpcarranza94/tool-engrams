@@ -151,6 +151,30 @@ def session_created_memories(conn: sqlite3.Connection,
     ).fetchall()
 
 
+def recent_created_outcomes(conn: sqlite3.Connection, since_ts: int,
+                            project_slug: str) -> list[sqlite3.Row]:
+    """Memories the formation role created/updated (any work session) since
+    `since_ts` that are STILL ACTIVE — the closed-loop "how did your recent
+    saves fare" feedback fed back into the next formation tick. Scoped to
+    memories visible from the caller's cwd (global, or exactly this project) so
+    the feedback matches what formation is actually allowed to (re)create here.
+    Distinct by memory_id (a `--into` merge can log more than one 'created'
+    event for the same memory), newest-created first."""
+    return conn.execute(
+        "SELECT e.memory_id, m.name, m.surface_count, m.useful_count, "
+        "  m.noise_count, m.created_ts, m.scope, m.project_slug "
+        "FROM watcher_run_events e "
+        "JOIN watcher_runs r ON r.id = e.run_id "
+        "JOIN memories m ON m.id = e.memory_id "
+        "WHERE r.role = 'formation' AND e.kind = 'created' AND e.ts >= ? "
+        "  AND m.archived_ts IS NULL "
+        "  AND (m.scope = 'global' OR m.project_slug = ?) "
+        "GROUP BY e.memory_id "
+        "ORDER BY m.created_ts DESC",
+        (since_ts, project_slug),
+    ).fetchall()
+
+
 def prev_window_start(conn: sqlite3.Connection, work_session_id: str,
                       role: str, before_cursor: int, max_windows: int = 2) -> int | None:
     """cursor_from of the oldest of the last `max_windows` ok runs that ended at

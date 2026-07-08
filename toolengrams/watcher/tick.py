@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import fcntl
 import os
+import re
 import subprocess
 import sys
 import time
@@ -44,7 +45,12 @@ from .. import db, envvars, pause
 from ..prompts.eval import build_eval_prompt
 from ..prompts.watcher import build_watcher_prompt
 from ..retrieval import session_state
-from ..utils import WATCHER_CHILD_ENV, env_int, safe_filename_id as _safe
+from ..utils import (
+    WATCHER_CHILD_ENV,
+    env_int,
+    project_slug_for_cwd,
+    safe_filename_id as _safe,
+)
 from . import runs_store, state
 from .agent import (
     DELTA_FILENAME,
@@ -275,13 +281,34 @@ _ACTIVITY_POINTER = (
 # small enough that the message never grows with session age.
 PRIOR_TAIL_MAX_CHARS = 4000
 
+# Caps on the command-anchor section (real commands this window) — enough for
+# formation to see the shape of the window's activity without the message
+# growing with a long or chatty window. Whichever bound is hit first wins.
+COMMAND_ANCHOR_MAX = 20
+COMMAND_ANCHOR_MAX_CHARS = 2000
+
+# Lookback window + caps for the outcome-feedback section (how formation's own
+# recent saves fared). Days, not seconds, to match how a human would think
+# about "recent"; small caps keep the closed loop from growing the prompt as
+# the memory store accumulates history.
+FEEDBACK_WINDOW_DAYS = 10
+FEEDBACK_MAX_BAD = 8
+FEEDBACK_MAX_GOOD = 2
+
+# A save with zero surfaces younger than this is just new, not COLD — give a
+# fresh trigger a chance to fire before flagging it as dead.
+_FEEDBACK_COLD_AGE_SEC = 2 * 86400
+
+_TOOL_LINE_RE = re.compile(r"^TOOL \([^)]+\):\s*(.+)$", re.MULTILINE)
+
 
 def _formation_decision(session_id: str, cwd: str, delta: str, n_lines: int,
                         flush: bool, armed: bool, transcript_path: str = "",
                         cursor: int = 0, target: str = "claude-code") -> _Decision:
     """Gate a formation window: a pure-chat turn with nothing armed isn't worth a
     model call (advance past it). Otherwise build the fresh-tick formation
-    message: full prompt + this session's prior saves + prior-delta tail."""
+    message: full prompt + outcome feedback + this session's prior saves +
+    prior-delta tail + this window's real-command anchor."""
     if n_lines == 0:
         return _Decision(skip=True, advance=False)  # nothing new
     has_activity = ("TOOL (" in delta) or ("RESULT:" in delta)
@@ -289,10 +316,106 @@ def _formation_decision(session_id: str, cwd: str, delta: str, n_lines: int,
         log = f"SKIP-GATE session={session_id} role=formation lines={n_lines}" if delta.strip() else None
         return _Decision(skip=True, advance=True, log=log)
     message = (build_watcher_prompt(cwd)
+               + _formation_feedback_section(cwd)
                + _session_saves_section(session_id)
                + _prior_tail_section(session_id, transcript_path, cursor, target)
+               + _command_anchor_section(delta)
                + _ACTIVITY_POINTER)
     return _Decision(skip=False, message=message, delta=delta)
+
+
+def _command_anchor_section(delta: str) -> str:
+    """The REAL commands the agent ran this window, extracted from the delta's
+    `TOOL (<tool>): <text>` lines — an anchor so formation never mints a
+    trigger from a tool name, skill name, or ticket id that will never appear
+    in a real command at PreToolUse. Dedups preserving first-seen order;
+    bounded to COMMAND_ANCHOR_MAX commands / COMMAND_ANCHOR_MAX_CHARS total so
+    a long or chatty window can't grow the prompt."""
+    if not delta:
+        return ""
+    seen: set[str] = set()
+    commands: list[str] = []
+    total_chars = 0
+    for m in _TOOL_LINE_RE.finditer(delta):
+        cmd = m.group(1).strip()
+        if not cmd or cmd in seen:
+            continue
+        seen.add(cmd)
+        commands.append(cmd)
+        total_chars += len(cmd)
+        if len(commands) >= COMMAND_ANCHOR_MAX or total_chars >= COMMAND_ANCHOR_MAX_CHARS:
+            break
+    if not commands:
+        return ""
+    lines = [
+        "\n\n--- Real commands this window (bind triggers to THESE) ---",
+        "Every --trigger's tokens must appear, in order, inside one of these "
+        "real commands. NEVER mint a trigger from a tool name, skill name, or "
+        "ticket id — those never match at PreToolUse:",
+    ]
+    lines += [f"- {c}" for c in commands]
+    return "\n".join(lines)
+
+
+def _formation_feedback_section(cwd: str) -> str:
+    """How formation's OWN recent saves fared (closed loop, any session) — the
+    track record to check before saving another memory in the same shape.
+    Scoped to FEEDBACK_WINDOW_DAYS and to memories visible from `cwd` (global +
+    this project); bounded to FEEDBACK_MAX_BAD worst (noisy first, then cold)
+    and FEEDBACK_MAX_GOOD good, so a long history can't grow the prompt."""
+    now = int(time.time())
+    since_ts = now - FEEDBACK_WINDOW_DAYS * 86400
+    try:
+        project_slug = project_slug_for_cwd(cwd, use_git=True)
+        with db.session() as conn:
+            rows = runs_store.recent_created_outcomes(conn, since_ts, project_slug)
+    except Exception:
+        return ""
+    if not rows:
+        return ""
+
+    noisy, cold, good = [], [], []
+    for r in rows:
+        useful = r["useful_count"] or 0
+        noise = r["noise_count"] or 0
+        surfaces = r["surface_count"] or 0
+        created = r["created_ts"] or now
+        if noise >= max(2, useful):
+            noisy.append(r)
+        elif surfaces == 0 and created < now - _FEEDBACK_COLD_AGE_SEC:
+            cold.append(r)
+        elif useful >= 3 and useful > noise:
+            good.append(r)
+
+    bad = (noisy + cold)[:FEEDBACK_MAX_BAD]
+    good = good[:FEEDBACK_MAX_GOOD]
+    if not bad and not good:
+        return ""
+
+    lines = ["\n\n--- How your recent saves fared (learn from this) ---"]
+    for r in bad:
+        useful = r["useful_count"] or 0
+        noise = r["noise_count"] or 0
+        surfaces = r["surface_count"] or 0
+        if noise >= max(2, useful):
+            lines.append(
+                f"- '{r['name']}' — {surfaces} surfaces, {useful} helpful, "
+                f"{noise} noise → trigger over-matched; don't repeat this shape."
+            )
+        else:
+            age_days = max(0, (now - (r["created_ts"] or now)) // 86400)
+            lines.append(
+                f"- '{r['name']}' — 0 surfaces in {age_days}d → trigger never "
+                "fired; bind to a real command."
+            )
+    if good:
+        lines.append("Good (keep doing this):")
+        for r in good:
+            lines.append(
+                f"- '{r['name']}' — {r['useful_count']} helpful, "
+                f"{r['noise_count']} noise."
+            )
+    return "\n".join(lines)
 
 
 def _session_saves_section(session_id: str) -> str:
