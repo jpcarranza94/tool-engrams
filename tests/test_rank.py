@@ -7,10 +7,13 @@ gate suppresses hints proven more noise than signal.
 from __future__ import annotations
 
 import math
+import time
 
+from toolengrams import memory_store
 from toolengrams.models import Candidate
 from toolengrams.reinforcement.scoring import final_score, is_gated, q
-from toolengrams.retrieval.rank import is_subsequence
+from toolengrams.retrieval.extract import extract_hints
+from toolengrams.retrieval.rank import call_anchors, is_subsequence, retrieve_candidates
 
 
 def _candidate(
@@ -192,3 +195,36 @@ def test_gate_exempts_pinned_block_even_when_strongly_negative():
     assert not is_gated(
         _candidate(kind="block", pinned=True, useful_count=4, noise_count=10)
     )
+
+
+# ---------- anchor selection (bucket widening) ----------
+
+
+def test_wrapped_and_compound_calls_reach_their_trigger(temp_db):
+    """`sudo ipconfig ...` used to anchor on "sudo" and `cd ~/x && gh ...` on
+    "cd", so an `ipconfig`/`gh` trigger was never even looked up. Anchors stay
+    verbatim (the live corpus has `Agent`/`Workflow`/`C0ASKPH84P8` triggers),
+    and the widening cannot invent a match — is_subsequence still decides.
+    """
+    now = int(time.time())
+    dhcp = memory_store.insert_memory(
+        temp_db, name="dhcp", description="d", body="b", kind="hint",
+        scope="global", project_slug=None, pinned=False, created_ts=now)
+    memory_store.add_token_trigger(temp_db, dhcp, ["ipconfig", "set"])
+    ghrun = memory_store.insert_memory(
+        temp_db, name="ghrun", description="d", body="b", kind="hint",
+        scope="global", project_slug=None, pinned=False, created_ts=now)
+    memory_store.add_token_trigger(temp_db, ghrun, ["gh", "run", "list"])
+
+    def matched(cmd):
+        hint = extract_hints("Bash", {"command": cmd})
+        return {c.memory_id for c in retrieve_candidates(temp_db, hint, None)}
+
+    assert call_anchors(["sudo", "ipconfig", "set"]) == ["sudo", "ipconfig"]
+    assert call_anchors(["cd", "~/x", "&&", "gh", "run"]) == ["cd", "gh"]
+
+    assert dhcp in matched("ipconfig set en7 NONE")             # already worked
+    assert dhcp in matched("sudo ipconfig set en7 NONE")        # defect B case 1
+    assert ghrun in matched("cd ~/x && gh run list --limit 5")  # defect B case 2
+    # Wider bucket, same predicate: "gh" anchors but the call lacks "run list".
+    assert matched("cd ~/x && gh pr view") == set()

@@ -7,9 +7,9 @@ Given `(tool_name, tool_input)`, produce:
   - paths: list of paths referenced by the call (file_path, absolute / tilde
     paths embedded in Bash, Grep/Glob paths, etc.)
 
-The first token anchors the indexed lookup (`triggers.first_token`); the full
-token list is subsequence-matched against stored trigger tokens at retrieval
-time. See retrieval/rank.py for the matcher.
+The call's command heads anchor the indexed lookup (`triggers.first_token`) —
+see `rank.call_anchors`; the full token list is subsequence-matched against
+stored trigger tokens at retrieval time. See retrieval/rank.py for the matcher.
 """
 
 from __future__ import annotations

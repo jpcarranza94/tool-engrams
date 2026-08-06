@@ -254,21 +254,29 @@ def triggers_for(conn: sqlite3.Connection, memory_id: int) -> list[Trigger]:
 # ---------- hot-path match (raw rows, no Memory allocation) ----------
 
 
-def match_token_triggers(conn: sqlite3.Connection, first_token: str,
+def match_token_triggers(conn: sqlite3.Connection, anchors: Sequence[str],
                          project_slug: str | None, kind: str | None) -> list[sqlite3.Row]:
-    """token_subseq candidates for a first_token, scope-filtered, non-archived.
+    """token_subseq candidates for any of `anchors`, scope-filtered, non-archived.
+
+    `anchors` are the call's command heads (rank.call_anchors) — ONE indexed
+    lookup over all of them, not one per anchor. Widening the bucket is safe:
+    rank.py still subsequence-checks the full stored token list, and this
+    never returns t.first_token, so a wider bucket only costs filtering.
 
     Returns raw rows (m.* subset + t.tokens_json) — rank.py subsequence-matches
     and builds Candidates. Lean on purpose: this runs on every tool call.
     """
+    if not anchors:
+        return []
     kind_sql = " AND m.kind = ?" if kind else ""
-    args = (first_token, project_slug, kind) if kind else (first_token, project_slug)
+    placeholders = ",".join("?" * len(anchors))
+    args = (*anchors, project_slug, kind) if kind else (*anchors, project_slug)
     return conn.execute(
         "SELECT m.id, m.name, m.body, m.kind, m.scope, m.surface_count, "
         "       m.useful_count, m.noise_count, m.last_surfaced_ts, m.pinned, "
         "       m.origin_session_id, t.tokens_json "
         "FROM triggers t JOIN memories m ON m.id = t.memory_id "
-        "WHERE t.kind = 'token_subseq' AND t.first_token = ? "
+        f"WHERE t.kind = 'token_subseq' AND t.first_token IN ({placeholders}) "
         "  AND m.archived_ts IS NULL "
         "  AND (m.scope = 'global' OR m.project_slug = ?)"
         f"{kind_sql}",
