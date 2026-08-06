@@ -19,7 +19,7 @@ from pathlib import Path
 from ...retrieval.extract import ExtractedTriggerHint, extract_hints as _extract_hints
 from ...utils import slugify_cwd
 from .collect import collect_sessions as _collect_sessions
-from .transcript import _format_delta
+from .transcript import _format_delta, iter_tool_calls  # noqa: F401 (adapter surface)
 
 NAME = "claude-code"
 cli_binary = "claude"

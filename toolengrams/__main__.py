@@ -27,6 +27,7 @@ from .cli import (
     monitor,
     pin,
     quarantine,
+    reachability,
     rebuild_counters,
     rebuild_triggers,
     recall,
@@ -72,6 +73,7 @@ _SELF_PARSING = {
     "watcher-tick": watcher.tick.main,
     "monitor": monitor.main,
     "migrate-v1-to-v2": migrate_v1_to_v2.main,
+    "reachability": reachability.main,
     "rebuild-triggers": rebuild_triggers.main,
     "rebuild-counters": rebuild_counters.main,
     "config": config_cmd.main,
@@ -180,6 +182,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("dashboard", help="Open HTML dashboard in browser")
     sub.add_parser("monitor", help="Resource usage and watcher activity", add_help=False)
     sub.add_parser("migrate-v1-to-v2", help="One-shot migration from a v1-era DB to the v2 schema", add_help=False)
+    sub.add_parser("reachability", help="Replay the tool-call corpus: which memories can still match (dry run; --archive to act)", add_help=False)
     sub.add_parser("rebuild-triggers", help="Re-extract triggers from memory bodies (post-migration repair)", add_help=False)
     sub.add_parser("rebuild-counters", help="Recompute useful/noise counts from session_surfaces (q-input repair)", add_help=False)
     sub.add_parser("config", help="Show/get/set/unset durable settings (config.json) — models, tuning, prompts", add_help=False)

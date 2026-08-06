@@ -15,6 +15,7 @@ from .collect import collect_sessions as _collect_sessions
 from .paths import config_path, hooks_path
 from .patch_parse import paths_from_patch
 from .transcript import format_delta as _format_delta
+from .transcript import iter_tool_calls  # noqa: F401 (adapter surface)
 
 NAME = CODEX
 cli_binary = "codex"
