@@ -46,7 +46,7 @@ MAX_SINGLE_SESSION_BYTES = 5 * 1024 * 1024  # 5 MB per session — skip giants
 # Per-run wall-clock budget for the consolidation agent's `claude -p`.
 CONSOLIDATION_TIMEOUT_SEC = 1800  # 30 minutes
 
-# Never-surfaced + older than this many days = "cold" (see _cold_memories). The
+# No surface + older than this many days = "cold" (see _cold_memories). The
 # conservative default keeps freshly-formed memories — which legitimately haven't
 # hit their trigger yet — out of the bucket.
 COLD_MEMORY_DAYS = 30
@@ -151,19 +151,23 @@ def _bounded_section(lines: list, header: str, items: list, render) -> None:
 
 
 def _cold_memories(memories: list, cutoff_ts: int) -> list:
-    """Memories that have never surfaced and predate `cutoff_ts`, oldest first.
+    """Memories with NO surface since `cutoff_ts` that predate it — never-surfaced
+    first-timers AND memories that used to fire and went silent.
 
-    A `surface_count == 0` memory past the cold horizon has had real wall-clock
-    time to match a live tool call and never did — either its trigger can't match
-    how the command is actually typed (fixable) or the pattern simply doesn't
-    recur (dead weight). `created_ts` is a proxy for "had a chance to fire": the
-    system keeps no per-memory exposure clock, and for a never-surfaced memory
-    `last_surfaced_ts` is uninformative (always 0), so creation age is the only
-    signal available. Pure filter over the already-loaded list — no extra query.
+    Keying on `last_surfaced_ts` instead of `surface_count == 0` is what makes a
+    NARROWED-INTO-SILENCE memory visible: a past run narrowed its trigger past
+    every real command, so it keeps a healthy `q` and a fat `surface_count`
+    forever while matching nothing. `surface_count == 0` structurally cannot see
+    that. `last_surfaced_ts` is NOT NULL DEFAULT 0, so never-surfaced memories
+    stay in the set — this is a strict superset of the old predicate.
+    `created_ts < cutoff_ts` still gates "had a chance to fire". Went-silent
+    sorts FIRST: it is the repairable half, and `_append_bounded` truncates the
+    tail. Pure filter over the already-loaded list — no extra query.
     """
     return sorted(
-        (m for m in memories if m.surface_count == 0 and m.created_ts < cutoff_ts),
-        key=lambda m: m.created_ts,
+        (m for m in memories
+         if m.last_surfaced_ts < cutoff_ts and m.created_ts < cutoff_ts),
+        key=lambda m: (m.surface_count == 0, m.last_surfaced_ts, m.created_ts),
     )
 
 
@@ -237,7 +241,7 @@ def _get_memory_summary(db_path: Path) -> str:
         _render_cluster,
     )
 
-    # Cold (never-surfaced) memories — listed separately so the agent triages
+    # Cold (no recent surface) memories — listed separately so the agent triages
     # them instead of losing them among the inventory rows above. Each carries its
     # body snippet + trigger list inline so the agent can diagnose (trigger can't
     # match vs. pattern doesn't recur) without an extra recall round-trip.
@@ -247,13 +251,16 @@ def _get_memory_summary(db_path: Path) -> str:
     cold_days = max(1, env_int(envvars.COLD_MEMORY_DAYS, COLD_MEMORY_DAYS))
     cold = _cold_memories(memories, now - cold_days * 86400)
     def _render_cold(m):
-        return (f"  {_mem_label(m)} triggers: "
+        why = ("never surfaced" if m.surface_count == 0 else
+               f"WENT SILENT after {m.surface_count} surfaces — trigger likely "
+               "over-narrowed by a past run; widen it back, do NOT archive")
+        return (f"  {_mem_label(m)} ({why}) triggers: "
                 f"{_trigger_labels(triggers_by_mem.get(m.id, []))}\n"
                 f"{_body_line(m)}")
     _bounded_section(
         lines,
-        f"\nCold — never surfaced in {cold_days}+ days ({len(cold)}). The trigger has "
-        "had time to match a live call and never did. TRIAGE each (see Task 2): fix the "
+        f"\nCold — no surface in {cold_days}+ days ({len(cold)}). The trigger has "
+        "had time to match a live call and didn't. TRIAGE each (see Task 2): fix the "
         "trigger if it can't match the real command, `engram forget --delete` if the "
         "pattern won't recur, or leave genuinely-useful-but-rare facts alone:",
         cold,
