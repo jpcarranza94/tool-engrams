@@ -1,7 +1,7 @@
 """PreToolUse injection format — how memories are presented to Claude.
 
-Memories are sorted by specificity (longest matching trigger first) then
-by relevance score. The injection labels each memory with its kind
+Memories are sorted by relevance score, with trigger specificity only as a
+tiebreaker. The injection labels each memory with its kind
 (block/hint) so Claude understands the weight: blocks are corrections
 that prevented the call; hints are contextual guidance.
 """
@@ -16,7 +16,7 @@ def format_injection(
 ) -> str:
     """Format matched memory candidates into additionalContext text.
 
-    Candidates are pre-sorted by the hook (specificity DESC, score DESC).
+    Candidates are pre-sorted by the hook (score DESC, specificity DESC).
     Each memory is labeled with its kind so Claude can prioritize:
       [block: name] — this is a correction, the call was denied for this reason
       [hint: name]  — contextual guidance, take into account
