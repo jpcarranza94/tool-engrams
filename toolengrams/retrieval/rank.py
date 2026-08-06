@@ -8,8 +8,8 @@ Matching model:
 
 Scoring is applied by `reinforcement/scoring.py::final_score`; this module
 just reads candidates, runs the match predicate, and attaches the score.
-Session dedup and the final sort live in the hook handlers themselves (see
-hooks/pretool.py and hooks/post_tool_failure.py). There is no cluster-level
+Session dedup lives in the hook handlers themselves; the final sort + cap is
+shared by both of them in hooks/_skip.py::rank_and_cap. There is no cluster-level
 Laplace gate — the two-kind model makes per-cluster quality filtering
 redundant.
 """

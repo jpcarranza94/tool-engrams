@@ -10,6 +10,9 @@
     Char-bounded truncation downstream still kicks in, but a hard count cap
     prevents a noisy first-token bucket from spraying Claude's context.
 
+  - `rank_and_cap()` is the single ordering+cap for BOTH surfacing hooks
+    (pretool.py and _failure_surface.py) — it must not drift between them.
+
   - `surface_notice()` is the $ENGRAM_SURFACE_NOTICE-gated systemMessage line
     pretool.py and post_tool_failure.py attach when memories surface.
 """
@@ -18,7 +21,9 @@ from __future__ import annotations
 
 import os
 
-DEFAULT_MAX_MEMORIES_PER_CALL = 2
+from ..models import Candidate
+
+DEFAULT_MAX_MEMORIES_PER_CALL = 4
 # Hard ceiling defends against typo overrides like ENGRAM_MAX_MEMORIES_PER_CALL=200
 # silently un-capping the system.
 MAX_MEMORIES_PER_CALL_CEILING = 10
@@ -34,6 +39,20 @@ def max_memories_per_call() -> int:
     except ValueError:
         return DEFAULT_MAX_MEMORIES_PER_CALL
     return max(1, min(n, MAX_MEMORIES_PER_CALL_CEILING))
+
+
+def rank_and_cap(candidates: list[Candidate]) -> list[Candidate]:
+    """Order candidates for injection and apply the per-call cap.
+
+    Quality first, trigger length only as the tiebreaker — a proven memory
+    must not lose its slot to an unproven one carrying a longer trigger.
+    Blocks are never capped and always lead, so the char budget downstream
+    can only ever drop a hint.
+    """
+    ranked = sorted(candidates, key=lambda c: (-c.final_score, -len(c.matched_tokens)))
+    blocks = [c for c in ranked if c.kind == "block"]
+    hints = [c for c in ranked if c.kind == "hint"]
+    return blocks + hints[: max(max_memories_per_call() - len(blocks), 0)]
 
 
 _NOTICE_TRUE = {"1", "true", "yes"}

@@ -56,8 +56,8 @@ def gate_warmup_n() -> int:
 def final_score(candidate: Candidate) -> float:
     """Rank weight: quality plus the pin boost. No recency, no structural term.
 
-    Collapses to `(0.5 + q) · [1.5 if pinned]`. The hook sort breaks ties by
-    trigger specificity first, then this score.
+    Collapses to `(0.5 + q) · [1.5 if pinned]`. This is the hook sort's primary
+    key; trigger specificity only breaks ties (hooks/_skip.py::rank_and_cap).
     """
     score = 0.5 + q(candidate.useful_count, candidate.noise_count)
     if candidate.pinned:

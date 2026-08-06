@@ -51,7 +51,7 @@ from ..retrieval.session_state import (
 )
 from ..target import get_target
 from ..utils import is_watcher_child, project_slug_for_cwd
-from ._skip import max_memories_per_call, surface_notice
+from ._skip import rank_and_cap, surface_notice
 
 
 def main(target_name: str = "claude-code") -> int:
@@ -142,17 +142,8 @@ def _run(payload: dict[str, Any], target) -> int:
             _emit({})
             return 0
 
-        # Sort: longer triggers (more specific) win, then higher final_score.
-        fresh.sort(key=lambda c: (-len(c.matched_tokens), -c.final_score))
-
-        # Cap surfaces per call. Always keep matched blocks so the deny path
-        # can't be diluted; trim hints first.
-        cap = max_memories_per_call()
-        if len(fresh) > cap:
-            blocks = [c for c in fresh if c.kind == "block"]
-            hints = [c for c in fresh if c.kind == "hint"]
-            remaining = max(cap - len(blocks), 0)
-            fresh = blocks + hints[:remaining]
+        # Order (quality first) + per-call cap, blocks always kept.
+        fresh = rank_and_cap(fresh)
 
         memory_ids = [c.memory_id for c in fresh]
         current_turn = get_session_turn(conn, session_id)
