@@ -81,7 +81,7 @@ def test_narrow_glob_replace_in_one_call(temp_db, capsys):
                        "--add-path", "infra/**/Dockerfile"])
     assert rc == 0
     paths = [t.path_pattern for t in _triggers(temp_db, mid)]
-    assert paths == ["infra/**/Dockerfile"]
+    assert paths == ["**/infra/**/Dockerfile"]  # rooted at write (v19)
     # Reinforcement counters are untouched by trigger surgery.
     row = temp_db.execute(
         "SELECT useful_count, noise_count FROM memories WHERE id = ?", (mid,)
