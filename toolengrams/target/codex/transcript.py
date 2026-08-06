@@ -113,6 +113,31 @@ def _parse_arguments(arguments) -> dict:
     return {}
 
 
+def iter_tool_calls(path):
+    """Yield `(tool_name, tool_input, cwd)` in codex's OWN tool vocabulary —
+    'Bash' and 'apply_patch' are what codex.extract_hints understands."""
+    cwd = ""
+    with open(path, errors="ignore") as f:
+        for raw in f:
+            try:
+                obj = json.loads(raw)
+            except (json.JSONDecodeError, ValueError):
+                continue
+            if obj.get("type") == "session_meta":
+                cwd = (obj.get("payload") or {}).get("cwd") or ""
+                continue
+            payload = obj.get("payload")
+            if obj.get("type") != "response_item" or not isinstance(payload, dict):
+                continue
+            if payload.get("type") == "function_call" and payload.get("name") == "exec_command":
+                args = _parse_arguments(payload.get("arguments"))
+                cmd = str(args.get("cmd") or args.get("command") or "")
+                if cmd:
+                    yield "Bash", {"command": cmd}, cwd
+            elif payload.get("type") == "custom_tool_call" and payload.get("name") == "apply_patch":
+                yield "apply_patch", {"patch": str(payload.get("input") or "")}, cwd
+
+
 def _append_custom_tool_call(parts: list[str], payload: dict) -> None:
     name = str(payload.get("name") or "unknown")
     patch = str(payload.get("input") or "")

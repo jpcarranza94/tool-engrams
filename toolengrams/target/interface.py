@@ -18,7 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import Iterator, Protocol, runtime_checkable
 
 from ..retrieval.extract import ExtractedTriggerHint
 
@@ -55,6 +55,12 @@ class TargetAdapter(Protocol):
     def transcript_path(self, payload: dict) -> str: ...
 
     def format_delta(self, lines: list[str]) -> str: ...
+
+    # Structured tool calls for off-line replay (`engram reachability`), in the
+    # target's own tool vocabulary so `extract_hints` above is the matcher.
+    # Unlike format_delta this is uncapped and unclipped — a truncated replay
+    # would understate reachability and archive live memories.
+    def iter_tool_calls(self, path: Path) -> Iterator[tuple[str, dict, str]]: ...
 
     # Return sessions the target considers part of target_date. Some harnesses
     # store sessions by modified time; Codex stores rollout files under

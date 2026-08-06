@@ -138,3 +138,23 @@ def _format_delta(lines: list[str]) -> str:
 
     joined = "\n".join(parts)
     return _cap_delta(joined)
+
+
+def iter_tool_calls(path):
+    """Yield `(tool_name, tool_input, cwd)` for every tool_use block in a
+    transcript — the lossless counterpart of `_format_delta` (which is capped
+    and clipped for a model, so replaying it would understate reachability)."""
+    with open(path, errors="ignore") as f:
+        for raw in f:
+            if '"tool_use"' not in raw:
+                continue
+            try:
+                obj = json.loads(raw)
+            except (json.JSONDecodeError, ValueError):
+                continue
+            cwd = obj.get("cwd") or ""
+            content = (obj.get("message") or {}).get("content")
+            for block in content if isinstance(content, list) else ():
+                if (isinstance(block, dict) and block.get("type") == "tool_use"
+                        and isinstance(block.get("input"), dict)):
+                    yield block.get("name") or "", block["input"], cwd
