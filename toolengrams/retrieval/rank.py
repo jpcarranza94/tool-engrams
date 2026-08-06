@@ -1,9 +1,9 @@
 """Candidate retrieval — tool call → scored candidates.
 
 Matching model:
-  - token_subseq: the call's first token selects a bucket via indexed lookup,
-    then we subsequence-match stored trigger tokens against the call's tokens
-    in Python.
+  - token_subseq: the call's command heads (`call_anchors`) select buckets via
+    one indexed lookup, then we subsequence-match stored trigger tokens against
+    the call's tokens in Python.
   - path_glob: fnmatch the stored pattern against each extracted call path.
 
 Scoring is applied by `reinforcement/scoring.py::final_score`; this module
@@ -45,7 +45,8 @@ def retrieve_candidates(
 
     # --- token_subseq matches ---
     if hint.tokens:
-        rows = memory_store.match_token_triggers(conn, hint.tokens[0], project_slug, kind)
+        rows = memory_store.match_token_triggers(
+            conn, call_anchors(hint.tokens), project_slug, kind)
         call = tuple(hint.tokens)
         for row in rows:
             stored = _load_tokens(row["tokens_json"])
@@ -66,6 +67,36 @@ def retrieve_candidates(
         c.final_score = final_score(c)
 
     return list(candidates.values())
+
+
+# Shell separators shlex leaves as standalone tokens.
+_SEPARATORS = frozenset({"&&", "||", ";", "|", "&"})
+
+
+def call_anchors(tokens: list[str]) -> list[str]:
+    """The call's command heads — `cd x && sudo gh run` → ["cd", "sudo", "gh"].
+
+    Only tokens[0] used to select the indexed bucket, so `sudo ipconfig ...`
+    anchored on "sudo" and `cd ~/x && gh run list` on "cd" — an `ipconfig` or
+    `gh` trigger was never even considered. Verbatim, no case folding:
+    first_token is stored as-is (Make != make, and the live corpus has
+    triggers anchored on `Agent`, `Workflow`, `C0ASKPH84P8`).
+    """
+    out: list[str] = []
+    head = True
+    for tok in tokens:
+        if tok in _SEPARATORS:
+            head = True
+        elif head:
+            if tok not in out:
+                out.append(tok)
+            # `sudo cmd` / `FOO=bar cmd`: the real command is the next token.
+            head = tok == "sudo" or "=" in tok
+    # Bounded so a pathological generated pipeline can't blow past sqlite's
+    # variable limit and silently fail-open the hook. Measured over all 31,722
+    # real corpus Bash calls: mean 2.42 anchors, p95 5, max 39 — so 64 leaves
+    # the cap non-binding in practice while still bounding the query.
+    return out[:64]
 
 
 def is_subsequence(needle: tuple[str, ...], haystack: tuple[str, ...]) -> bool:

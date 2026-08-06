@@ -115,7 +115,7 @@ def test_triggers_roundtrip_and_match(temp_db):
     tok = [t for t in trigs if t.kind == "token_subseq"][0]
     assert tok.tokens == ["gh", "pr", "create"]
 
-    rows = ms.match_token_triggers(temp_db, "gh", project_slug=None, kind=None)
+    rows = ms.match_token_triggers(temp_db, ["gh"], project_slug=None, kind=None)
     assert mid in {r["id"] for r in rows}
     prows = ms.match_path_triggers(temp_db, project_slug=None, kind=None)
     assert mid in {r["id"] for r in prows}
@@ -139,9 +139,9 @@ def test_match_token_triggers_kind_filter(temp_db):
     ms.add_token_trigger(temp_db, block, ["git", "push"])
     ms.add_token_trigger(temp_db, hint, ["git", "push"])
 
-    ids = {r["id"] for r in ms.match_token_triggers(temp_db, "git", None, kind="block")}
+    ids = {r["id"] for r in ms.match_token_triggers(temp_db, ["git"], None, kind="block")}
     assert block in ids and hint not in ids
-    both = {r["id"] for r in ms.match_token_triggers(temp_db, "git", None, kind=None)}
+    both = {r["id"] for r in ms.match_token_triggers(temp_db, ["git"], None, kind=None)}
     assert block in both and hint in both
 
 

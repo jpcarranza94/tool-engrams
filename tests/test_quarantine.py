@@ -51,12 +51,12 @@ def test_quarantined_memory_no_longer_surfaces(temp_db, capsys):
     can't suppress a young memory.)"""
     mid = _seed(temp_db)
     memory_store.add_token_trigger(temp_db, mid, ["dangerctl", "deploy"])
-    before = memory_store.match_token_triggers(temp_db, "dangerctl", None, None)
+    before = memory_store.match_token_triggers(temp_db, ["dangerctl"], None, None)
     assert any(r["id"] == mid for r in before)
 
     quarantine.main([str(mid), "--reason", "dangerous"])
     capsys.readouterr()
-    after = memory_store.match_token_triggers(temp_db, "dangerctl", None, None)
+    after = memory_store.match_token_triggers(temp_db, ["dangerctl"], None, None)
     assert not any(r["id"] == mid for r in after)
 
 
