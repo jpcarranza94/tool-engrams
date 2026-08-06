@@ -93,9 +93,10 @@ def call_anchors(tokens: list[str]) -> list[str]:
             # `sudo cmd` / `FOO=bar cmd`: the real command is the next token.
             head = tok == "sudo" or "=" in tok
     # Bounded so a pathological generated pipeline can't blow past sqlite's
-    # variable limit and silently fail-open the hook. Measured over 4k real
-    # corpus calls: mean 2.41 anchors, p95 5, max 26.
-    return out[:32]
+    # variable limit and silently fail-open the hook. Measured over all 31,722
+    # real corpus Bash calls: mean 2.42 anchors, p95 5, max 39 — so 64 leaves
+    # the cap non-binding in practice while still bounding the query.
+    return out[:64]
 
 
 def is_subsequence(needle: tuple[str, ...], haystack: tuple[str, ...]) -> bool:
