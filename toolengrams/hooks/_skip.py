@@ -10,9 +10,8 @@
     Char-bounded truncation downstream still kicks in, but a hard count cap
     prevents a noisy first-token bucket from spraying Claude's context.
 
-  - `rank_and_cap()` is the single ordering+cap used by BOTH surfacing hooks
-    (pretool.py and _failure_surface.py). It lived duplicated in the two, so
-    a fix to one silently left the other starving proven memories.
+  - `rank_and_cap()` is the single ordering+cap for BOTH surfacing hooks
+    (pretool.py and _failure_surface.py) — it must not drift between them.
 
   - `surface_notice()` is the $ENGRAM_SURFACE_NOTICE-gated systemMessage line
     pretool.py and post_tool_failure.py attach when memories surface.
@@ -21,6 +20,8 @@
 from __future__ import annotations
 
 import os
+
+from ..models import Candidate
 
 DEFAULT_MAX_MEMORIES_PER_CALL = 4
 # Hard ceiling defends against typo overrides like ENGRAM_MAX_MEMORIES_PER_CALL=200
@@ -40,17 +41,13 @@ def max_memories_per_call() -> int:
     return max(1, min(n, MAX_MEMORIES_PER_CALL_CEILING))
 
 
-def rank_and_cap(candidates: list) -> list:
+def rank_and_cap(candidates: list[Candidate]) -> list[Candidate]:
     """Order candidates for injection and apply the per-call cap.
 
-    Quality first, specificity only as the tiebreaker: a proven memory must
-    not lose its slot to an unproven one that merely carries a longer trigger
-    (path_glob candidates have no matched tokens at all, so under the old
-    length-first key they sorted dead last unconditionally).
-
-    Blocks are kept unconditionally and always ordered first — the deny path
-    must never be diluted, and the char budget downstream drops the tail.
-    Only hints are trimmed.
+    Quality first, trigger length only as the tiebreaker — a proven memory
+    must not lose its slot to an unproven one carrying a longer trigger.
+    Blocks are never capped and always lead, so the char budget downstream
+    can only ever drop a hint.
     """
     ranked = sorted(candidates, key=lambda c: (-c.final_score, -len(c.matched_tokens)))
     blocks = [c for c in ranked if c.kind == "block"]
