@@ -51,6 +51,18 @@ def test_scan_uses_production_matcher(temp_db, tmp_path):
     assert "kubectl" not in tokens_seen and "git" in tokens_seen
 
 
+def test_archive_refuses_an_empty_corpus(temp_db, tmp_path, monkeypatch, capsys):
+    """A target that stops being wired makes the corpus empty, and then every
+    memory looks unreachable. Archiving must refuse, not empty the DB."""
+    dead = _mem(temp_db, "truly-dead", "b", ["obsoletecli", "sync"])
+    temp_db.commit()
+    monkeypatch.setattr(reachability, "collect_corpus", lambda days: [])
+
+    assert reachability.main(["--archive"]) == 1
+    assert json.loads(capsys.readouterr().out)["tokens_observed"] == 0
+    assert memory_store.get(temp_db, dead).archived_ts is None
+
+
 def test_archive_never_touches_blocks_or_pinned(temp_db, tmp_path):
     """Blocks are safety controls: they have never fired precisely BECAUSE the
     dangerous command never came up. Same for pinned, young, path-glob, and

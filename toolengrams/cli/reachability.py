@@ -39,6 +39,13 @@ from .consolidate import collect_sessions
 # settled question in this codebase.
 DEFAULT_DAYS = 90
 
+# Archiving trusts "matched nothing" to mean "unreachable". That inference is
+# only valid if we actually read a corpus: a target that stops being wired makes
+# collect_corpus() return [] silently, and then EVERY memory looks dead. Refuse
+# to archive below this many distinct observed tokens.
+# ponytail: crude floor — catches the empty corpus, not a half-read one.
+MIN_ARCHIVE_TOKENS = 50
+
 
 def collect_corpus(days: int) -> list:
     """Sessions from every wired target over the last `days` days, tagged.
@@ -139,6 +146,14 @@ def main(argv: list[str] | None = None) -> int:
         candidates, spared = archivable(never, triggers_by_mem, tokens_seen,
                                         int(time.time()) - cold_days * 86400)
         if args.archive:
+            if len(tokens_seen) < MIN_ARCHIVE_TOKENS:
+                print(json.dumps({
+                    "error": "corpus too small to archive safely",
+                    "tokens_observed": len(tokens_seen),
+                    "minimum": MIN_ARCHIVE_TOKENS,
+                    "hint": "no wired target produced sessions — run `engram doctor`",
+                }, indent=2))
+                return 1
             for m in candidates:
                 memory_store.archive(conn, m.id)
 
