@@ -16,7 +16,7 @@ from ..retrieval.session_state import (
 )
 from ..utils import is_watcher_child, project_slug_for_cwd
 from ..watcher import tick
-from ._skip import max_memories_per_call, surface_notice
+from ._skip import rank_and_cap, surface_notice
 
 
 def surface_failure_hints(
@@ -69,8 +69,7 @@ def surface_failure_hints(
         if not fresh:
             return {}
 
-        fresh.sort(key=lambda c: (-len(c.matched_tokens), -c.final_score))
-        fresh = fresh[: max_memories_per_call()]
+        fresh = rank_and_cap(fresh)
         memory_ids = [c.memory_id for c in fresh]
         first_token = hint.tokens[0] if hint.tokens else None
         log_surfaces(conn, session_id, memory_ids, tool_use_id,
