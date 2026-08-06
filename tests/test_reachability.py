@@ -47,7 +47,7 @@ def test_scan_uses_production_matcher(temp_db, tmp_path):
     reachable, tokens_seen = reachability.scan(
         temp_db, _session(tmp_path, ["git push --force origin main"]))
 
-    assert reachable == {hit}
+    assert reachable == {hit} and miss not in reachable
     assert "kubectl" not in tokens_seen and "git" in tokens_seen
 
 

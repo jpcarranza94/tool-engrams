@@ -22,7 +22,6 @@ import argparse
 import json
 import time
 from collections import Counter
-from dataclasses import replace
 from datetime import date, timedelta
 
 from .. import db, envvars, memory_store
@@ -31,6 +30,7 @@ from ..harness_names import CLAUDE_CODE
 from ..retrieval.rank import retrieve_candidates
 from ..target import TARGETS
 from ..utils import env_int, project_slug_for_cwd
+from .consolidate import collect_sessions
 
 # How far back the corpus reaches. Wider than the cold horizon on purpose: the
 # window decides what counts as reachable, and a narrow one calls a quarterly
@@ -41,19 +41,15 @@ DEFAULT_DAYS = 90
 
 
 def collect_corpus(days: int) -> list:
-    """Sessions from every wired target over the last `days` days, tagged."""
+    """Sessions from every wired target over the last `days` days, tagged.
+
+    Reuses the nightly collector, so a target that is wired for consolidation
+    is automatically part of the corpus. ponytail: re-globs per day because
+    collect_sessions takes one date; give it a range if that ever matters.
+    """
     today = date.today()
-    sessions = []
-    for target in TARGETS.values():
-        if not target.is_wired():
-            continue
-        for n in range(days + 1):
-            try:
-                sessions.extend(replace(s, target=target.NAME)
-                                for s in target.collect_sessions(today - timedelta(days=n)))
-            except Exception:
-                continue
-    return sessions
+    return [s for n in range(days + 1)
+            for s in collect_sessions(today - timedelta(days=n))]
 
 
 def scan(conn, sessions) -> tuple[set[int], set[str]]:
