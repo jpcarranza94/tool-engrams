@@ -60,6 +60,21 @@ _PATH_RE = re.compile(
 _CLI_NAME_RE = re.compile(r"^[a-zA-Z_][\w.-]*$")
 
 
+def _normalize_path_glob(pattern: str) -> str:
+    """Root a relative glob at `**/`.
+
+    Stored globs are fnmatched against the paths retrieval/extract.py emits, and
+    those are ALWAYS absolute (`/...` or `~/...`). fnmatch has no implicit
+    anchor — the pattern must describe the whole string — so a relative pattern
+    like `app/db/**` can never match anything, ever. A leading `./` is stripped
+    first: `**/./scripts/x.py` would be just as dead.
+    """
+    pat = pattern.strip()
+    if pat.startswith("./"):
+        pat = pat[2:]
+    return pat if not pat or pat.startswith(("/", "~", "*")) else f"**/{pat}"
+
+
 @dataclass(slots=True)
 class FormationCandidate:
     """A single candidate trigger extracted from a memory body."""
@@ -70,6 +85,15 @@ class FormationCandidate:
     access_mode: AccessMode = DEFAULT_PATH_ACCESS_MODE  # path_glob intent (issue #63); ignored for token_subseq
     source: str = ""                       # "backtick" | "path" | "url" | "extra" | "explicit"
     existing_memories: int = 0             # set by consolidate_vocabulary
+
+    def __post_init__(self) -> None:
+        # Normalize at construction, not at the write seam: this lands BEFORE
+        # path_glob_is_specific_enough (so `README.md` is judged as the
+        # `**/README.md` it would become, and refused), and keeps dedup_key /
+        # count_path_trigger_owners / rebuild-triggers' access-mode carry-over
+        # comparing the same vocabulary the DB stores.
+        if self.kind == "path_glob" and self.path_pattern:
+            self.path_pattern = _normalize_path_glob(self.path_pattern)
 
     @property
     def dedup_key(self) -> tuple:
